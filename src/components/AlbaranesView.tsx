@@ -119,7 +119,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         const base64Image = reader.result;
         // DIRECCIÓN CORREGIDA:
         const n8nWebhookURL = "https://n8n.permatunnelopen.org/webhook/albaranes-ai";
-
+        
         const responseData = await proxyFetch(n8nWebhookURL, {
           method: 'POST',
           body: { image: base64Image, fileName: file.name }
