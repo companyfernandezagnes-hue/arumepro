@@ -117,8 +117,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       reader.readAsDataURL(file);
       reader.onload = async () => {
         const base64Image = reader.result;
-        const n8nWebhookURL = "https://ia.permatunnelopen.org/webhook/albaranes-ai";
-
+       const n8nWebhookURL = "https://n8n.permatunnelopen.org/webhook/albaranes-ai";
         const data = await proxyFetch(n8nWebhookURL, {
           method: 'POST',
           body: { image: base64Image, fileName: file.name }
