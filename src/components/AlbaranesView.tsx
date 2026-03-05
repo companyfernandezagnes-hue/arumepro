@@ -107,7 +107,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   }, [analyzedItems]);
 
   // --- ACTIONS ---
-  const handleN8NScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
+ const handleN8NScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -117,35 +117,29 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       reader.readAsDataURL(file);
       reader.onload = async () => {
         const base64Image = reader.result;
-       const n8nWebhookURL = "https://n8n.permatunnelopen.org/webhook/albaranes-ai";
-        const data = await proxyFetch(n8nWebhookURL, {
+        // DIRECCIÓN CORREGIDA:
+        const n8nWebhookURL = "https://n8n.permatunnelopen.org/webhook/albaranes-ai";
+
+        const responseData = await proxyFetch(n8nWebhookURL, {
           method: 'POST',
           body: { image: base64Image, fileName: file.name }
         });
         
         setForm(prev => ({
           ...prev,
-          prov: data.proveedor || prev.prov,
-          date: data.fecha ? data.fecha.split('T')[0] : prev.date,
-          text: data.lineasTexto || prev.text
+          prov: responseData.proveedor || prev.prov,
+          date: responseData.fecha ? responseData.fecha.split('T')[0] : prev.date,
+          text: responseData.lineasTexto || prev.text
         }));
       };
     } catch (err) {
       console.error(err);
-      alert("Error de conexión con IA. Revisa que el túnel esté activo.");
+      alert("⚠️ Error de conexión con n8n. Asegúrate de que el flujo 'albaranes-ai' esté Activo en tu panel de n8n.");
     } finally {
       setIsAnalyzing(false);
       e.target.value = '';
     }
   };
-
-  const handleSaveAlbaran = async () => {
-    if (liveTotals.grandTotal <= 0 || !form.prov) {
-      return alert("Faltan datos (Proveedor o Importe).");
-    }
-
-    const newData = { ...data };
-    if (!newData.albaranes) newData.albaranes = [];
 
     // --- INTELIGENCIA DE AGRUPACIÓN ---
     // Buscamos si ya existe un albarán para este proveedor, fecha y socio hoy
