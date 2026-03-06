@@ -4,14 +4,28 @@ export const Num = {
   parse: (val: any): number => {
     if (!val) return 0;
     if (typeof val === 'number') return val;
-    let clean = val.toString().replace(/\./g, '').replace(',', '.');
-    return parseFloat(clean) || 0;
+    
+    // Convertimos a string por seguridad
+    let strVal = val.toString().trim();
+    
+    // Si tiene formato europeo (ej: 1.000,45), quitamos puntos y cambiamos coma por punto
+    if (strVal.includes(',') && strVal.indexOf(',') > strVal.lastIndexOf('.')) {
+      strVal = strVal.replace(/\./g, '').replace(',', '.');
+    } else {
+      // Si tiene formato internacional o ya es un float en string (ej: 1000.45), 
+      // quitamos comas de miles si las hubiera, manteniendo el punto decimal.
+      strVal = strVal.replace(/,/g, '');
+    }
+
+    return parseFloat(strVal) || 0;
   },
+  
   fmt: (val: number): string => 
     new Intl.NumberFormat('es-ES', { 
       style: 'currency', 
       currency: 'EUR', 
-      maximumFractionDigits: 0 
+      minimumFractionDigits: 2, // 🚀 FIX: Forzamos que siempre haya 2 decimales
+      maximumFractionDigits: 2  // 🚀 FIX: Evitamos que redondee a enteros
     }).format(val || 0)
 };
 
