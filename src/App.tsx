@@ -1,12 +1,16 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, Package, Wallet, ChefHat, Users, History, Settings, Search,
   ArrowUpRight, ArrowDownRight, TrendingUp, AlertCircle, X, Download, RefreshCw,
-  FileText, Truck, Scale, Zap, Building2, PieChart, Lock, Handshake, Import
+  FileText, Truck, Scale, Zap, Building2, PieChart, Lock, Handshake, Import, Database
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { fetchArumeData, saveArumeData, supabase } from './services/supabase';
+
+// 🚀 IMPORTAMOS NUESTRO NUEVO HOOK Y SUPABASE
+import { supabase } from './services/supabase';
+import { useArumeData } from './hooks/useArumeData';
+
 import { ArumeEngine, Num } from './services/engine';
 import { cn } from './lib/utils';
 import { AppData, Cierre } from './types';
@@ -30,10 +34,11 @@ import { SettingsModal } from './components/SettingsModal';
 // --- Main App ---
 
 export default function App() {
-  const [loading, setLoading] = useState(true);
+  // 🚀 CONECTAMOS EL CABLE A LA BASE DE DATOS
+  const { data: db, loading, saveData, setData, reloadData } = useArumeData();
+
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isConfigOpen, setIsConfigOpen] = useState(false);
-  const [db, setDb] = useState<AppData | null>(null);
 
   // 🚀 FIX: Control de Scroll dinámico para evitar bloqueos
   useEffect(() => {
@@ -47,98 +52,134 @@ export default function App() {
     }
   }, [isConfigOpen]);
 
-  // Realtime Subscription
+  // Realtime Subscription (Mejorada para SaaS)
   useEffect(() => {
     const channel = supabase.channel('arume-data')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'arume_data' }, payload => {
-        console.log('🔄 Cambio detectado desde n8n!', payload);
-        setDb(payload.new.data);
+        console.log('🔄 Cambio detectado desde n8n u otra pestaña!', payload);
+        // En lugar de machacar el estado, recargamos con el hook para mantener la seguridad anti-pisadas
+        reloadData();
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [reloadData]);
 
+  // Auto-migración (Tu lógica intacta, adaptada al Hook)
   useEffect(() => {
-    async function init() {
-      try {
-        const cloudData = await fetchArumeData();
-        let finalData = cloudData || {};
+    if (db && !db.config?.n8nUrlBanco) {
+      let finalData = { ...db };
+      let needsUpdate = false;
 
-        // Inicializar estructuras si no existen
-        const keys = ['banco','platos','recetas','ingredientes','ventas_menu','cierres','facturas','albaranes','gastos_fijos','activos','proveedores','cierres_mensuales'];
-        keys.forEach(k => { if(!finalData[k]) finalData[k] = []; });
-        if(!finalData.diario) finalData.diario = [];
-        if(!finalData.control_pagos) finalData.control_pagos = {};
-        if(!finalData.priceHistory) finalData.priceHistory = {};
+      // Inicializar estructuras si no existen
+      const keys = ['banco','platos','recetas','ingredientes','ventas_menu','cierres','facturas','albaranes','gastos_fijos','activos','proveedores','cierres_mensuales'];
+      keys.forEach(k => { if(!finalData[k]) { finalData[k] = []; needsUpdate = true; } });
+      if(!finalData.diario) { finalData.diario = []; needsUpdate = true; }
+      if(!finalData.control_pagos) { finalData.control_pagos = {}; needsUpdate = true; }
+      if(!finalData.priceHistory) { finalData.priceHistory = {}; needsUpdate = true; }
 
-        // Auto-migración Gastos Fijos
-        if (finalData.gastos_fijos) {
-          finalData.gastos_fijos.forEach((g: any) => {
-            if (!g.dia_pago) g.dia_pago = 1;
-            if (!g.name) g.name = "⚠️ (Sin Nombre)";
-            if (g.active === undefined) g.active = true;
-            if (!g.cat) g.cat = "varios";
-          });
-        }
+      // Auto-migración Gastos Fijos
+      if (finalData.gastos_fijos) {
+        finalData.gastos_fijos.forEach((g: any) => {
+          if (!g.dia_pago) { g.dia_pago = 1; needsUpdate = true; }
+          if (!g.name) { g.name = "⚠️ (Sin Nombre)"; needsUpdate = true; }
+          if (g.active === undefined) { g.active = true; needsUpdate = true; }
+          if (!g.cat) { g.cat = "varios"; needsUpdate = true; }
+        });
+      }
 
-        if(!finalData.config) finalData.config = { 
-          objetivoMensual: 40000,
-          n8nUrlBanco: "https://ia.permatunnelopen.org/webhook/1085406f-324c-42f7-b50f-22f211f445cd",
-          n8nUrlIA: ""
-        };
-        if(!finalData.config.n8nUrlBanco) {
-          finalData.config.n8nUrlBanco = "https://ia.permatunnelopen.org/webhook/1085406f-324c-42f7-b50f-22f211f445cd";
-        }
-        if(finalData.config.n8nUrlIA === undefined) {
-          finalData.config.n8nUrlIA = "";
-        }
+      if(!finalData.config) {
+        finalData.config = { objetivoMensual: 40000, n8nUrlBanco: "https://ia.permatunnelopen.org/webhook/1085406f-324c-42f7-b50f-22f211f445cd", n8nUrlIA: "" };
+        needsUpdate = true;
+      }
+      if(!finalData.config.n8nUrlBanco) {
+        finalData.config.n8nUrlBanco = "https://ia.permatunnelopen.org/webhook/1085406f-324c-42f7-b50f-22f211f445cd";
+        needsUpdate = true;
+      }
 
-        // Auto-migración (Lógica de tu app.js)
-        if (finalData.diario.length > 0) {
-          finalData.diario.forEach((old: any) => {
-            let isoDate = old.date || old.fecha;
-            if(isoDate && isoDate.includes('/')) {
-              const [d,m,y] = isoDate.split('/');
-              isoDate = `${y.length===2?'20'+y:y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
-            }
-            const totalOld = Num.parse(old.totalVenta || old.total || 0);
-            const exists = finalData.cierres.some((c: any) => c.date === isoDate && Math.abs(Num.parse(c.totalVenta) - totalOld) < 1);
-            if (!exists && isoDate) {
-              finalData.cierres.push({
-                id: old.id || `mig-${Date.now()}-${Math.random()}`,
-                date: isoDate,
-                totalVenta: totalOld,
-                efectivo: Num.parse(old.totalCaja || old.cash || 0),
-                tarjeta: Num.parse(old.totalTarjeta || old.card || 0),
-                apps: Num.parse(old.glovo || 0) + Num.parse(old.uber || 0),
-                tickets: parseInt(old.tickets || 0),
-                conciliado_banco: false
-              });
-            }
-          });
-        }
+      // Auto-migración Diario a Cierres
+      if (finalData.diario && finalData.diario.length > 0) {
+        finalData.diario.forEach((old: any) => {
+          let isoDate = old.date || old.fecha;
+          if(isoDate && isoDate.includes('/')) {
+            const [d,m,y] = isoDate.split('/');
+            isoDate = `${y.length===2?'20'+y:y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
+          }
+          const totalOld = Num.parse(old.totalVenta || old.total || 0);
+          const exists = finalData.cierres.some((c: any) => c.date === isoDate && Math.abs(Num.parse(c.totalVenta) - totalOld) < 1);
+          if (!exists && isoDate) {
+            finalData.cierres.push({
+              id: old.id || `mig-${Date.now()}-${Math.random()}`,
+              date: isoDate,
+              totalVenta: totalOld,
+              efectivo: Num.parse(old.totalCaja || old.cash || 0),
+              tarjeta: Num.parse(old.totalTarjeta || old.card || 0),
+              apps: Num.parse(old.glovo || 0) + Num.parse(old.uber || 0),
+              tickets: parseInt(old.tickets || 0),
+              conciliado_banco: false
+            });
+            needsUpdate = true;
+          }
+        });
+      }
 
-        setDb(finalData);
-      } catch (e) {
-        console.error("Error cargando datos:", e);
-      } finally {
-        setLoading(false);
+      // Si se hizo alguna corrección estructural, la aplicamos al estado local
+      if (needsUpdate) {
+        setData(finalData);
       }
     }
-    init();
-  }, []);
+  }, [db, setData]);
 
+  // Manejador central de guardado
   const handleSave = async (newData: AppData) => {
     try {
-      await saveArumeData(newData);
-      setDb({ ...newData, lastSync: Date.now() });
+      await saveData(newData);
     } catch (e) {
       console.error("Error guardando:", e);
     }
   };
+
+  // ⚠️ SI NO HAY DATOS (Pantalla de Restaurar Backup)
+  if (!loading && !db) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-6 text-center animate-fade-in">
+        <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center shadow-xl mb-6">
+          <Database className="w-12 h-12 text-indigo-500" />
+        </div>
+        <h1 className="text-3xl font-black text-slate-800 mb-2 tracking-tight">Carga tu Contabilidad</h1>
+        <p className="text-slate-500 mb-8 max-w-md">La base de datos en la nube está limpia. Por favor, sube tu archivo JSON de copia de seguridad para restaurar Arume ERP.</p>
+        
+        <label className="bg-indigo-600 text-white px-8 py-4 rounded-full font-black shadow-lg hover:bg-indigo-700 hover:scale-105 transition-all cursor-pointer flex items-center gap-3">
+          <Import className="w-5 h-5" />
+          RESTAURAR ARCHIVO JSON
+          <input 
+            type="file" 
+            accept=".json"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = async (e) => {
+                try {
+                  const content = e.target?.result as string;
+                  const parsed = JSON.parse(content);
+                  await handleSave(parsed);
+                  alert("¡Base de datos restaurada con éxito en la nube! 🚀");
+                  window.location.reload();
+                } catch (err) {
+                  alert("Error leyendo el archivo JSON.");
+                }
+              };
+              reader.readAsText(file);
+            }}
+          />
+        </label>
+      </div>
+    );
+  }
 
   const renderContent = () => {
     if (!db) return null;
@@ -249,7 +290,7 @@ export default function App() {
         isOpen={isConfigOpen} 
         onClose={() => setIsConfigOpen(false)} 
         db={db} 
-        setDb={setDb} 
+        setDb={setData} 
         onSave={handleSave} 
       />
     </>
