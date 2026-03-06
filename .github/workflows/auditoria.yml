@@ -21,9 +21,12 @@ jobs:
         with:
           node-version: 20
 
+      - name: 📦 Instalar Ingredientes (NUEVO)
+        run: npm install
+
       - name: 🔬 Ejecutar CFO Virtual
         id: audit
-        continue-on-error: true # Para que aunque falle el audit, envíe el Telegram
+        continue-on-error: true 
         run: npx tsx src/scripts/audit.ts
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
