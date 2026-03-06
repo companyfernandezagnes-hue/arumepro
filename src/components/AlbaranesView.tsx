@@ -1,26 +1,11 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
-  Truck, 
-  Search, 
-  Plus, 
-  Camera, 
-  Zap, 
-  RefreshCw, 
-  Download, 
-  Trash2, 
-  AlertTriangle,
-  FileText,
-  CheckCircle2,
-  Clock,
-  ExternalLink,
-  MoreVertical,
-  Filter,
-  ArrowRight,
-  Info
+  Truck, Search, Plus, Zap, Download, Trash2, 
+  CheckCircle2, Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppData, Albaran } from '../types';
-import { Num, DateUtil } from '../services/engine';
+import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
 import { proxyFetch } from '../services/api';
 
@@ -34,7 +19,6 @@ const REAL_PARTNERS = ['PAU', 'JERONI', 'AGNES', 'ONLY ONE', 'TIENDA DE SAKES'];
 export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const [activeFilter, setActiveFilter] = useState<'Todos' | 'Arume' | 'Socios'>('Todos');
   const [searchQ, setSearchQ] = useState('');
-  const [isSyncing, setIsSyncing] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   
   // Form State
@@ -107,7 +91,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   }, [analyzedItems]);
 
   // --- ACTIONS ---
- const handleN8NScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleN8NScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -117,7 +101,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       reader.readAsDataURL(file);
       reader.onload = async () => {
         const base64Image = reader.result;
-        // DIRECCIÓN CORREGIDA:
         const n8nWebhookURL = "https://n8n.permatunnelopen.org/webhook/albaranes-ai";
         
         const responseData = await proxyFetch(n8nWebhookURL, {
@@ -134,15 +117,25 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       };
     } catch (err) {
       console.error(err);
-      alert("⚠️ Error de conexión con n8n. Asegúrate de que el flujo 'albaranes-ai' esté Activo en tu panel de n8n.");
+      alert("⚠️ Error de conexión con n8n. Asegúrate de que el webhook esté activo.");
     } finally {
       setIsAnalyzing(false);
       e.target.value = '';
     }
   };
 
+  // 🚀 FIX CRÍTICO: Esta función estaba rota y suelta en tu código
+  const handleSaveAlbaran = async () => {
+    if (!form.prov) {
+      alert("Por favor, introduce el nombre del proveedor.");
+      return;
+    }
+
+    // Hacemos una copia segura de los datos actuales
+    const newData = { ...data };
+    if (!newData.albaranes) newData.albaranes = [];
+
     // --- INTELIGENCIA DE AGRUPACIÓN ---
-    // Buscamos si ya existe un albarán para este proveedor, fecha y socio hoy
     const existingIdx = newData.albaranes.findIndex(a => 
       !a.invoiced && // Solo agrupamos si no está facturado
       norm(a.prov) === norm(form.prov) && 
@@ -154,24 +147,24 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       // Agrupamos en el existente
       const existing = newData.albaranes[existingIdx];
       
-      // Evitamos duplicar exactamente el mismo producto si ya existe en este albarán
       const newItems = analyzedItems.filter(newItem => 
         !(existing.items || []).some((oldItem: any) => 
-          norm(oldItem.n) === norm(newItem.n) && 
-          Math.abs(oldItem.t - newItem.t) < 0.01
+          norm(oldItem.n) === norm(newItem?.n || '') && 
+          Math.abs((oldItem.t || 0) - (newItem?.t || 0)) < 0.01
         )
       );
 
+      // Si hay items válidos nuevos, los sumamos preservando decimales
       if (newItems.length > 0) {
-        existing.items = [...(existing.items || []), ...newItems];
-        existing.total = (Num.parse(existing.total) || 0) + newItems.reduce((acc, it) => acc + it.t, 0);
-        existing.base = (Num.parse(existing.base) || 0) + newItems.reduce((acc, it) => acc + it.base, 0);
-        existing.taxes = (Num.parse(existing.taxes) || 0) + newItems.reduce((acc, it) => acc + (it.tax || 0), 0);
+        existing.items = [...(existing.items || []), ...newItems.map(item => item!)];
+        existing.total = (Num.parse(existing.total) || 0) + newItems.reduce((acc, it) => acc + (it?.t || 0), 0);
+        existing.base = (Num.parse(existing.base) || 0) + newItems.reduce((acc, it) => acc + (it?.base || 0), 0);
+        existing.taxes = (Num.parse(existing.taxes) || 0) + newItems.reduce((acc, it) => acc + (it?.tax || 0), 0);
         existing.notes = existing.notes ? `${existing.notes} | ${form.notes}` : form.notes;
         existing.paid = existing.paid || form.paid;
       }
     } else {
-      // Creamos uno nuevo
+      // Creamos un albarán totalmente nuevo
       const taxesArray = Object.values(liveTotals.taxes) as { b: number; i: number }[];
       const newAlbaran: Albaran = {
         id: Date.now().toString(),
@@ -180,7 +173,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         num: form.num || "S/N",
         socio: form.socio,
         notes: form.notes,
-        items: analyzedItems,
+        items: analyzedItems.map(item => item!), // Aseguramos que no hay nulls
         total: liveTotals.grandTotal,
         base: taxesArray.reduce((acc, t) => acc + t.b, 0),
         taxes: taxesArray.reduce((acc, t) => acc + t.i, 0),
@@ -192,8 +185,10 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       newData.albaranes.push(newAlbaran);
     }
 
+    // Guardamos en el estado global/nube
     await onSave(newData);
 
+    // Reseteamos el formulario
     setForm({
       prov: '',
       date: new Date().toISOString().split('T')[0],
@@ -256,50 +251,11 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
           <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest">Control Financiero v12.4</p>
         </div>
         <div className="flex gap-2 items-center flex-wrap justify-center">
-          <button 
-            onClick={async () => {
-              if (!confirm("¿Agrupar albaranes fragmentados? Esto unirá gastos del mismo día/proveedor.")) return;
-              const newData = { ...data };
-              const grouped: Record<string, Albaran> = {};
-              
-              (newData.albaranes || []).forEach(a => {
-                const targetKey = Object.keys(grouped).find(k => 
-                  !grouped[k].invoiced && 
-                  norm(grouped[k].prov) === norm(a.prov) && 
-                  grouped[k].date === a.date && 
-                  norm(grouped[k].socio || 'Arume') === norm(a.socio || 'Arume')
-                );
-                
-                if (targetKey && !a.invoiced) {
-                  // Agrupamos
-                  grouped[targetKey].items = [...(grouped[targetKey].items || []), ...(a.items || [])];
-                  grouped[targetKey].total = (Num.parse(grouped[targetKey].total) || 0) + (Num.parse(a.total) || 0);
-                  grouped[targetKey].base = (Num.parse(grouped[targetKey].base) || 0) + (Num.parse(a.base) || 0);
-                  grouped[targetKey].taxes = (Num.parse(grouped[targetKey].taxes) || 0) + (Num.parse(a.taxes) || 0);
-                  grouped[targetKey].notes = grouped[targetKey].notes ? `${grouped[targetKey].notes} | ${a.notes}` : a.notes;
-                } else {
-                  // No hay match o está facturado, lo añadimos como nuevo en el mapa
-                  grouped[a.id] = { ...a };
-                }
-              });
-              
-              newData.albaranes = Object.values(grouped);
-              await onSave(newData);
-              alert("¡Albaranes agrupados con éxito!");
-            }}
-            className="bg-rose-50 text-rose-500 px-4 py-3 rounded-2xl text-[10px] font-black hover:bg-rose-100 transition shadow-sm flex items-center gap-1"
-          >
-            <Trash2 className="w-4 h-4" /> AGRUPAR
-          </button>
           <label className="bg-gradient-to-r from-emerald-400 to-teal-500 text-white px-5 py-3 rounded-2xl text-[10px] font-black hover:shadow-lg hover:scale-105 transition cursor-pointer shadow-md flex items-center gap-2">
             <Zap className="w-4 h-4" />
-            <span>IA (n8n)</span>
+            <span>ESCANEAR TICKET (IA)</span>
             <input type="file" onChange={handleN8NScan} className="hidden" accept="image/*, application/pdf" />
           </label>
-          <button className="bg-slate-800 text-white px-5 py-3 rounded-2xl text-[10px] font-black shadow-md transition flex items-center gap-2">
-            <Download className="w-4 h-4" />
-            <span>CSV</span>
-          </button>
         </div>
       </header>
 
@@ -325,11 +281,10 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         {/* Form Column */}
         <div className="lg:col-span-1 space-y-4">
           <div className="bg-white p-6 rounded-[2.5rem] shadow-xl border-2 border-indigo-50 relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 via-indigo-500 to-rose-500"></div>
             
             {isAnalyzing && (
               <div className="absolute inset-0 bg-white/95 z-20 flex flex-col items-center justify-center text-center p-4 backdrop-blur-sm">
-                <RefreshCw className="w-12 h-12 text-indigo-500 animate-spin mb-3" />
+                <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-3"></div>
                 <p className="text-xs font-black text-indigo-600 animate-pulse uppercase tracking-widest">Analizando Factura...</p>
               </div>
             )}
@@ -369,65 +324,29 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                 <option value="Arume">🏢 Gasto: Restaurante (Arume)</option>
                 {REAL_PARTNERS.map(s => <option key={s} value={s}>👤 Gasto Socio: {s}</option>)}
               </select>
-              <input 
-                value={form.notes}
-                onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                type="text" 
-                placeholder="Notas (opcional)..." 
-                className="w-full p-3 bg-slate-50 rounded-xl text-xs border-0 outline-none"
-              />
             </div>
 
             <textarea 
               value={form.text}
               onChange={(e) => setForm({ ...form, text: e.target.value })}
-              placeholder="Escribe aquí o escanea con IA...&#10;Ej:&#10;5 kg Salmón 150.00&#10;10 Cajas Cerveza 80.50" 
+              placeholder="Escribe líneas o usa la IA...&#10;Ej: 5 kg Salmón 150.00" 
               className="w-full h-32 bg-slate-50 rounded-2xl p-4 text-xs font-mono border-0 outline-none resize-none mb-3 shadow-inner focus:bg-white transition"
             />
             
             <div className="mt-3 space-y-1 max-h-52 overflow-y-auto custom-scrollbar px-1 bg-slate-50/50 rounded-xl p-2 min-h-[50px]">
-              {analyzedItems.length > 0 ? analyzedItems.map((it, idx) => (
-                <div key={idx} className="flex flex-col border-b border-slate-200 py-2 last:border-0">
-                  <div className="flex justify-between items-center text-[10px]">
-                    <span className="truncate pr-2 font-bold text-slate-700"><b>{it?.q}x</b> {it?.n}</span>
-                    <span className="font-black text-slate-900 whitespace-nowrap">{Num.fmt(it?.t || 0)}</span>
-                  </div>
+              {analyzedItems.length > 0 ? analyzedItems.map((it, idx) => it && (
+                <div key={idx} className="flex justify-between items-center text-[10px] border-b border-slate-200 py-2 last:border-0">
+                  <span className="truncate pr-2 font-bold text-slate-700"><b>{it.q}x</b> {it.n}</span>
+                  <span className="font-black text-slate-900 whitespace-nowrap">{Num.fmt(it.t)}</span>
                 </div>
               )) : (
-                <p className="text-[10px] text-slate-300 text-center italic py-2">Escribe líneas para ver desglose...</p>
+                <p className="text-[10px] text-slate-300 text-center italic py-2">Sin productos detectados...</p>
               )}
-            </div>
-
-            <div className="mt-4 p-4 bg-slate-900 rounded-2xl shadow-lg space-y-2">
-              {(Object.entries(liveTotals.taxes) as [string, { b: number; i: number }][]).map(([r, t]) => t.b > 0 && (
-                <div key={r} className="flex justify-between text-[10px] text-slate-400">
-                  <span className="font-bold w-12 uppercase">IVA {r}%</span>
-                  <span className="flex-1 text-right pr-4">Base: {Num.fmt(t.b)}</span>
-                  <span className="text-emerald-400 font-black">+{Num.fmt(t.i)}</span>
-                </div>
-              ))}
-              <div className="flex justify-between items-center pt-2 border-t border-slate-700 mt-2">
-                <span className="text-xs font-black text-white uppercase">TOTAL</span>
-                <span className="text-2xl font-black text-white">{Num.fmt(liveTotals.grandTotal)}</span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between mt-4 px-2">
-              <div className="flex items-center gap-2">
-                <input 
-                  type="checkbox" 
-                  id="inPaid" 
-                  checked={form.paid}
-                  onChange={(e) => setForm({ ...form, paid: e.target.checked })}
-                  className="w-4 h-4 accent-indigo-600 cursor-pointer" 
-                />
-                <label htmlFor="inPaid" className="text-xs font-bold text-slate-600 cursor-pointer">Pagado</label>
-              </div>
             </div>
 
             <button 
               onClick={handleSaveAlbaran}
-              className="w-full mt-4 bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-xl hover:bg-indigo-700 transition active:scale-95"
+              className="w-full mt-6 bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-xl hover:bg-indigo-700 transition active:scale-95"
             >
               GUARDAR ALBARÁN
             </button>
@@ -484,9 +403,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                   </h4>
                   <div className="flex items-center gap-2 mt-1">
                     <p className="text-[10px] text-slate-400 font-bold">{a.date}</p>
-                    {a.notes && <span className="text-[9px] text-indigo-400 bg-indigo-50 px-1.5 rounded font-bold">📝 Nota</span>}
                     {a.reconciled && <span className="text-[9px] text-emerald-600 bg-emerald-50 px-1.5 rounded font-black">🔗 Conciliado</span>}
-                    {a.invoiced && <span className="text-[9px] text-blue-600 bg-blue-50 px-1.5 rounded font-black">📄 Facturado</span>}
                   </div>
                 </div>
                 <div className="text-right">
@@ -514,16 +431,12 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         {editingAlbaran && (
           <div className="fixed inset-0 z-[200] flex justify-center items-center p-4">
             <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setEditingAlbaran(null)}
               className="absolute inset-0 bg-slate-900/90 backdrop-blur-sm"
             />
             <motion.div 
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}
               className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl relative z-10 flex flex-col max-h-[90vh]"
             >
               <button onClick={() => setEditingAlbaran(null)} className="absolute top-6 right-6 text-slate-300 hover:text-slate-500 text-2xl transition">✕</button>
@@ -545,28 +458,13 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                   </div>
                 </div>
 
-                <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-100">
-                  <p className="text-[9px] font-black text-indigo-400 uppercase mb-1">Asignado a</p>
-                  <p className="text-sm font-black text-indigo-900">{editingAlbaran.socio === 'Arume' ? '🏢 Restaurante (Arume)' : `👤 Socio: ${editingAlbaran.socio}`}</p>
-                </div>
-
-                {editingAlbaran.notes && (
-                  <div className="bg-amber-50 p-4 rounded-2xl border border-amber-100">
-                    <p className="text-[9px] font-black text-amber-600 uppercase mb-1">Notas</p>
-                    <p className="text-xs font-bold text-amber-900">{editingAlbaran.notes}</p>
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <p className="text-[9px] font-black text-slate-400 uppercase ml-2">Desglose de productos</p>
-                  <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 space-y-2">
-                    {editingAlbaran.items?.map((it, i) => (
-                      <div key={i} className="flex justify-between items-center text-xs border-b border-slate-200 last:border-0 pb-2 last:pb-0 pt-2 first:pt-0">
-                        <span className="font-bold text-slate-700"><b>{it.q}x</b> {it.n}</span>
-                        <span className="font-black text-slate-900">{Num.fmt(it.t)}</span>
-                      </div>
-                    ))}
-                  </div>
+                <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 space-y-2">
+                  {editingAlbaran.items?.map((it, i) => (
+                    <div key={i} className="flex justify-between items-center text-xs border-b border-slate-200 last:border-0 pb-2 last:pb-0 pt-2 first:pt-0">
+                      <span className="font-bold text-slate-700"><b>{it.q}x</b> {it.n}</span>
+                      <span className="font-black text-slate-900">{Num.fmt(it.t)}</span>
+                    </div>
+                  ))}
                 </div>
 
                 <div className="flex justify-between items-center bg-slate-900 p-6 rounded-[2rem] text-white shadow-xl">
@@ -574,28 +472,14 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                     <p className="text-[10px] font-black text-slate-400 uppercase">Total Importe</p>
                     <p className="text-3xl font-black text-emerald-400">{Num.fmt(editingAlbaran.total)}</p>
                   </div>
-                  <div className="text-right">
-                    <div className={cn(
-                      "px-3 py-1 rounded-full text-[10px] font-black uppercase inline-block",
-                      editingAlbaran.paid ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400"
-                    )}>
-                      {editingAlbaran.paid ? 'Pagado' : 'Pendiente'}
-                    </div>
-                  </div>
                 </div>
               </div>
 
               <div className="mt-8 pt-6 border-t border-slate-100 flex gap-3">
-                <button 
-                  onClick={() => handleDelete(editingAlbaran.id)}
-                  className="flex-1 bg-rose-50 text-rose-500 py-4 rounded-2xl font-black text-xs hover:bg-rose-100 transition flex items-center justify-center gap-2"
-                >
+                <button onClick={() => handleDelete(editingAlbaran.id)} className="flex-1 bg-rose-50 text-rose-500 py-4 rounded-2xl font-black text-xs hover:bg-rose-100 flex justify-center items-center gap-2">
                   <Trash2 className="w-4 h-4" /> ELIMINAR
                 </button>
-                <button 
-                  onClick={() => setEditingAlbaran(null)}
-                  className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl font-black text-xs hover:bg-slate-200 transition"
-                >
+                <button onClick={() => setEditingAlbaran(null)} className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl font-black text-xs hover:bg-slate-200">
                   CERRAR
                 </button>
               </div>
