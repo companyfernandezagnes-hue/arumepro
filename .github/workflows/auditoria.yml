@@ -1,0 +1,52 @@
+name: 🛡️ AGENTE AUDITOR ARUME V13
+
+on:
+  workflow_dispatch: # Botón manual para que lo pruebes cuando quieras
+  schedule:
+    - cron: "0 2 * * *" # Se ejecuta solo todas las noches a las 02:00 AM
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit_and_backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Descargar código
+        uses: actions/checkout@v4
+
+      - name: 🧱 Preparar Motor
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 🔬 Ejecutar CFO Virtual
+        id: audit
+        run: npx tsx src/scripts/audit.ts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+
+      - name: 📄 Guardar Backup y Reporte
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arume-auditoria-backup
+          path: out/
+          retention-days: 30
+
+      - name: 🚨 Crear Alerta Roja si hay peligro
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.existsSync('out/audit-summary.md') ? fs.readFileSync('out/audit-summary.md','utf8') : 'Error al generar resumen.';
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '🚨 ACCIÓN REQUERIDA: Anomalía Contable Detectada',
+              body: summary,
+              labels: ['bug', 'auditoria']
+            })
