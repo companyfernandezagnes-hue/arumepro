@@ -1,40 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  LayoutDashboard, 
-  Package, 
-  Wallet, 
-  ChefHat, 
-  Users, 
-  History,
-  Settings,
-  Search,
-  ArrowUpRight,
-  ArrowDownRight,
-  TrendingUp,
-  AlertCircle,
-  X,
-  Download,
-  RefreshCw,
-  FileText,
-  Truck,
-  Scale,
-  Zap,
-  Building2,
-  PieChart,
-  Lock,
-  Handshake,
-  Import
+  LayoutDashboard, Package, Wallet, ChefHat, Users, History, Settings, Search,
+  ArrowUpRight, ArrowDownRight, TrendingUp, AlertCircle, X, Download, RefreshCw,
+  FileText, Truck, Scale, Zap, Building2, PieChart, Lock, Handshake, Import
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  AreaChart, 
-  Area, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer 
-} from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { fetchArumeData, saveArumeData, supabase } from './services/supabase';
 import { ArumeEngine, Num } from './services/engine';
 import { cn } from './lib/utils';
@@ -52,7 +23,6 @@ import { MenuView } from './components/MenuView';
 import { CierreContableView } from './components/CierreContableView';
 import { StockView } from './components/StockView';
 import { NotificationService } from './services/notifications';
-
 import { DashboardView } from './components/DashboardView';
 import { NavButton } from './components/NavButton';
 import { SettingsModal } from './components/SettingsModal';
@@ -64,6 +34,18 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [db, setDb] = useState<AppData | null>(null);
+
+  // 🚀 FIX: Control de Scroll dinámico para evitar bloqueos
+  useEffect(() => {
+    const contenedorPrincipal = document.getElementById('app-root-container');
+    if (!contenedorPrincipal) return;
+
+    if (isConfigOpen) {
+      contenedorPrincipal.style.overflow = 'hidden'; // Bloquea el fondo al abrir ajustes
+    } else {
+      contenedorPrincipal.style.overflow = 'auto';   // Libera el fondo al cerrar
+    }
+  }, [isConfigOpen]);
 
   // Realtime Subscription
   useEffect(() => {
@@ -203,14 +185,14 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Mobile Header */}
-      <header className="mobile-header sticky top-0 z-40 px-6 py-4 flex justify-between items-center bg-white border-b border-slate-200 shadow-sm lg:hidden">
+      {/* 🚀 FIX: Mobile Header con z-[110] asegurado para que la rueda sea clicable */}
+      <header className="mobile-header sticky top-0 z-[110] px-6 py-4 flex justify-between items-center bg-white border-b border-slate-200 shadow-sm lg:hidden">
         <div>
           <h1 className="text-xl font-black text-slate-900 tracking-tighter">ARUME <span className="text-indigo-600">PRO</span></h1>
           <p className="text-[9px] text-slate-400 font-bold uppercase tracking-tighter">Diamond Connected</p>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={() => setIsConfigOpen(true)} className="btn-rueda w-10 h-10 flex items-center justify-center bg-slate-50 rounded-full text-lg border border-slate-100 shadow-sm">
+          <button onClick={() => setIsConfigOpen(true)} className="btn-rueda w-10 h-10 flex items-center justify-center bg-slate-50 rounded-full text-lg border border-slate-100 shadow-sm cursor-pointer pointer-events-auto">
             ⚙️
           </button>
           <div className="bg-slate-100 px-3 py-1.5 rounded-full text-[10px] font-black text-slate-600 border border-slate-200 uppercase">
@@ -219,8 +201,8 @@ export default function App() {
         </div>
       </header>
 
-      {/* PC Header */}
-      <div className="pc-header-visible hidden lg:flex">
+      {/* 🚀 FIX: PC Header asegurando el z-[110] */}
+      <div className="pc-header-visible hidden lg:flex z-[110]">
         <div>
           <h1 className="text-2xl font-black text-slate-800 tracking-tighter">ARUME <span className="text-indigo-600">ERP</span></h1>
           <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Panel de Control Integral</p>
@@ -229,7 +211,7 @@ export default function App() {
           <div className="bg-white px-4 py-2 rounded-full text-[11px] font-black text-emerald-600 border border-emerald-100 shadow-sm uppercase flex items-center gap-2">
             <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span> Online
           </div>
-          <button onClick={() => setIsConfigOpen(true)} className="btn-rueda w-12 h-12 flex items-center justify-center bg-white rounded-full text-xl border border-slate-100 shadow-md">
+          <button onClick={() => setIsConfigOpen(true)} className="btn-rueda w-12 h-12 flex items-center justify-center bg-white rounded-full text-xl border border-slate-100 shadow-md cursor-pointer pointer-events-auto">
             ⚙️
           </button>
         </div>
@@ -241,7 +223,7 @@ export default function App() {
           {renderContent()}
         </main>
 
-        {/* Navbar - Replicando los 12 botones de tu app.js */}
+        {/* Navbar */}
         <nav id="navbar-container">
           <div className="flex items-center justify-between w-full overflow-x-auto gap-4 px-6 py-3 no-scrollbar">
             <NavButton icon={LayoutDashboard} label="Dash" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
