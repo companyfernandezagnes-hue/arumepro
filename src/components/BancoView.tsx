@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef } from 'react';
 import { 
   Building2, Search, Trash2, Clipboard, Upload, Zap, 
   CheckCircle2, ArrowRight, TrendingUp, TrendingDown, 
-  Scale, Settings, RefreshCw, ShoppingCart 
+  Scale, Settings, RefreshCw, ShoppingCart, Eraser 
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppData, Albaran, Factura } from '../types';
@@ -119,7 +119,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
     setSelectedBankId(null);
   };
 
-  // 🚀 FIX CRÍTICO: Nueva lógica de acciones rápidas (Separa Gastos Fijos de Albaranes e Ingresos)
+  // 🚀 FIX: Lógica ESTRICTA. No crea facturas ni albaranes. Solo marca el banco o crea Plantillas de Gasto Fijo.
   const handleQuickAction = async (bankId: string, label: string, type: 'ALBARAN' | 'FIXED_EXPENSE' | 'TPV' | 'CASH' | 'INCOME') => {
     const newData = { ...data };
     const item = newData.banco.find(b => b.id === bankId);
@@ -129,7 +129,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
     const amt = Math.abs(amtRaw);
 
     if (type === 'FIXED_EXPENSE') {
-      // Es un gasto recurrente (Nómina, Alquiler...)
+      // Es un gasto recurrente (Nómina, Alquiler...) - ESTO SÍ ESTÁ PERMITIDO
       const d = new Date(item.date);
       const monthKey = `pagos_${d.getFullYear()}_${d.getMonth() + 1}`;
       
@@ -138,18 +138,17 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
       
       const isPersonal = label.includes('Personal') || label.includes('Nómina');
       
-      // Intentar buscar un gasto fijo pendiente este mes con importe similar
       const pendingFixed = (newData.gastos_fijos || []).find(g => 
         g.active !== false && 
         g.cat === (isPersonal ? 'personal' : 'varios') &&
         !newData.control_pagos[monthKey].includes(g.id) &&
-        Math.abs(Num.parse(g.amount) - amt) < 50 // Tolerancia amplia para nóminas variables
+        Math.abs(Num.parse(g.amount) - amt) < 50 
       );
 
       if (pendingFixed) {
         newData.control_pagos[monthKey].push(pendingFixed.id);
       } else {
-        // Auto-crear el gasto recurrente para que el sistema ya lo conozca el mes que viene
+        // Crear plantilla de gasto fijo
         const newFixedId = 'gf-' + Date.now();
         if (!newData.gastos_fijos) newData.gastos_fijos = [];
         newData.gastos_fijos.push({
@@ -163,87 +162,28 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
         });
         newData.control_pagos[monthKey].push(newFixedId);
       }
-
-    } else if (type === 'ALBARAN') {
-      // Es una compra de material/proveedor
-      if (!newData.albaranes) newData.albaranes = [];
-      newData.albaranes.push({
-        id: 'auto-alb-' + Date.now(),
-        date: item.date,
-        prov: label,
-        num: "BANCO",
-        total: amt,
-        paid: true,
-        status: 'ok',
-        reconciled: true,
-        category: label === 'Comisión Bancaria' ? 'Financiero' : 'Gastos Varios',
-        items: []
-      });
-
-    } else if (type === 'INCOME') {
-      // Es un ingreso extraordinario o factura cobrada
-      if (!newData.facturas) newData.facturas = [];
-      newData.facturas.push({
-        id: 'auto-fac-' + Date.now(),
-        date: item.date,
-        num: `ING-${Date.now().toString().slice(-4)}`,
-        cliente: label,
-        total: amt,
-        base: amt,
-        taxes: 0,
-        reconciled: true,
-        paid: true,
-        items: []
-      });
-
     } else if (type === 'TPV') {
-      // Cierre de Caja con Tarjetas
-      if (!newData.cierres) newData.cierres = [];
-      if (!newData.facturas) newData.facturas = [];
-
-      const zMatch = newData.cierres.find(c => !c.conciliado_banco && Math.abs(Num.parse(c.tarjeta) - amt) <= 5);
-      
+      // Buscar el cierre y enlazarlo, PERO NUNCA CREARLO
+      const zMatch = newData.cierres?.find(c => !c.conciliado_banco && Math.abs(Num.parse(c.tarjeta) - amt) <= 5);
       if (zMatch) {
         zMatch.conciliado_banco = true;
         const zNum = `Z-${zMatch.date.replace(/-/g, '')}`;
-        const fZ = newData.facturas.find(f => f.num === zNum);
+        const fZ = newData.facturas?.find(f => f.num === zNum);
         if (fZ) fZ.reconciled = true;
-      } else {
-        // Si no existe, LO CREAMOS para que cuadre la caja
-        newData.cierres.push({
-          id: 'z-auto-' + Date.now(),
-          date: item.date,
-          totalVenta: amt,
-          efectivo: 0,
-          tarjeta: amt,
-          apps: 0,
-          tickets: 1,
-          conciliado_banco: true
-        });
-        newData.facturas.push({
-          id: 'fac-z-auto-' + Date.now(),
-          date: item.date,
-          num: `Z-${item.date.replace(/-/g, '')}`,
-          cliente: 'Z DIARIO AUTO',
-          total: amt,
-          base: amt / 1.10, // Base estimada
-          taxes: amt - (amt / 1.10),
-          reconciled: true,
-          paid: true,
-          items: []
-        });
       }
     } else if (type === 'CASH') {
       const cMatch = newData.cierres?.find(c => !c.conciliado_banco && Math.abs(Num.parse(c.efectivo) - amt) <= 50);
       if (cMatch) cMatch.conciliado_banco = true;
     }
 
+    // Para ALBARAN e INCOME no creamos nada. Solo ocultamos el movimiento del banco con su etiqueta.
     item.status = 'matched';
+    item.category = label;
     await onSave(newData);
     setSelectedBankId(null);
   };
 
-  // 🚀 FIX CRÍTICO: Impedimos que la IA convierta ingresos en gastos
+  // 🚀 FIX: IA ESTRICTA. No crea facturas falsas.
   const handleMagicMatch = async () => {
     const pendings = filteredMovements.slice(0, 25);
     if (pendings.length === 0) return;
@@ -269,7 +209,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
           const amtRaw = Num.parse(item.amount);
 
           if (amtRaw > 0) {
-            // ES UN INGRESO (+) -> Buscar cierre o crear Factura
+            // INGRESO -> Buscar cierre, no crear factura fantasma
             if (mov.esCierreTPV) {
               const zMatch = newData.cierres?.find(c => !c.conciliado_banco && Math.abs(Num.parse(c.tarjeta) - Math.abs(amtRaw)) <= 5);
               if (zMatch) {
@@ -277,32 +217,17 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
                 const fZ = newData.facturas?.find(f => f.num === `Z-${zMatch.date.replace(/-/g, '')}`);
                 if (fZ) fZ.reconciled = true;
               }
-            } else {
-              // Ingreso desconocido
-              if (!newData.facturas) newData.facturas = [];
-              newData.facturas.push({
-                id: 'fac-ia-' + Date.now(),
-                date: item.date,
-                num: `ING-${Date.now().toString().slice(-4)}`,
-                cliente: mov.categoriaAsignada || 'Ingreso Banco',
-                total: amtRaw,
-                reconciled: true,
-                paid: true,
-                items: []
-              });
             }
           } else {
-            // ES UN GASTO (-) -> Ir a Gastos Fijos o Albaranes
+            // GASTO -> Crear solo plantilla de Gasto Fijo si es nómina
             if (mov.categoriaAsignada && mov.confidence >= 0.7) {
               const catLower = mov.categoriaAsignada.toLowerCase();
               if (catLower.includes('personal') || catLower.includes('nómina') || catLower.includes('alquiler')) {
-                 // Tratamos como Gasto recurrente, no como Albarán
                  const d = new Date(item.date);
                  const monthKey = `pagos_${d.getFullYear()}_${d.getMonth() + 1}`;
                  if (!newData.control_pagos) newData.control_pagos = {};
                  if (!newData.control_pagos[monthKey]) newData.control_pagos[monthKey] = [];
                  
-                 // Crear gasto fijo si la IA lo detecta
                  const newFixedId = 'gf-ia-' + Date.now();
                  if (!newData.gastos_fijos) newData.gastos_fijos = [];
                  newData.gastos_fijos.push({
@@ -315,25 +240,11 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
                     active: true
                  });
                  newData.control_pagos[monthKey].push(newFixedId);
-              } else {
-                 // Gasto normal de compras
-                 if (!newData.albaranes) newData.albaranes = [];
-                 newData.albaranes.push({
-                   id: 'ia-' + Date.now() + Math.random(),
-                   date: item.date,
-                   prov: mov.categoriaAsignada + ' (IA)',
-                   num: "BANCO",
-                   total: Math.abs(amtRaw),
-                   paid: true,
-                   status: 'ok',
-                   reconciled: true,
-                   category: mov.categoriaAsignada,
-                   items: []
-                 });
               }
             }
           }
           item.status = 'matched';
+          item.category = mov.categoriaAsignada || 'IA';
           count++;
         }
         await onSave(newData);
@@ -347,6 +258,34 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
     }
   };
 
+  // 🧹 MAGIA PURA: BOTÓN PARA LIMPIAR FANTASMAS
+  const handleAutoCleanup = async () => {
+    if (!confirm("⚠️ ¿Quieres ejecutar la LIMPIEZA AUTOMÁTICA? Esto borrará todos los albaranes y facturas creadas por error en el banco.")) return;
+    
+    const newData = { ...data };
+    let eliminados = 0;
+
+    // 1. Limpiar Albaranes Fantasma
+    const initialAlbs = (newData.albaranes || []).length;
+    newData.albaranes = (newData.albaranes || []).filter(a => {
+      const isGhost = a.id.startsWith('auto-') || a.id.startsWith('ia-') || a.prov === 'BANCO' || a.prov?.includes('(IA)');
+      return !isGhost;
+    });
+    eliminados += (initialAlbs - newData.albaranes.length);
+
+    // 2. Limpiar Facturas Fantasma
+    const initialFacs = (newData.facturas || []).length;
+    newData.facturas = (newData.facturas || []).filter(f => {
+      const isGhost = f.id.startsWith('auto-fac') || f.id.startsWith('fac-ia-') || f.id.startsWith('fac-z-auto') || f.cliente === 'Z DIARIO AUTO' || f.cliente === 'Ingreso Banco';
+      return !isGhost;
+    });
+    eliminados += (initialFacs - newData.facturas.length);
+
+    await onSave(newData);
+    alert(`✨ Limpieza exitosa: Hemos aniquilado ${eliminados} documentos fantasma de tu contabilidad.`);
+  };
+
+  // EXCEL IMPORT EXACTAMENTE COMO LO TENÍAS
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -446,6 +385,11 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
           >
             {isMagicLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
             AUTO-MATCH (IA)
+          </button>
+
+          {/* 🚀 EL BOTÓN ROJO DE LIMPIEZA */}
+          <button onClick={handleAutoCleanup} className="bg-rose-50 text-rose-600 px-5 py-3 rounded-xl text-[10px] font-black hover:bg-rose-100 transition shadow-sm flex items-center gap-2 ml-auto">
+            <Eraser className="w-4 h-4" /> LIMPIAR FANTASMAS
           </button>
         </div>
       </header>
@@ -580,17 +524,17 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
                       <Zap className="w-3 h-3 text-indigo-500" />
                       ⚡ Creación Rápida
                     </h4>
-                    {/* 🚀 FIX: Mostramos botones diferentes dependiendo de si es ingreso o gasto */}
                     <div className="grid grid-cols-2 gap-3">
                       {(Num.parse(selectedItem.amount) > 0 ? [
                         { label: 'Cierre TPV (Tarjetas)', icon: TrendingUp, type: 'TPV' as const },
                         { label: 'Ingreso Efectivo', icon: Building2, type: 'CASH' as const },
                         { label: 'Otros Ingresos', icon: TrendingUp, type: 'INCOME' as const }
                       ] : [
-                        { label: 'Gasto Recurrente / Fijo', icon: Zap, type: 'FIXED_EXPENSE' as const },
-                        { label: 'Personal / Nómina', icon: TrendingDown, type: 'FIXED_EXPENSE' as const },
+                        { label: 'Gasto Fijo', icon: Zap, type: 'FIXED_EXPENSE' as const },
                         { label: 'Comisión Bancaria', icon: Building2, type: 'ALBARAN' as const },
-                        { label: 'Compra a Proveedor', icon: ShoppingCart, type: 'ALBARAN' as const }
+                        { label: 'Suministros', icon: Zap, type: 'FIXED_EXPENSE' as const },
+                        { label: 'Personal', icon: TrendingDown, type: 'FIXED_EXPENSE' as const },
+                        { label: 'Alquiler', icon: Scale, type: 'FIXED_EXPENSE' as const }
                       ]).map(cat => (
                         <button 
                           key={cat.label}
