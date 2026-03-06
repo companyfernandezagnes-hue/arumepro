@@ -1,128 +1,219 @@
 import { AppData, GastoFijo, Activo } from "../types";
 
+/* ===========================
+ * NUMÉRICAS ROBUSTAS (Motor Copilot + Arume)
+ * =========================== */
 export const Num = {
-  parse: (val: any): number => {
-    if (!val) return 0;
-    if (typeof val === 'number') return val;
-    
-    // Convertimos a string por seguridad
-    let strVal = val.toString().trim();
-    
-    // Si tiene formato europeo (ej: 1.000,45), quitamos puntos y cambiamos coma por punto
-    if (strVal.includes(',') && strVal.indexOf(',') > strVal.lastIndexOf('.')) {
-      strVal = strVal.replace(/\./g, '').replace(',', '.');
-    } else {
-      // Si tiene formato internacional o ya es un float en string (ej: 1000.45), 
-      // quitamos comas de miles si las hubiera, manteniendo el punto decimal.
-      strVal = strVal.replace(/,/g, '');
+  parse: (val: unknown): number => {
+    if (val === null || val === undefined || val === '') return 0;
+    if (typeof val === "number" && Number.isFinite(val)) return val;
+
+    let s = String(val).trim();
+
+    // Paréntesis contables -> negativo (Ej: (100) -> -100)
+    let negative = false;
+    if (s.startsWith("(") && s.endsWith(")")) {
+      negative = true;
+      s = s.slice(1, -1);
     }
 
-    return parseFloat(strVal) || 0;
+    // Quitar moneda y signos no numéricos (excepto . , -)
+    s = s.replace(/[^\d.,\-+]/g, "").replace(/[\u00A0\u202F\s']/g, "");
+
+    const sign = s.includes("-") ? -1 : 1;
+    s = s.replace(/[+-]/g, "");
+
+    // Detección de separador decimal automático
+    const lastDot = s.lastIndexOf(".");
+    const lastComma = s.lastIndexOf(",");
+    let decimalSep: "." | "," | null = null;
+
+    if (lastDot >= 0 || lastComma >= 0) {
+      if (lastDot > lastComma) decimalSep = ".";
+      else if (lastComma > lastDot) decimalSep = ",";
+      else decimalSep = lastDot >= 0 ? "." : lastComma >= 0 ? "," : null;
+    }
+
+    if (decimalSep === ",") {
+      s = s.replace(/\./g, "").replace(",", ".");
+    } else if (decimalSep === ".") {
+      s = s.replace(/,/g, "");
+    } else {
+      s = s.replace(/[.,]/g, "");
+    }
+
+    const n = parseFloat(s);
+    const final = (negative ? -1 : 1) * sign * (Number.isFinite(n) ? n : 0);
+    return isNaN(final) ? 0 : final;
   },
-  
-  fmt: (val: number): string => 
-    new Intl.NumberFormat('es-ES', { 
-      style: 'currency', 
-      currency: 'EUR', 
-      minimumFractionDigits: 2, // 🚀 FIX: Forzamos que siempre haya 2 decimales
-      maximumFractionDigits: 2  // 🚀 FIX: Evitamos que redondee a enteros
-    }).format(val || 0)
+
+  fmt: (val: number): string =>
+    new Intl.NumberFormat("es-ES", {
+      style: "currency",
+      currency: "EUR",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(Number.isFinite(val) ? val : 0),
+
+  round2: (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100,
 };
 
+/* ===========================
+ * FECHAS ROBUSTAS
+ * =========================== */
 export const DateUtil = {
-  today: () => new Date().toISOString().split('T')[0],
+  today: (): string => new Date().toISOString().split("T")[0],
+
   getMonthBounds: (month: number, year: number) => {
-    const start = new Date(year, month, 1);
-    const end = new Date(year, month + 1, 0);
+    const m = month >= 1 && month <= 12 ? month - 1 : month; // normalizar
+    const start = new Date(year, m, 1);
+    const end = new Date(year, m + 1, 0);
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
     return { start, end };
   },
+
   parse: (d: any): Date => {
     if (!d) return new Date();
     if (d instanceof Date) return d;
-    if (typeof d === 'string' && d.includes('/')) {
-      const [dia, mes, anio] = d.split('/');
-      return new Date(`${anio.length === 2 ? '20' + anio : anio}-${mes}-${dia}`);
+    if (typeof d === "number") return new Date(d);
+
+    const s = String(d).trim();
+    const mEU = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/;
+    const mISO = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
+
+    let y = 0, m = 0, day = 0;
+    if (mEU.test(s)) {
+      const [, dd, mm, yyyy] = s.match(mEU)!;
+      y = Number(yyyy.length === 2 ? "20" + yyyy : yyyy);
+      m = Number(mm) - 1;
+      day = Number(dd);
+      return new Date(y, m, day);
     }
-    return new Date(d);
-  }
+    if (mISO.test(s)) {
+      const [, yyyy, mm, dd] = s.match(mISO)!;
+      y = Number(yyyy);
+      m = Number(mm) - 1;
+      day = Number(dd);
+      return new Date(y, m, day);
+    }
+    return new Date(s);
+  },
 };
 
 export function calcularAmortizacionMensual(activos: Activo[]): number {
   if (!activos || activos.length === 0) return 0;
-  const hoy = new Date();
   let total = 0;
-  activos.forEach(a => {
-    if (!a.fecha_compra || !a.importe || !a.vida_util_meses) return;
-    const vida = a.vida_util_meses;
-    const fecha = new Date(a.fecha_compra);
-    const meses = (hoy.getFullYear() - fecha.getFullYear()) * 12 + (hoy.getMonth() - fecha.getMonth());
-    if (meses >= 0 && meses < vida) total += (a.importe / vida);
-  });
-  return total;
+  const hoy = new Date();
+  for (const a of activos) {
+    const importe = Num.parse(a?.importe);
+    const vida = Number(a?.vida_util_meses);
+    const fCompra = DateUtil.parse(a?.fecha_compra);
+
+    if (!(importe > 0) || !(vida > 0) || isNaN(fCompra.getTime())) continue;
+
+    const meses = (hoy.getFullYear() - fCompra.getFullYear()) * 12 + (hoy.getMonth() - fCompra.getMonth());
+    if (meses >= 0 && meses < vida) {
+      total += importe / vida;
+    }
+  }
+  return Num.round2(total);
 }
 
+/* ===========================
+ * MOTOR PRINCIPAL (ARUME ENGINE)
+ * =========================== */
 export const ArumeEngine = {
+  // 🚀 CALCULADORA DE IMPUESTOS (Para tu Excel de Albaranes)
+  calcularImpuestos: (totalConIva: number, tipoIva: 4 | 10 | 21 = 10) => {
+    const total = Num.parse(totalConIva);
+    const base = total / (1 + (tipoIva / 100));
+    const cuota = total - base;
+    return { 
+      base: Num.round2(base), 
+      cuota: Num.round2(cuota), 
+      total: Num.round2(total) 
+    };
+  },
+
   getProfit: (data: AppData, month: number, year: number) => {
     const { start, end } = DateUtil.getMonthBounds(month, year);
-    const sTime = start.getTime();
-    const eTime = end.getTime();
+    const sMs = start.getTime();
+    const eMs = end.getTime();
 
     // A. INGRESOS
     let cajaZ = 0, facturasB2B = 0;
-    (data.cierres || []).forEach(c => {
-      const d = new Date(c.date).getTime();
-      if (d >= sTime && d <= eTime) cajaZ += Num.parse(c.totalVenta);
-    });
+    for (const c of (data.cierres || [])) {
+      const d = DateUtil.parse(c.date).getTime();
+      if (d >= sMs && d <= eMs) cajaZ += Num.parse(c.totalVenta);
+    }
 
-    (data.facturas || []).forEach(f => {
-      const d = new Date(f.date).getTime();
-      if (d >= sTime && d <= eTime && !String(f.num).toUpperCase().startsWith('Z')) {
-        facturasB2B += Num.parse(f.total);
-      }
-    });
+    for (const f of (data.facturas || [])) {
+      const d = DateUtil.parse(f.date).getTime();
+      if (d < sMs || d > eMs) continue;
+      if (String(f.num ?? "").toUpperCase().startsWith("Z")) continue;
+      facturasB2B += Num.parse(f.total);
+    }
 
-    const totalIngresos = cajaZ + facturasB2B;
+    const totalIngresos = Num.round2(cajaZ + facturasB2B);
 
     // B. GASTOS VARIABLES
     let gComida = 0, gBebida = 0, gOtros = 0;
-    (data.albaranes || []).forEach(a => {
-      const d = new Date(a.date).getTime();
-      if (d >= sTime && d <= eTime) {
-        const total = Num.parse(a.total);
-        const p = (a.prov || '').toLowerCase();
-        if (p.match(/fruta|carne|pesca|makro|mercadona|pan|huevo|verdu|aliment|chef|congelado|lidl|dia|eroski|assortiment|gourmet/)) gComida += total;
-        else if (p.match(/estrella|mahou|coca|vino|bebida|licor|bodega|drinks|cerveza|agua|cafe|schweppes|pepsi/)) gBebida += total;
-        else gOtros += total;
+    for (const a of (data.albaranes || [])) {
+      const d = DateUtil.parse(a.date).getTime();
+      if (d < sMs || d > eMs) continue;
+
+      const total = Num.parse(a.total);
+      const prov = String(a.prov || "").toLowerCase();
+      const cat = String((a as any).category || "").toLowerCase();
+
+      if (cat === 'comida' || prov.match(/fruta|carne|pesca|makro|mercadona|pan|huevo|verdu|aliment|chef|congelad|lidl|dia|eroski|assortiment|gourmet/)) {
+        gComida += total;
+      } else if (cat === 'bebida' || prov.match(/estrella|mahou|coca|vino|bebida|licor|bodega|drinks|cervez|agua|cafe|schweppes|pepsi/)) {
+        gBebida += total;
+      } else {
+        gOtros += total;
       }
-    });
+    }
 
     // C. GASTOS FIJOS
     let gPersonal = 0, gEstructura = 0;
-    (data.gastos_fijos || []).filter(g => g.active !== false).forEach(g => {
+    for (const g of (data.gastos_fijos || [])) {
+      if (g.active === false) continue;
+
       let val = Num.parse(g.amount);
-      if (g.freq === 'anual') val /= 12;
-      else if (g.freq === 'semestral') val /= 6;
-      else if (g.freq === 'trimestral') val /= 3;
-      else if (g.freq === 'bimensual') val /= 2;
-      else if (g.freq === 'semanal') val *= 4.33;
+      const freq = String(g.freq || "").toLowerCase();
+      
+      if (freq === 'anual') val /= 12;
+      else if (freq === 'semestral') val /= 6;
+      else if (freq === 'trimestral') val /= 3;
+      else if (freq === 'bimensual') val /= 2;
+      else if (freq === 'semanal') val *= 4.33;
 
       if (g.cat === 'personal') gPersonal += val;
       else gEstructura += val;
-    });
+    }
 
     // D. AMORTIZACIONES
     const gAmort = calcularAmortizacionMensual(data.activos);
-    const totalGastos = gComida + gBebida + gOtros + gPersonal + gEstructura + gAmort;
+    const totalGastos = Num.round2(gComida + gBebida + gOtros + gPersonal + gEstructura + gAmort);
 
+    // Ratios
+    const safeDiv = (num: number, den: number) => (den ? num / den : 0);
+    
     return {
-      ingresos: { total: totalIngresos, caja: cajaZ, b2b: facturasB2B },
-      gastos: { total: totalGastos, comida: gComida, bebida: gBebida, personal: gPersonal, otros: gOtros, estructura: gEstructura, amortizacion: gAmort },
-      neto: totalIngresos - totalGastos,
+      ingresos: { total: totalIngresos, caja: Num.round2(cajaZ), b2b: Num.round2(facturasB2B) },
+      gastos: { 
+        total: totalGastos, comida: Num.round2(gComida), bebida: Num.round2(gBebida), 
+        personal: Num.round2(gPersonal), otros: Num.round2(gOtros), 
+        estructura: Num.round2(gEstructura), amortizacion: Num.round2(gAmort) 
+      },
+      neto: Num.round2(totalIngresos - totalGastos),
       ratios: {
-        foodCost: totalIngresos ? (gComida / totalIngresos) * 100 : 0,
-        drinkCost: totalIngresos ? (gBebida / totalIngresos) * 100 : 0,
-        staffCost: totalIngresos ? (gPersonal / totalIngresos) * 100 : 0,
-        primeCost: totalIngresos ? ((gComida + gBebida + gPersonal) / totalIngresos) * 100 : 0
+        foodCost: Num.round2(safeDiv(gComida, totalIngresos) * 100),
+        drinkCost: Num.round2(safeDiv(gBebida, totalIngresos) * 100),
+        staffCost: Num.round2(safeDiv(gPersonal, totalIngresos) * 100),
+        primeCost: Num.round2(safeDiv(gComida + gBebida + gPersonal, totalIngresos) * 100)
       }
     };
   }
