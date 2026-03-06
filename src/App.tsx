@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, Package, Wallet, ChefHat, Users, History, Settings, Search,
   ArrowUpRight, ArrowDownRight, TrendingUp, AlertCircle, X, Download, RefreshCw,
-  FileText, Truck, Scale, Zap, Building2, PieChart, Lock, Handshake, Import, Database
+  FileText, Truck, Scale, Zap, Building2, PieChart, Lock, Handshake, Import, Database,
+  Sparkles // ✨ IMPORTAMOS EL ICONO DE LAS ESTRELLITAS
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -26,6 +27,7 @@ import { MenuView } from './components/MenuView';
 import { CierreContableView } from './components/CierreContableView';
 import { StockView } from './components/StockView';
 import { DashboardView } from './components/DashboardView';
+import { AIConsultant } from './components/AIConsultant'; // 🤖 IMPORTAMOS TU NUEVA IA
 import { NavButton } from './components/NavButton';
 import { SettingsModal } from './components/SettingsModal';
 
@@ -157,6 +159,7 @@ export default function App() {
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard': return <DashboardView data={db} />;
+      case 'ia': return <AIConsultant data={db} />; // 🤖 AÑADIMOS LA PANTALLA DE LA IA
       case 'diario': return <CashView data={db} onSave={handleSave} />;
       case 'importador': return <ImportView data={db} onSave={handleSave} onNavigate={setActiveTab} />;
       case 'facturas': return <InvoicesView data={db} onSave={handleSave} />;
@@ -227,6 +230,10 @@ export default function App() {
         <nav id="navbar-container">
           <div className="flex items-center justify-between w-full overflow-x-auto gap-4 px-6 py-3 no-scrollbar">
             <NavButton icon={LayoutDashboard} label="Dash" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
+            
+            {/* ✨ AÑADIMOS EL BOTÓN EN EL MENÚ INFERIOR ✨ */}
+            <NavButton icon={Sparkles} label="IA" active={activeTab === 'ia'} onClick={() => setActiveTab('ia')} />
+            
             <NavButton icon={Wallet} label="Diar" active={activeTab === 'diario'} onClick={() => setActiveTab('diario')} />
             <NavButton icon={Import} label="Impo" active={activeTab === 'importador'} onClick={() => setActiveTab('importador')} />
             <NavButton icon={FileText} label="Fact" active={activeTab === 'facturas'} onClick={() => setActiveTab('facturas')} />
