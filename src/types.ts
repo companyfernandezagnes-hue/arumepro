@@ -1,3 +1,14 @@
+export interface AppConfig {
+  objetivoMensual: number;
+  empresa?: string;
+  n8nUrlBanco?: string;
+  n8nUrlIA?: string;
+  telegramToken?: string;
+  telegramChatId?: string;
+  saldoInicial?: number;
+  [key: string]: any;
+}
+
 export interface BankMovement {
   id: string;
   date: string;
@@ -8,6 +19,7 @@ export interface BankMovement {
   linkId?: string;
   hash?: string;
   source?: string;
+  category?: string;
 }
 
 export interface User {
@@ -65,16 +77,18 @@ export interface Factura {
   total: number;
   base?: number;
   tax?: number;
+  taxes?: number;
   dueDate?: string;
   reconciled?: boolean;
   albaranIds?: string;
   albaranIdsArr?: string[];
-  status?: 'draft' | 'approved';
-  source?: 'email-ia' | 'manual-group' | 'direct';
+  status?: 'draft' | 'approved' | 'rejected';
+  source?: 'email-ia' | 'manual-group' | 'direct' | 'manual';
 }
 
 export interface Albaran {
   id: string;
+  company_id?: string; // Preparado para SaaS
   uid?: string;
   num?: string;
   date: string;
@@ -159,15 +173,7 @@ export interface CierreMensual {
 
 export interface AppData {
   lastSync?: number;
-  config: {
-    objetivoMensual: number;
-    empresa?: string;
-    n8nUrlBanco?: string;
-    n8nUrlIA?: string;
-    telegramToken?: string;
-    telegramChatId?: string;
-    [key: string]: any;
-  };
+  config: AppConfig;
   banco: BankMovement[];
   users: User[];
   kardex: KardexEntry[];
