@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Download, RefreshCw } from 'lucide-react';
 import { AppData } from '../types';
 import { NotificationService } from '../services/notifications';
+import { ExportTools } from './ExportTools'; // 🚀 La nueva herramienta del código 1
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -30,7 +31,8 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.95, opacity: 0 }}
-        className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl relative z-10"
+        // 🚀 FIX: Añadido overflow para que no se corte en pantallas pequeñas de móvil
+        className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl relative z-10 max-h-[90vh] overflow-y-auto custom-scrollbar"
       >
         <button onClick={onClose} className="absolute top-6 right-6 text-slate-300 hover:text-slate-500 text-2xl transition">✕</button>
         
@@ -41,6 +43,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
         </header>
 
         <div className="space-y-6">
+          {/* --- BLOQUE 1: DATOS Y CREDENCIALES --- */}
           <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100">
             <label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-2">Objetivo Mensual (€)</label>
             <div className="flex gap-2 mb-4">
@@ -113,7 +116,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
             </button>
           </div>
 
-          {/* Integration Status */}
+          {/* --- BLOQUE 2: INDICADORES VISUALES (Mantenemos tu diseño de GitHub) --- */}
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div className={`p-3 rounded-2xl border flex items-center gap-2 ${db?.config?.n8nUrlIA ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700'}`}>
               <div className={`w-2 h-2 rounded-full ${db?.config?.n8nUrlIA ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></div>
@@ -124,16 +127,19 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
               <span className="text-[9px] font-black uppercase tracking-tighter">Telegram Bot</span>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <button className="p-5 bg-emerald-50 border border-emerald-100 rounded-3xl flex flex-col items-center gap-2 hover:bg-emerald-100 transition group">
-              <Download className="w-6 h-6 text-emerald-600 group-hover:scale-110 transition-transform" />
-              <span className="text-[10px] font-black text-emerald-700 uppercase">Backup</span>
-            </button>
-            <button onClick={() => window.location.reload()} className="p-5 bg-slate-100 border border-slate-200 rounded-3xl flex flex-col items-center gap-2 hover:bg-slate-200 transition group">
-              <RefreshCw className="w-6 h-6 text-slate-600 group-hover:rotate-180 transition-transform duration-500" />
-              <span className="text-[10px] font-black text-slate-600 uppercase">Recargar</span>
+
+          {/* --- BLOQUE 3: HERRAMIENTAS DE EXPORTACIÓN Y BACKUP --- */}
+          {/* Aquí inyectamos el nuevo componente que maneja Excel, PDF y Backups */}
+          <ExportTools db={db} onSave={onSave} />
+
+          {/* --- BLOQUE 4: RECARGAR APP --- */}
+          <div className="flex justify-center mt-2">
+            <button onClick={() => window.location.reload()} className="w-full p-4 bg-slate-100 border border-slate-200 rounded-2xl flex items-center justify-center gap-2 hover:bg-slate-200 transition group">
+              <RefreshCw className="w-5 h-5 text-slate-600 group-hover:rotate-180 transition-transform duration-500" />
+              <span className="text-[10px] font-black text-slate-600 uppercase">Recargar App</span>
             </button>
           </div>
+
         </div>
       </motion.div>
     </div>
