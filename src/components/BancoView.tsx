@@ -1,19 +1,8 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { 
-  Building2, 
-  Search, 
-  Trash2, 
-  Clipboard, 
-  Upload, 
-  Zap, 
-  CheckCircle2, 
-  X, 
-  ArrowRight,
-  TrendingUp,
-  TrendingDown,
-  Scale,
-  Settings,
-  RefreshCw
+  Building2, Search, Trash2, Clipboard, Upload, Zap, 
+  CheckCircle2, ArrowRight, TrendingUp, TrendingDown, 
+  Scale, Settings, RefreshCw, ShoppingCart 
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppData, Albaran, Factura } from '../types';
@@ -75,12 +64,8 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
           const fZ = data.facturas?.find(f => f.num === zNum);
           if (fZ && !fZ.reconciled) {
             results.push({ 
-              type: 'FACTURA Z', 
-              id: fZ.id, 
-              date: c.date, 
-              title: `Cierre Caja ${c.date}`, 
-              amount: Num.parse(c.tarjeta),
-              color: 'emerald'
+              type: 'FACTURA Z', id: fZ.id, date: c.date, 
+              title: `Cierre Caja ${c.date}`, amount: Num.parse(c.tarjeta), color: 'emerald'
             });
           }
         }
@@ -88,12 +73,8 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
       data.facturas?.forEach(f => {
         if (f.cliente !== "Z DIARIO" && !f.reconciled && Num.parse(f.total) > 0 && Math.abs(Num.parse(f.total) - amt) <= 2) {
           results.push({ 
-            type: 'FACTURA CLIENTE', 
-            id: f.id, 
-            date: f.date, 
-            title: `Fac ${f.num} (${f.cliente})`, 
-            amount: Num.parse(f.total),
-            color: 'teal'
+            type: 'FACTURA CLIENTE', id: f.id, date: f.date, 
+            title: `Fac ${f.num} (${f.cliente})`, amount: Num.parse(f.total), color: 'teal'
           });
         }
       });
@@ -102,24 +83,16 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
       data.albaranes?.forEach(a => {
         if (!a.reconciled && Math.abs(Num.parse(a.total) - amt) <= 2) {
           results.push({ 
-            type: 'ALBARÁN', 
-            id: a.id, 
-            date: a.date, 
-            title: `${a.prov} (${a.num})`, 
-            amount: Num.parse(a.total),
-            color: 'indigo'
+            type: 'ALBARÁN', id: a.id, date: a.date, 
+            title: `${a.prov} (${a.num})`, amount: Num.parse(a.total), color: 'indigo'
           });
         }
       });
       data.facturas?.forEach(f => {
         if (Num.parse(f.total) < 0 && !f.reconciled && Math.abs(Math.abs(Num.parse(f.total)) - amt) <= 2) {
           results.push({ 
-            type: 'FACTURA PROV', 
-            id: f.id, 
-            date: f.date, 
-            title: `Fac ${f.num} (${f.prov || 'Prov'})`, 
-            amount: Math.abs(Num.parse(f.total)),
-            color: 'rose'
+            type: 'FACTURA PROV', id: f.id, date: f.date, 
+            title: `Fac ${f.num} (${f.prov || 'Prov'})`, amount: Math.abs(Num.parse(f.total)), color: 'rose'
           });
         }
       });
@@ -146,61 +119,123 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
     setSelectedBankId(null);
   };
 
-  const handleQuickAction = async (bankId: string, label: string, type: 'EXPENSE' | 'TPV' | 'CASH' | 'TRANS' | 'OTHER') => {
+  // 🚀 FIX CRÍTICO: Nueva lógica de acciones rápidas (Separa Gastos Fijos de Albaranes e Ingresos)
+  const handleQuickAction = async (bankId: string, label: string, type: 'ALBARAN' | 'FIXED_EXPENSE' | 'TPV' | 'CASH' | 'INCOME') => {
     const newData = { ...data };
     const item = newData.banco.find(b => b.id === bankId);
     if (!item) return;
 
-    if (type === 'EXPENSE') {
-      if (label === 'Gasto Fijo') {
-        const amt = Math.abs(Num.parse(item.amount));
-        const d = new Date(item.date);
-        const monthKey = `pagos_${d.getFullYear()}_${d.getMonth() + 1}`;
-        
-        if (!newData.control_pagos) newData.control_pagos = {};
-        if (!newData.control_pagos[monthKey]) newData.control_pagos[monthKey] = [];
-        
-        // Intentar buscar un gasto fijo pendiente con importe similar
-        const pendingFixed = (newData.gastos_fijos || []).find(g => 
-          g.active !== false && 
-          !newData.control_pagos[monthKey].includes(g.id) &&
-          Math.abs(Num.parse(g.amount) - amt) < 20 // Tolerancia de 20€
-        );
+    const amtRaw = Num.parse(item.amount);
+    const amt = Math.abs(amtRaw);
 
-        if (pendingFixed) {
-          newData.control_pagos[monthKey].push(pendingFixed.id);
-        }
+    if (type === 'FIXED_EXPENSE') {
+      // Es un gasto recurrente (Nómina, Alquiler...)
+      const d = new Date(item.date);
+      const monthKey = `pagos_${d.getFullYear()}_${d.getMonth() + 1}`;
+      
+      if (!newData.control_pagos) newData.control_pagos = {};
+      if (!newData.control_pagos[monthKey]) newData.control_pagos[monthKey] = [];
+      
+      const isPersonal = label.includes('Personal') || label.includes('Nómina');
+      
+      // Intentar buscar un gasto fijo pendiente este mes con importe similar
+      const pendingFixed = (newData.gastos_fijos || []).find(g => 
+        g.active !== false && 
+        g.cat === (isPersonal ? 'personal' : 'varios') &&
+        !newData.control_pagos[monthKey].includes(g.id) &&
+        Math.abs(Num.parse(g.amount) - amt) < 50 // Tolerancia amplia para nóminas variables
+      );
+
+      if (pendingFixed) {
+        newData.control_pagos[monthKey].push(pendingFixed.id);
       } else {
-        const newAlb: Albaran = {
-          id: 'auto-' + Date.now(),
-          date: item.date,
-          prov: label,
-          num: "BANCO",
-          total: Math.abs(Num.parse(item.amount)),
-          paid: true,
-          status: 'ok',
-          reconciled: true,
-          category: label === 'Comisión Bancaria' ? 'Financiero' : 'Gastos Varios',
-          items: []
-        };
-        newData.albaranes.push(newAlb);
+        // Auto-crear el gasto recurrente para que el sistema ya lo conozca el mes que viene
+        const newFixedId = 'gf-' + Date.now();
+        if (!newData.gastos_fijos) newData.gastos_fijos = [];
+        newData.gastos_fijos.push({
+          id: newFixedId,
+          name: `${label} (Detectado Auto)`,
+          amount: amt,
+          freq: 'mensual',
+          dia_pago: d.getDate(),
+          cat: isPersonal ? 'personal' : 'varios',
+          active: true
+        });
+        newData.control_pagos[monthKey].push(newFixedId);
       }
+
+    } else if (type === 'ALBARAN') {
+      // Es una compra de material/proveedor
+      if (!newData.albaranes) newData.albaranes = [];
+      newData.albaranes.push({
+        id: 'auto-alb-' + Date.now(),
+        date: item.date,
+        prov: label,
+        num: "BANCO",
+        total: amt,
+        paid: true,
+        status: 'ok',
+        reconciled: true,
+        category: label === 'Comisión Bancaria' ? 'Financiero' : 'Gastos Varios',
+        items: []
+      });
+
+    } else if (type === 'INCOME') {
+      // Es un ingreso extraordinario o factura cobrada
+      if (!newData.facturas) newData.facturas = [];
+      newData.facturas.push({
+        id: 'auto-fac-' + Date.now(),
+        date: item.date,
+        num: `ING-${Date.now().toString().slice(-4)}`,
+        cliente: label,
+        total: amt,
+        base: amt,
+        taxes: 0,
+        reconciled: true,
+        paid: true,
+        items: []
+      });
+
     } else if (type === 'TPV') {
-      // Intentar buscar el cierre más cercano si no está ya en matches
-      const amt = Math.abs(Num.parse(item.amount));
+      // Cierre de Caja con Tarjetas
+      if (!newData.cierres) newData.cierres = [];
+      if (!newData.facturas) newData.facturas = [];
+
       const zMatch = newData.cierres.find(c => !c.conciliado_banco && Math.abs(Num.parse(c.tarjeta) - amt) <= 5);
+      
       if (zMatch) {
         zMatch.conciliado_banco = true;
         const zNum = `Z-${zMatch.date.replace(/-/g, '')}`;
         const fZ = newData.facturas.find(f => f.num === zNum);
         if (fZ) fZ.reconciled = true;
+      } else {
+        // Si no existe, LO CREAMOS para que cuadre la caja
+        newData.cierres.push({
+          id: 'z-auto-' + Date.now(),
+          date: item.date,
+          totalVenta: amt,
+          efectivo: 0,
+          tarjeta: amt,
+          apps: 0,
+          tickets: 1,
+          conciliado_banco: true
+        });
+        newData.facturas.push({
+          id: 'fac-z-auto-' + Date.now(),
+          date: item.date,
+          num: `Z-${item.date.replace(/-/g, '')}`,
+          cliente: 'Z DIARIO AUTO',
+          total: amt,
+          base: amt / 1.10, // Base estimada
+          taxes: amt - (amt / 1.10),
+          reconciled: true,
+          paid: true,
+          items: []
+        });
       }
     } else if (type === 'CASH') {
-      const amt = Math.abs(Num.parse(item.amount));
-      const cMatch = newData.cierres.find(c => !c.conciliado_banco && Math.abs(Num.parse(c.efectivo) - amt) <= 50);
-      if (cMatch) {
-        cMatch.conciliado_banco = true;
-      }
+      const cMatch = newData.cierres?.find(c => !c.conciliado_banco && Math.abs(Num.parse(c.efectivo) - amt) <= 50);
+      if (cMatch) cMatch.conciliado_banco = true;
     }
 
     item.status = 'matched';
@@ -208,6 +243,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
     setSelectedBankId(null);
   };
 
+  // 🚀 FIX CRÍTICO: Impedimos que la IA convierta ingresos en gastos
   const handleMagicMatch = async () => {
     const pendings = filteredMovements.slice(0, 25);
     if (pendings.length === 0) return;
@@ -230,35 +266,78 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
           const item = newData.banco.find(b => b.id === mov.id);
           if (!item) continue;
 
-          if (mov.esCierreTPV) {
-            const zMatch = newData.cierres.find(c => !c.conciliado_banco && Math.abs(Num.parse(c.tarjeta) - Math.abs(Num.parse(item.amount))) <= 5);
-            if (zMatch) {
-              zMatch.conciliado_banco = true;
-              const fZ = newData.facturas.find(f => f.num === `Z-${zMatch.date.replace(/-/g, '')}`);
-              if (fZ) fZ.reconciled = true;
+          const amtRaw = Num.parse(item.amount);
+
+          if (amtRaw > 0) {
+            // ES UN INGRESO (+) -> Buscar cierre o crear Factura
+            if (mov.esCierreTPV) {
+              const zMatch = newData.cierres?.find(c => !c.conciliado_banco && Math.abs(Num.parse(c.tarjeta) - Math.abs(amtRaw)) <= 5);
+              if (zMatch) {
+                zMatch.conciliado_banco = true;
+                const fZ = newData.facturas?.find(f => f.num === `Z-${zMatch.date.replace(/-/g, '')}`);
+                if (fZ) fZ.reconciled = true;
+              }
+            } else {
+              // Ingreso desconocido
+              if (!newData.facturas) newData.facturas = [];
+              newData.facturas.push({
+                id: 'fac-ia-' + Date.now(),
+                date: item.date,
+                num: `ING-${Date.now().toString().slice(-4)}`,
+                cliente: mov.categoriaAsignada || 'Ingreso Banco',
+                total: amtRaw,
+                reconciled: true,
+                paid: true,
+                items: []
+              });
             }
-            item.status = 'matched';
-            count++;
-          } else if (mov.categoriaAsignada && mov.confidence >= 0.7) {
-            const newAlb: Albaran = {
-              id: 'ia-' + Date.now() + Math.random(),
-              date: item.date,
-              prov: mov.categoriaAsignada + ' (IA)',
-              num: "BANCO",
-              total: Math.abs(Num.parse(item.amount)),
-              paid: true,
-              status: 'ok',
-              reconciled: true,
-              category: mov.categoriaAsignada,
-              items: []
-            };
-            newData.albaranes.push(newAlb);
-            item.status = 'matched';
-            count++;
+          } else {
+            // ES UN GASTO (-) -> Ir a Gastos Fijos o Albaranes
+            if (mov.categoriaAsignada && mov.confidence >= 0.7) {
+              const catLower = mov.categoriaAsignada.toLowerCase();
+              if (catLower.includes('personal') || catLower.includes('nómina') || catLower.includes('alquiler')) {
+                 // Tratamos como Gasto recurrente, no como Albarán
+                 const d = new Date(item.date);
+                 const monthKey = `pagos_${d.getFullYear()}_${d.getMonth() + 1}`;
+                 if (!newData.control_pagos) newData.control_pagos = {};
+                 if (!newData.control_pagos[monthKey]) newData.control_pagos[monthKey] = [];
+                 
+                 // Crear gasto fijo si la IA lo detecta
+                 const newFixedId = 'gf-ia-' + Date.now();
+                 if (!newData.gastos_fijos) newData.gastos_fijos = [];
+                 newData.gastos_fijos.push({
+                    id: newFixedId,
+                    name: mov.categoriaAsignada,
+                    amount: Math.abs(amtRaw),
+                    freq: 'mensual',
+                    dia_pago: d.getDate(),
+                    cat: catLower.includes('personal') ? 'personal' : 'varios',
+                    active: true
+                 });
+                 newData.control_pagos[monthKey].push(newFixedId);
+              } else {
+                 // Gasto normal de compras
+                 if (!newData.albaranes) newData.albaranes = [];
+                 newData.albaranes.push({
+                   id: 'ia-' + Date.now() + Math.random(),
+                   date: item.date,
+                   prov: mov.categoriaAsignada + ' (IA)',
+                   num: "BANCO",
+                   total: Math.abs(amtRaw),
+                   paid: true,
+                   status: 'ok',
+                   reconciled: true,
+                   category: mov.categoriaAsignada,
+                   items: []
+                 });
+              }
+            }
           }
+          item.status = 'matched';
+          count++;
         }
         await onSave(newData);
-        alert(`✨ IA ha conciliado ${count} movimientos.`);
+        alert(`✨ IA ha conciliado ${count} movimientos adecuadamente.`);
       }
     } catch (err) {
       console.error(err);
@@ -281,10 +360,10 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
       const rows: any[] = XLSX.utils.sheet_to_json(ws);
 
       const newData = { ...data };
+      if (!newData.banco) newData.banco = [];
       let imported = 0;
 
       rows.forEach(row => {
-        // Simple mapping logic
         const date = row.Fecha || row.Date || row.date;
         const amount = row.Importe || row.Amount || row.amount;
         const desc = row.Concepto || row.Description || row.desc;
@@ -292,7 +371,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
         if (date && amount) {
           newData.banco.push({
             id: 'imp-' + Date.now() + Math.random(),
-            date: new Date(date).toISOString().split('T')[0],
+            date: new Date(date).toISOString().split('T')[0] || date,
             amount: Num.parse(amount),
             desc: desc || 'Importado',
             status: 'pending',
@@ -501,23 +580,22 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
                       <Zap className="w-3 h-3 text-indigo-500" />
                       ⚡ Creación Rápida
                     </h4>
+                    {/* 🚀 FIX: Mostramos botones diferentes dependiendo de si es ingreso o gasto */}
                     <div className="grid grid-cols-2 gap-3">
                       {(Num.parse(selectedItem.amount) > 0 ? [
                         { label: 'Cierre TPV (Tarjetas)', icon: TrendingUp, type: 'TPV' as const },
                         { label: 'Ingreso Efectivo', icon: Building2, type: 'CASH' as const },
-                        { label: 'Transferencia Interna', icon: RefreshCw, type: 'TRANS' as const },
-                        { label: 'Otros Ingresos', icon: TrendingUp, type: 'OTHER' as const }
+                        { label: 'Otros Ingresos', icon: TrendingUp, type: 'INCOME' as const }
                       ] : [
-                        { label: 'Gasto Fijo', icon: Zap, type: 'EXPENSE' as const },
-                        { label: 'Comisión Bancaria', icon: Building2, type: 'EXPENSE' as const },
-                        { label: 'Suministros', icon: Zap, type: 'EXPENSE' as const },
-                        { label: 'Personal', icon: TrendingDown, type: 'EXPENSE' as const },
-                        { label: 'Alquiler', icon: Scale, type: 'EXPENSE' as const }
+                        { label: 'Gasto Recurrente / Fijo', icon: Zap, type: 'FIXED_EXPENSE' as const },
+                        { label: 'Personal / Nómina', icon: TrendingDown, type: 'FIXED_EXPENSE' as const },
+                        { label: 'Comisión Bancaria', icon: Building2, type: 'ALBARAN' as const },
+                        { label: 'Compra a Proveedor', icon: ShoppingCart, type: 'ALBARAN' as const }
                       ]).map(cat => (
                         <button 
                           key={cat.label}
                           onClick={() => handleQuickAction(selectedItem.id, cat.label, cat.type)}
-                          className="p-4 border border-slate-100 rounded-2xl hover:bg-slate-50 text-left transition group"
+                          className="p-4 border border-slate-100 rounded-2xl hover:bg-slate-50 text-left transition group cursor-pointer"
                         >
                           <cat.icon className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 mb-2 transition-colors" />
                           <p className="text-[10px] font-black text-slate-600 uppercase">{cat.label}</p>
