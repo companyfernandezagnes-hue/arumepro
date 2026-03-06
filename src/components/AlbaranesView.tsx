@@ -1,11 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { 
   Truck, Search, Plus, Zap, Download, Trash2, 
-  CheckCircle2, Clock
+  CheckCircle2, Clock, FileSpreadsheet, Calculator
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppData, Albaran } from '../types';
-import { Num } from '../services/engine';
+import { Num, ArumeEngine } from '../services/engine';
 import { cn } from '../lib/utils';
 import { proxyFetch } from '../services/api';
 
@@ -33,11 +33,20 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     forceDup: false
   });
 
+  // 🚀 NUEVO: Estado para la Calculadora Rápida de IVA
+  const [quickCalc, setQuickCalc] = useState({ name: '', total: '', iva: 10 });
+
   // Modal State
   const [editingAlbaran, setEditingAlbaran] = useState<Albaran | null>(null);
 
   // --- HELPERS ---
   const norm = (s: string) => (s || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+  // 🚀 NUEVO: Autocompletar proveedores basado en histórico
+  const uniqueProviders = useMemo(() => {
+    const provs = (data.albaranes || []).map(a => a.prov).filter(Boolean);
+    return Array.from(new Set(provs)).sort();
+  }, [data.albaranes]);
 
   const parseSmartLine = (line: string) => {
     let clean = line.replace(/[€$]/g, '').replace(/,/g, '.').trim();
@@ -91,6 +100,106 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   }, [analyzedItems]);
 
   // --- ACTIONS ---
+  
+  // 🚀 NUEVO: Insertar desde Calculadora Rápida
+  const handleQuickAdd = () => {
+    const t = Num.parse(quickCalc.total);
+    if (t > 0 && quickCalc.name) {
+      // Usamos el motor para asegurar precisión decimal
+      const calc = ArumeEngine.calcularImpuestos(t, quickCalc.iva as any);
+      const newLine = `1x ${quickCalc.name} ${quickCalc.iva}% ${calc.total.toFixed(2)}`;
+      
+      setForm(prev => ({ 
+        ...prev, 
+        text: prev.text ? `${prev.text}\n${newLine}` : newLine 
+      }));
+      setQuickCalc({ name: '', total: '', iva: 10 }); // Reset
+    }
+  };
+
+  // 🚀 NUEVO: Importador de CSV de n8n
+  const handleCSVImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsAnalyzing(true);
+    try {
+      const text = await file.text();
+      // Lector CSV robusto para comillas (ej: "AGUA, SIERRA")
+      const parseCSVLine = (str: string) => {
+        const re = /(?:\"([^\"]*(?:\"\"[^\"]*)*)\"|([^,\r\n]*))/g;
+        let result = [], match;
+        while ((match = re.exec(str)) !== null) {
+          if (match.index === re.lastIndex) re.lastIndex++;
+          result.push(match[1] !== undefined ? match[1].replace(/\"\"/g, '\"') : match[2]);
+        }
+        return result.filter(v => v !== undefined);
+      };
+
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      const newAlbaranesMap = new Map<string, Albaran>();
+
+      for(let i = 1; i < lines.length; i++) { // Saltamos la cabecera
+        const cols = parseCSVLine(lines[i]);
+        if (cols.length < 8) continue;
+
+        // Columnas Excel: 0=Fecha, 1=Prov, 2=nº albaran, 3=nombre, 4=Cantidad, 5=Precio Base, 6=IVA, 7=total, 8=Link Drive
+        let rawDate = cols[0];
+        let date = rawDate.includes('/') ? rawDate.split('/').reverse().join('-') : rawDate; // Convierte 02/02/2026 a 2026-02-02
+        let prov = cols[1];
+        let num = cols[2] || "S/N";
+        let name = cols[3];
+        let qty = Num.parse(cols[4] || 1);
+        let base = Num.parse(cols[5]);
+        let ivaRaw = cols[6] || "10%";
+        let total = Num.parse(cols[7]);
+        let link = cols[8];
+
+        let rate = 10;
+        if (ivaRaw.includes('21')) rate = 21;
+        if (ivaRaw.includes('4')) rate = 4;
+
+        const key = `${prov}|${date}|${num}`;
+        if (!newAlbaranesMap.has(key)) {
+          newAlbaranesMap.set(key, {
+            id: `csv-${Date.now()}-${Math.random().toString(36).substring(2)}`,
+            prov, date, num, socio: 'Arume', notes: 'Importado de CSV n8n',
+            items: [], total: 0, base: 0, taxes: 0, invoiced: false, paid: false, status: 'ok', reconciled: false, link_foto: link
+          });
+        }
+
+        const alb = newAlbaranesMap.get(key)!;
+        const tax = total - base;
+        alb.items.push({ q: qty, n: name, t: total, rate, base, tax, unit: qty > 0 ? base/qty : base });
+        alb.total = Num.round2(alb.total + total);
+        alb.base = Num.round2(alb.base + base);
+        alb.taxes = Num.round2(alb.taxes + tax);
+      }
+
+      // Evitar duplicados revisando si ya existe un albarán con esa fecha, num y proveedor
+      const finalAlbaranes = Array.from(newAlbaranesMap.values()).filter(newAlb => 
+        !(data.albaranes || []).some(oldAlb => 
+          oldAlb.date === newAlb.date && norm(oldAlb.prov) === norm(newAlb.prov) && oldAlb.num === newAlb.num
+        )
+      );
+
+      if (finalAlbaranes.length > 0) {
+        const newData = { ...data };
+        newData.albaranes = [...(newData.albaranes || []), ...finalAlbaranes];
+        await onSave(newData);
+        alert(`¡Éxito! Se han importado ${finalAlbaranes.length} albaranes nuevos del Excel.`);
+      } else {
+        alert("El Excel ha sido procesado, pero todos los albaranes ya existían en el sistema (Sin duplicados).");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("⚠️ Error leyendo el archivo CSV. Asegúrate de que es el formato de n8n.");
+    } finally {
+      setIsAnalyzing(false);
+      e.target.value = '';
+    }
+  };
+
   const handleN8NScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -124,27 +233,23 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     }
   };
 
-  // 🚀 FIX CRÍTICO: Esta función estaba rota y suelta en tu código
   const handleSaveAlbaran = async () => {
     if (!form.prov) {
       alert("Por favor, introduce el nombre del proveedor.");
       return;
     }
 
-    // Hacemos una copia segura de los datos actuales
     const newData = { ...data };
     if (!newData.albaranes) newData.albaranes = [];
 
-    // --- INTELIGENCIA DE AGRUPACIÓN ---
     const existingIdx = newData.albaranes.findIndex(a => 
-      !a.invoiced && // Solo agrupamos si no está facturado
+      !a.invoiced && 
       norm(a.prov) === norm(form.prov) && 
       a.date === form.date && 
       a.socio === form.socio
     );
 
     if (existingIdx !== -1 && !form.forceDup) {
-      // Agrupamos en el existente
       const existing = newData.albaranes[existingIdx];
       
       const newItems = analyzedItems.filter(newItem => 
@@ -154,29 +259,28 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         )
       );
 
-      // Si hay items válidos nuevos, los sumamos preservando decimales
       if (newItems.length > 0) {
         existing.items = [...(existing.items || []), ...newItems.map(item => item!)];
-        existing.total = (Num.parse(existing.total) || 0) + newItems.reduce((acc, it) => acc + (it?.t || 0), 0);
-        existing.base = (Num.parse(existing.base) || 0) + newItems.reduce((acc, it) => acc + (it?.base || 0), 0);
-        existing.taxes = (Num.parse(existing.taxes) || 0) + newItems.reduce((acc, it) => acc + (it?.tax || 0), 0);
+        existing.total = Num.round2((Num.parse(existing.total) || 0) + newItems.reduce((acc, it) => acc + (it?.t || 0), 0));
+        existing.base = Num.round2((Num.parse(existing.base) || 0) + newItems.reduce((acc, it) => acc + (it?.base || 0), 0));
+        existing.taxes = Num.round2((Num.parse(existing.taxes) || 0) + newItems.reduce((acc, it) => acc + (it?.tax || 0), 0));
         existing.notes = existing.notes ? `${existing.notes} | ${form.notes}` : form.notes;
         existing.paid = existing.paid || form.paid;
       }
     } else {
-      // Creamos un albarán totalmente nuevo
       const taxesArray = Object.values(liveTotals.taxes) as { b: number; i: number }[];
       const newAlbaran: Albaran = {
-        id: Date.now().toString(),
+        // 🚀 FIX: Usamos un ID más robusto anti-colisiones como aconsejó GPT
+        id: `man-${Date.now()}-${Math.random().toString(36).substring(2)}`,
         prov: form.prov,
         date: form.date,
         num: form.num || "S/N",
         socio: form.socio,
         notes: form.notes,
-        items: analyzedItems.map(item => item!), // Aseguramos que no hay nulls
-        total: liveTotals.grandTotal,
-        base: taxesArray.reduce((acc, t) => acc + t.b, 0),
-        taxes: taxesArray.reduce((acc, t) => acc + t.i, 0),
+        items: analyzedItems.map(item => item!), 
+        total: Num.round2(liveTotals.grandTotal),
+        base: Num.round2(taxesArray.reduce((acc, t) => acc + t.b, 0)),
+        taxes: Num.round2(taxesArray.reduce((acc, t) => acc + t.i, 0)),
         invoiced: false,
         paid: form.paid,
         status: 'ok',
@@ -185,10 +289,8 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       newData.albaranes.push(newAlbaran);
     }
 
-    // Guardamos en el estado global/nube
     await onSave(newData);
 
-    // Reseteamos el formulario
     setForm({
       prov: '',
       date: new Date().toISOString().split('T')[0],
@@ -244,14 +346,28 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
   return (
     <div className="animate-fade-in space-y-6 pb-24">
+      {/* 🚀 NUEVO: Datalist para el buscador inteligente de proveedores */}
+      <datalist id="providers-list">
+        {uniqueProviders.map(p => <option key={p} value={p} />)}
+      </datalist>
+
       {/* Header */}
       <header className="flex flex-col md:flex-row justify-between items-center bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 gap-4">
         <div>
           <h2 className="text-xl font-black text-slate-800 tracking-tighter">Albaranes & Gastos</h2>
-          <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest">Control Financiero v12.4</p>
+          <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest">Control Financiero v13.0</p>
         </div>
         <div className="flex gap-2 items-center flex-wrap justify-center">
-          <label className="bg-gradient-to-r from-emerald-400 to-teal-500 text-white px-5 py-3 rounded-2xl text-[10px] font-black hover:shadow-lg hover:scale-105 transition cursor-pointer shadow-md flex items-center gap-2">
+          
+          {/* 🚀 BOTÓN NUEVO: Importar CSV de n8n */}
+          <label className="bg-gradient-to-r from-emerald-500 to-green-600 text-white px-5 py-3 rounded-2xl text-[10px] font-black hover:shadow-lg hover:scale-105 transition cursor-pointer shadow-md flex items-center gap-2">
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>SINCRONIZAR CSV</span>
+            <input type="file" onChange={handleCSVImport} className="hidden" accept=".csv" />
+          </label>
+
+          {/* Botón Escanear Original */}
+          <label className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-5 py-3 rounded-2xl text-[10px] font-black hover:shadow-lg hover:scale-105 transition cursor-pointer shadow-md flex items-center gap-2">
             <Zap className="w-4 h-4" />
             <span>ESCANEAR TICKET (IA)</span>
             <input type="file" onChange={handleN8NScan} className="hidden" accept="image/*, application/pdf" />
@@ -285,7 +401,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
             {isAnalyzing && (
               <div className="absolute inset-0 bg-white/95 z-20 flex flex-col items-center justify-center text-center p-4 backdrop-blur-sm">
                 <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-3"></div>
-                <p className="text-xs font-black text-indigo-600 animate-pulse uppercase tracking-widest">Analizando Factura...</p>
+                <p className="text-xs font-black text-indigo-600 animate-pulse uppercase tracking-widest">Sincronizando n8n...</p>
               </div>
             )}
 
@@ -297,6 +413,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
               <input 
                 value={form.prov}
                 onChange={(e) => setForm({ ...form, prov: e.target.value })}
+                list="providers-list"
                 type="text" 
                 placeholder="Proveedor (ej: Makro)" 
                 className="w-full p-3 bg-slate-50 rounded-xl text-sm font-bold border-0 outline-none focus:ring-2 focus:ring-indigo-500 transition"
@@ -326,6 +443,32 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
               </select>
             </div>
 
+            {/* 🚀 NUEVO: Calculadora Rápida de IVA */}
+            <div className="bg-slate-100 rounded-xl p-3 mb-3 flex gap-2 items-center">
+              <Calculator className="w-4 h-4 text-slate-400 shrink-0" />
+              <input 
+                type="text" placeholder="Prod..." value={quickCalc.name}
+                onChange={e => setQuickCalc({...quickCalc, name: e.target.value})}
+                className="flex-1 bg-white text-[10px] font-bold p-2 rounded-lg border-0 outline-none"
+              />
+              <input 
+                type="number" placeholder="Tot €" value={quickCalc.total}
+                onChange={e => setQuickCalc({...quickCalc, total: e.target.value})}
+                className="w-16 bg-white text-[10px] font-bold p-2 rounded-lg border-0 outline-none"
+              />
+              <select 
+                value={quickCalc.iva} onChange={e => setQuickCalc({...quickCalc, iva: Number(e.target.value)})}
+                className="w-14 bg-white text-[10px] font-bold p-2 rounded-lg border-0 outline-none"
+              >
+                <option value={10}>10%</option>
+                <option value={21}>21%</option>
+                <option value={4}>4%</option>
+              </select>
+              <button onClick={handleQuickAdd} className="bg-indigo-600 text-white p-2 rounded-lg hover:bg-indigo-700">
+                <Plus className="w-3 h-3" />
+              </button>
+            </div>
+
             <textarea 
               value={form.text}
               onChange={(e) => setForm({ ...form, text: e.target.value })}
@@ -336,7 +479,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
             <div className="mt-3 space-y-1 max-h-52 overflow-y-auto custom-scrollbar px-1 bg-slate-50/50 rounded-xl p-2 min-h-[50px]">
               {analyzedItems.length > 0 ? analyzedItems.map((it, idx) => it && (
                 <div key={idx} className="flex justify-between items-center text-[10px] border-b border-slate-200 py-2 last:border-0">
-                  <span className="truncate pr-2 font-bold text-slate-700"><b>{it.q}x</b> {it.n}</span>
+                  <span className="truncate pr-2 font-bold text-slate-700"><b>{it.q}x</b> {it.n} <span className="text-[8px] text-slate-400">({it.rate}%)</span></span>
                   <span className="font-black text-slate-900 whitespace-nowrap">{Num.fmt(it.t)}</span>
                 </div>
               )) : (
@@ -404,6 +547,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                   <div className="flex items-center gap-2 mt-1">
                     <p className="text-[10px] text-slate-400 font-bold">{a.date}</p>
                     {a.reconciled && <span className="text-[9px] text-emerald-600 bg-emerald-50 px-1.5 rounded font-black">🔗 Conciliado</span>}
+                    {a.link_foto && <span className="text-[9px] text-blue-600 bg-blue-50 px-1.5 rounded font-black">📸 Drive</span>}
                   </div>
                 </div>
                 <div className="text-right">
@@ -444,6 +588,11 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
               <div className="border-b border-slate-100 pb-4 mb-6">
                 <h3 className="text-2xl font-black text-slate-800 tracking-tighter">Detalle del Gasto</h3>
                 <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest mt-1">Ref: {editingAlbaran.num}</p>
+                {editingAlbaran.link_foto && (
+                  <a href={editingAlbaran.link_foto} target="_blank" rel="noreferrer" className="text-[10px] text-blue-500 hover:underline inline-block mt-2">
+                    📸 Ver Ticket en Drive
+                  </a>
+                )}
               </div>
               
               <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-6">
@@ -465,6 +614,12 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                       <span className="font-black text-slate-900">{Num.fmt(it.t)}</span>
                     </div>
                   ))}
+                  
+                  {/* Desglose de IVA en el modal */}
+                  <div className="mt-4 pt-2 border-t border-slate-300 border-dashed flex justify-between text-[10px] text-slate-500 font-bold">
+                    <span>Base: {Num.fmt(editingAlbaran.base || 0)}</span>
+                    <span>IVA: {Num.fmt(editingAlbaran.taxes || 0)}</span>
+                  </div>
                 </div>
 
                 <div className="flex justify-between items-center bg-slate-900 p-6 rounded-[2rem] text-white shadow-xl">
