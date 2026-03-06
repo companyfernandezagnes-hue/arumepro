@@ -5,7 +5,6 @@ import {
   FileText, Truck, Scale, Zap, Building2, PieChart, Lock, Handshake, Import, Database
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 // 🚀 IMPORTAMOS NUESTRO NUEVO HOOK Y SUPABASE
 import { supabase } from './services/supabase';
@@ -26,7 +25,6 @@ import { ReportsView } from './components/ReportsView';
 import { MenuView } from './components/MenuView';
 import { CierreContableView } from './components/CierreContableView';
 import { StockView } from './components/StockView';
-import { NotificationService } from './services/notifications';
 import { DashboardView } from './components/DashboardView';
 import { NavButton } from './components/NavButton';
 import { SettingsModal } from './components/SettingsModal';
@@ -40,24 +38,23 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isConfigOpen, setIsConfigOpen] = useState(false);
 
-  // 🚀 FIX: Control de Scroll dinámico para evitar bloqueos
+  // Control de Scroll dinámico
   useEffect(() => {
     const contenedorPrincipal = document.getElementById('app-root-container');
     if (!contenedorPrincipal) return;
 
     if (isConfigOpen) {
-      contenedorPrincipal.style.overflow = 'hidden'; // Bloquea el fondo al abrir ajustes
+      contenedorPrincipal.style.overflow = 'hidden'; 
     } else {
-      contenedorPrincipal.style.overflow = 'auto';   // Libera el fondo al cerrar
+      contenedorPrincipal.style.overflow = 'auto';   
     }
   }, [isConfigOpen]);
 
-  // Realtime Subscription (Mejorada para SaaS)
+  // Realtime Subscription (Suscripción a la nube)
   useEffect(() => {
     const channel = supabase.channel('arume-data')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'arume_data' }, payload => {
         console.log('🔄 Cambio detectado desde n8n u otra pestaña!', payload);
-        // En lugar de machacar el estado, recargamos con el hook para mantener la seguridad anti-pisadas
         reloadData();
       })
       .subscribe();
@@ -67,20 +64,18 @@ export default function App() {
     };
   }, [reloadData]);
 
-  // Auto-migración (Tu lógica intacta, adaptada al Hook)
+  // Auto-migración (Lógica de revisión de datos)
   useEffect(() => {
     if (db && !db.config?.n8nUrlBanco) {
       let finalData = { ...db };
       let needsUpdate = false;
 
-      // Inicializar estructuras si no existen
       const keys = ['banco','platos','recetas','ingredientes','ventas_menu','cierres','facturas','albaranes','gastos_fijos','activos','proveedores','cierres_mensuales'];
       keys.forEach(k => { if(!finalData[k]) { finalData[k] = []; needsUpdate = true; } });
       if(!finalData.diario) { finalData.diario = []; needsUpdate = true; }
       if(!finalData.control_pagos) { finalData.control_pagos = {}; needsUpdate = true; }
       if(!finalData.priceHistory) { finalData.priceHistory = {}; needsUpdate = true; }
 
-      // Auto-migración Gastos Fijos
       if (finalData.gastos_fijos) {
         finalData.gastos_fijos.forEach((g: any) => {
           if (!g.dia_pago) { g.dia_pago = 1; needsUpdate = true; }
@@ -94,45 +89,13 @@ export default function App() {
         finalData.config = { objetivoMensual: 40000, n8nUrlBanco: "https://ia.permatunnelopen.org/webhook/1085406f-324c-42f7-b50f-22f211f445cd", n8nUrlIA: "" };
         needsUpdate = true;
       }
-      if(!finalData.config.n8nUrlBanco) {
-        finalData.config.n8nUrlBanco = "https://ia.permatunnelopen.org/webhook/1085406f-324c-42f7-b50f-22f211f445cd";
-        needsUpdate = true;
-      }
 
-      // Auto-migración Diario a Cierres
-      if (finalData.diario && finalData.diario.length > 0) {
-        finalData.diario.forEach((old: any) => {
-          let isoDate = old.date || old.fecha;
-          if(isoDate && isoDate.includes('/')) {
-            const [d,m,y] = isoDate.split('/');
-            isoDate = `${y.length===2?'20'+y:y}-${m.padStart(2,'0')}-${d.padStart(2,'0')}`;
-          }
-          const totalOld = Num.parse(old.totalVenta || old.total || 0);
-          const exists = finalData.cierres.some((c: any) => c.date === isoDate && Math.abs(Num.parse(c.totalVenta) - totalOld) < 1);
-          if (!exists && isoDate) {
-            finalData.cierres.push({
-              id: old.id || `mig-${Date.now()}-${Math.random()}`,
-              date: isoDate,
-              totalVenta: totalOld,
-              efectivo: Num.parse(old.totalCaja || old.cash || 0),
-              tarjeta: Num.parse(old.totalTarjeta || old.card || 0),
-              apps: Num.parse(old.glovo || 0) + Num.parse(old.uber || 0),
-              tickets: parseInt(old.tickets || 0),
-              conciliado_banco: false
-            });
-            needsUpdate = true;
-          }
-        });
-      }
-
-      // Si se hizo alguna corrección estructural, la aplicamos al estado local
       if (needsUpdate) {
         setData(finalData);
       }
     }
   }, [db, setData]);
 
-  // Manejador central de guardado
   const handleSave = async (newData: AppData) => {
     try {
       await saveData(newData);
@@ -141,8 +104,18 @@ export default function App() {
     }
   };
 
+  // ⚠️ PANTALLA DE CARGA INICIAL
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center animate-fade-in">
+        <div className="w-16 h-16 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4"></div>
+        <p className="text-slate-500 font-bold animate-pulse tracking-widest uppercase text-sm">Sincronizando Cerebro...</p>
+      </div>
+    );
+  }
+
   // ⚠️ SI NO HAY DATOS (Pantalla de Restaurar Backup)
-  if (!loading && !db) {
+  if (!db) {
     return (
       <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-6 text-center animate-fade-in">
         <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center shadow-xl mb-6">
@@ -182,7 +155,6 @@ export default function App() {
   }
 
   const renderContent = () => {
-    if (!db) return null;
     switch (activeTab) {
       case 'dashboard': return <DashboardView data={db} />;
       case 'diario': return <CashView data={db} onSave={handleSave} />;
@@ -213,20 +185,7 @@ export default function App() {
 
   return (
     <>
-      <AnimatePresence>
-        {loading && (
-          <motion.div 
-            initial={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-white/90 z-[9999] flex flex-col justify-center items-center"
-          >
-            <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-            <p className="font-black text-slate-400 animate-pulse uppercase text-[10px] tracking-widest">Sincronizando Cerebro...</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* 🚀 FIX: Mobile Header con z-[110] asegurado para que la rueda sea clicable */}
+      {/* Mobile Header */}
       <header className="mobile-header sticky top-0 z-[110] px-6 py-4 flex justify-between items-center bg-white border-b border-slate-200 shadow-sm lg:hidden">
         <div>
           <h1 className="text-xl font-black text-slate-900 tracking-tighter">ARUME <span className="text-indigo-600">PRO</span></h1>
@@ -242,7 +201,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* 🚀 FIX: PC Header asegurando el z-[110] */}
+      {/* PC Header */}
       <div className="pc-header-visible hidden lg:flex z-[110]">
         <div>
           <h1 className="text-2xl font-black text-slate-800 tracking-tighter">ARUME <span className="text-indigo-600">ERP</span></h1>
