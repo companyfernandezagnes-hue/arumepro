@@ -17,14 +17,25 @@ const CASH_UNITS: { id: CashBusinessUnit; name: string; icon: any; color: string
   { id: 'SHOP', name: 'Tienda Sake', icon: ShoppingBag, color: 'text-emerald-600', bg: 'bg-emerald-50' }
 ];
 
+/* =======================================================
+ * 🛡️ CONFIGURACIÓN DE COMISIONES (¡MODIFICA ESTO LUEGO!)
+ * =======================================================
+ * Instrucciones: Cuando mires tus contratos, cambia el 0 por tu porcentaje.
+ * Ejemplo: Si Glovo te cobra 32%, pon 0.32
+ * Si ApperStreet te cobra 12%, pon 0.12
+ * Si Madisa es tu software y no cobra por pedido, déjalo en 0.
+ */
+const COMISIONES = {
+  glovo: 0.0,       // <-- Pon tu % de Glovo aquí
+  uber: 0.0,        // <-- Pon tu % de Uber aquí
+  apperStreet: 0.0, // <-- Pon tu % de ApperStreet aquí
+  madisa: 0.0       // <-- Pon tu % de Madisa aquí (o 0 si no aplica)
+};
+
 interface CashViewProps {
   data: AppData;
   onSave: (newData: AppData) => Promise<void>;
 }
-
-/* =======================================================
- * 🛡️ FUNCIONES DE AYUDA Y IA
- * ======================================================= */
 
 const asNum = (v: any, d = 0) => {
   const n = Number(v);
@@ -41,7 +52,7 @@ const normalizeDate = (s?: string) => {
 const extractJSON = (rawText: string) => {
   try {
     if (!rawText) throw new Error("Respuesta vacía");
-    const clean = rawText.replace(/(?:json)?/gi, '').replace(/\uFEFF/g, '').trim();
+    const clean = rawText.replace(/(?:json)?/gi, '').replace(/\uFEFF/g, '').replace(/```/g, '').trim();
     const start = clean.indexOf('{');
     const end = clean.lastIndexOf('}');
     if (start === -1 || end === -1 || end <= start) throw new Error("No se detectó JSON");
@@ -91,7 +102,6 @@ function upsertFactura(list: any[], item: any, key: string = 'num') {
   else list.push(item);
 }
 
-
 /* =======================================================
  * COMPONENTE PRINCIPAL
  * ======================================================= */
@@ -101,23 +111,62 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   const [scanStatus, setScanStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [images, setImages] = useState<{ img1: string | null, img2: string | null }>({ img1: null, img2: null });
   
-  // 🎙️ Estados Grabación
+  // 🎙️ Estados para VOSK (Fallback Local)
+  const [voskReady, setVoskReady] = useState(false);
+  const [voskModel, setVoskModel] = useState<any>(null);
+  const voskTranscriptRef = useRef<string>('');
+  const voskProcessorRef = useRef<any>(null);
+  const voskAudioCtxRef = useRef<AudioContext | null>(null);
+
+  // 🎙️ Estados Grabación Principal
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const [isSaving, setIsSaving] = useState(false); // ESTADO PARA EVITAR DOBLE CLIC
+  const [isSaving, setIsSaving] = useState(false);
 
-  // 📝 FORMULARIO DE CAJA
+  // 📝 FORMULARIO DE CAJA (Actualizado con ApperStreet)
   const [form, setForm] = useState({
     date: new Date().toLocaleDateString('sv-SE'),
-    efectivo: '', tarjeta: '', glovo: '', uber: '', madisa: '', deliveroo: '',
+    efectivo: '', tarjeta: '', glovo: '', uber: '', madisa: '', apperStreet: '',
     cajaFisica: '', tienda: '', notas: ''
   });
 
-  // 💰 NUEVOS ESTADOS DE GESTIÓN DE EFECTIVO
   const [fondoCaja, setFondoCaja] = useState<number>(300);
   const [depositoBanco, setDepositoBanco] = useState<string>(''); 
   const [gastosCaja, setGastosCaja] = useState<{ concepto: string; importe: string; iva: 4|10|21; unidad: CashBusinessUnit }[]>([]);
+
+  // ==========================================
+  // 🧠 CÁLCULOS NETOS (APPS Y TOTALES)
+  // ==========================================
+  const appsBrutas = useMemo(() => {
+    return Num.parse(form.glovo) + Num.parse(form.uber) + Num.parse(form.madisa) + Num.parse(form.apperStreet);
+  }, [form]);
+
+  const appsNetas = useMemo(() => {
+    const g = Num.parse(form.glovo) * (1 - COMISIONES.glovo);
+    const u = Num.parse(form.uber) * (1 - COMISIONES.uber);
+    const m = Num.parse(form.madisa) * (1 - COMISIONES.madisa);
+    const a = Num.parse(form.apperStreet) * (1 - COMISIONES.apperStreet);
+    return Num.round2(g + u + m + a);
+  }, [form]);
+
+  const totalCalculadoBruto = useMemo(() => {
+    return Num.parse(form.efectivo) + Num.parse(form.tarjeta) + appsBrutas;
+  }, [form, appsBrutas]);
+
+  const totalTienda = useMemo(() => Num.parse(form.tienda), [form.tienda]);
+  
+  // Total restaurante REAL que entra al negocio
+  const totalRestauranteNeto = useMemo(() => {
+    return (Num.parse(form.efectivo) + Num.parse(form.tarjeta) + appsNetas) - totalTienda;
+  }, [form.efectivo, form.tarjeta, appsNetas, totalTienda]);
+
+  const descuadreVivo = useMemo(() => {
+    const cajaF = Num.parse(form.cajaFisica);
+    const efec = Num.parse(form.efectivo);
+    if (form.cajaFisica === '' || form.efectivo === '') return null;
+    return Num.round2(cajaF - (efec + fondoCaja));
+  }, [form.cajaFisica, form.efectivo, fondoCaja]);
 
   const kpis = useMemo(() => {
     const cierresMes = (data.cierres || []).filter(c => {
@@ -135,21 +184,24 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     return { total, media, dias, efec, tarj, apps, cierresMes };
   }, [data.cierres, currentFilterDate, selectedUnit]);
 
-  // Cálculos en tiempo real
-  const totalCalculado = useMemo(() => {
-    return Num.parse(form.efectivo) + Num.parse(form.tarjeta) + Num.parse(form.glovo) + Num.parse(form.uber) + Num.parse(form.madisa) + Num.parse(form.deliveroo);
-  }, [form]);
-
-  const totalTienda = useMemo(() => Num.parse(form.tienda), [form.tienda]);
-  const totalRestaurante = useMemo(() => totalCalculado - totalTienda, [totalCalculado, totalTienda]);
-
-  // 🚀 DESCUDRE REPARADO
-  const descuadreVivo = useMemo(() => {
-    const cajaF = Num.parse(form.cajaFisica);
-    const efec = Num.parse(form.efectivo);
-    if (form.cajaFisica === '' || form.efectivo === '') return null;
-    return Num.round2(cajaF - (efec + fondoCaja));
-  }, [form.cajaFisica, form.efectivo, fondoCaja]);
+  // ==========================================
+  // ⚙️ INICIALIZAR VOSK AL CARGAR
+  // ==========================================
+  useEffect(() => {
+    const loadVoskModel = async () => {
+      try {
+        const modelPath = '/vosk-model-small-es-0.42'; 
+        const { Model } = await import('vosk-browser');
+        const model = new Model(modelPath);
+        setVoskModel(model);
+        setVoskReady(true);
+        console.log('✅ Vosk listo para el rescate!');
+      } catch (e) {
+        console.error('❌ Error cargando Vosk:', e);
+      }
+    };
+    loadVoskModel();
+  }, []);
 
   const handleMonthChange = (offset: number) => {
     let [y, m] = currentFilterDate.split('-').map(Number);
@@ -171,19 +223,14 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     if (!apiKey) return alert("⚠️ No tienes la clave de IA conectada.");
 
     setScanStatus('loading');
-    
     try {
       const objUrl = URL.createObjectURL(file);
       setImages(prev => ({ ...prev, [slot]: objUrl }));
       const base64Data = await compressImageToBase64(file);
 
       const ai = new GoogleGenAI({ apiKey });
-      const prompt = `Analiza este ticket de cierre de caja.
-      {
-        "fecha":"YYYY-MM-DD",
-        "efectivo":0, "tarjeta":0, "glovo":0, "uber":0, "sobre_cash":0, "gastos":0, "venta_tienda":0, "notas":""
-      }
-      REGLAS ESTRICTAS: Todos los valores numéricos como número. Separador decimal: punto. Si no hay dato -> 0.`;
+      const prompt = `Analiza este ticket de cierre de caja. Devuelve SOLO JSON con:
+      {"fecha":"YYYY-MM-DD", "efectivo":0, "tarjeta":0, "glovo":0, "uber":0, "sobre_cash":0, "gastos":0, "venta_tienda":0, "notas":""}`;
 
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
@@ -191,37 +238,59 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         config: { responseMimeType: "application/json", temperature: 0.1 }
       });
 
-      const raw = response.text || "";
-      const rawJson = raw.includes('{') ? extractJSON(raw) : JSON.parse(raw || '{}');
-
-      setForm(prev => ({
-        ...prev,
-        date: rawJson.fecha ? normalizeDate(rawJson.fecha) : prev.date,
-        efectivo: String(asNum(rawJson.efectivo) || prev.efectivo),
-        tarjeta: String(asNum(rawJson.tarjeta) || prev.tarjeta),
-        glovo: String(asNum(rawJson.glovo) || prev.glovo),
-        uber: String(asNum(rawJson.uber) || prev.uber),
-        tienda: String(asNum(rawJson.venta_tienda) || prev.tienda),
-        cajaFisica: asNum(rawJson.sobre_cash) > 0 ? (asNum(rawJson.sobre_cash) + fondoCaja).toFixed(2) : prev.cajaFisica,
-        notas: asNum(rawJson.gastos) > 0 ? `Gastos detectados: ${rawJson.gastos}€. ${rawJson.notas || ''}` : (rawJson.notas || prev.notas),
-      }));
-      
+      const rawJson = extractJSON(response.text || "");
+      actualizarFormConIA(rawJson);
       setScanStatus('success');
     } catch (error: any) {
       setScanStatus('error');
-      alert(`⚠️ Problema con la IA.`);
+      alert(`⚠️ Problema procesando la imagen.`);
     } finally {
       setTimeout(() => setScanStatus('idle'), 4000);
     }
   };
 
+  // ==========================================
+  // 🎙️ GRABACIÓN PARALELA (GEMINI + VOSK)
+  // ==========================================
   const toggleRecording = async () => {
     if (isRecording) {
       mediaRecorderRef.current?.stop();
+      if (voskProcessorRef.current) {
+        voskProcessorRef.current.disconnect();
+        voskProcessorRef.current = null;
+      }
+      if (voskAudioCtxRef.current) {
+        voskAudioCtxRef.current.close();
+      }
       return;
     }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      if (voskReady && voskModel) {
+        voskTranscriptRef.current = ''; 
+        const { Recognizer } = await import('vosk-browser');
+        const recognizer = new Recognizer(voskModel, 16000);
+        
+        const audioContext = new AudioContext({ sampleRate: 16000 });
+        voskAudioCtxRef.current = audioContext;
+        const source = audioContext.createMediaStreamSource(stream);
+        const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+        source.connect(processor);
+        processor.connect(audioContext.destination);
+
+        processor.onaudioprocess = (e) => {
+          const input = e.inputBuffer.getChannelData(0);
+          if (recognizer.acceptWaveform(input)) {
+             const result = recognizer.result();
+             if (result?.text) voskTranscriptRef.current += result.text + ' ';
+          }
+        };
+        voskProcessorRef.current = processor;
+      }
+
       const supports = (type: string) => MediaRecorder.isTypeSupported(type);
       const mimePref = supports('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : supports('audio/mp4') ? 'audio/mp4' : 'audio/webm';
 
@@ -235,12 +304,15 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
         stream.getTracks().forEach(t => t.stop());
         setIsRecording(false);
+        
+        if (voskReady) voskTranscriptRef.current += ' (Grabación terminada)';
+        
         await processAudioWithAI(audioBlob, mimeType);
       };
 
       mr.start();
       setIsRecording(true);
-      setTimeout(() => { if (mr.state === 'recording') mr.stop(); }, 60000);
+      setTimeout(() => { if (mr.state === 'recording') toggleRecording(); }, 60000); 
     } catch (err) {
       alert("⚠️ No se pudo acceder al micrófono.");
     }
@@ -248,10 +320,11 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
 
   const processAudioWithAI = async (audioBlob: Blob, mimeType: string) => {
     const apiKey = sessionStorage.getItem('gemini_api_key') || localStorage.getItem('gemini_api_key');
-    if (!apiKey) return alert("⚠️ No tienes la clave de IA conectada.");
-
     setScanStatus('loading');
+    
     try {
+      if (!apiKey) throw new Error("No API Key");
+
       const base64Audio = await new Promise<string>((resolve) => {
         const fr = new FileReader();
         fr.onload = () => resolve((fr.result as string).split(',')[1]);
@@ -259,9 +332,8 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
       });
 
       const ai = new GoogleGenAI({ apiKey });
-      const prompt = `Transcribe la voz sobre el cierre de caja. Devuelve SOLO JSON con:
-      { "efectivo":0, "tarjeta":0, "glovo":0, "uber":0, "sobre_cash":0, "gastos":0, "venta_tienda":0, "notas":"" }
-      REGLAS: Números como number. Sakes/Botellas -> "venta_tienda". Dinero físico contado -> "sobre_cash".`;
+      const prompt = `Transcribe y extrae los datos de caja. Devuelve SOLO JSON con:
+      { "efectivo":0, "tarjeta":0, "glovo":0, "uber":0, "apperStreet":0, "sobre_cash":0, "gastos":0, "venta_tienda":0, "notas":"" }`;
 
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
@@ -269,27 +341,43 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         config: { responseMimeType: "application/json", temperature: 0.1 }
       });
 
-      const raw = response.text || "";
-      const rawJson = raw.includes('{') ? extractJSON(raw) : JSON.parse(raw || '{}');
-
-      setForm(prev => ({
-        ...prev,
-        efectivo: String(asNum(rawJson.efectivo) || prev.efectivo),
-        tarjeta: String(asNum(rawJson.tarjeta) || prev.tarjeta),
-        glovo: String(asNum(rawJson.glovo) || prev.glovo),
-        uber: String(asNum(rawJson.uber) || prev.uber),
-        tienda: String(asNum(rawJson.venta_tienda) || prev.tienda),
-        cajaFisica: asNum(rawJson.sobre_cash) > 0 ? (asNum(rawJson.sobre_cash) + fondoCaja).toFixed(2) : prev.cajaFisica,
-        notas: asNum(rawJson.gastos) > 0 ? `Gastos IA (Voz): ${rawJson.gastos}€. ${rawJson.notas || ''}` : (rawJson.notas || prev.notas),
-      }));
-
+      const rawJson = extractJSON(response.text || "");
+      actualizarFormConIA(rawJson, "Voz IA");
       setScanStatus('success');
+
     } catch (error: any) {
-      setScanStatus('error');
-      alert("⚠️ La IA no entendió el audio.");
+      console.log("Gemini falló, usando texto Vosk recolectado en vivo");
+      const textoVosk = voskTranscriptRef.current.trim();
+      
+      if (textoVosk) {
+        setForm(prev => ({
+          ...prev,
+          notas: (prev.notas || "") + "\n[Dictado Vosk Fallback]: " + textoVosk
+        }));
+        setScanStatus('success');
+        alert("⚠️ Gemini falló, pero Vosk salvó la transcripción en las NOTAS.");
+      } else {
+        setScanStatus('error');
+        alert("⚠️ Ambas IAs fallaron. ¿Hablaste lo suficientemente alto?");
+      }
     } finally {
       setTimeout(() => setScanStatus('idle'), 4000);
     }
+  };
+
+  const actualizarFormConIA = (rawJson: any, origen: string = "IA") => {
+    setForm(prev => ({
+      ...prev,
+      date: rawJson.fecha ? normalizeDate(rawJson.fecha) : prev.date,
+      efectivo: String(asNum(rawJson.efectivo) || prev.efectivo),
+      tarjeta: String(asNum(rawJson.tarjeta) || prev.tarjeta),
+      glovo: String(asNum(rawJson.glovo) || prev.glovo),
+      uber: String(asNum(rawJson.uber) || prev.uber),
+      apperStreet: String(asNum(rawJson.apperStreet) || prev.apperStreet),
+      tienda: String(asNum(rawJson.venta_tienda) || prev.tienda),
+      cajaFisica: asNum(rawJson.sobre_cash) > 0 ? (asNum(rawJson.sobre_cash) + fondoCaja).toFixed(2) : prev.cajaFisica,
+      notas: asNum(rawJson.gastos) > 0 ? `Gastos detectados (${origen}): ${rawJson.gastos}€. ${rawJson.notas || ''}` : (rawJson.notas || prev.notas),
+    }));
   };
 
   useEffect(() => {
@@ -300,10 +388,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
       for (let i = 0; i < items.length; i++) {
         if (items[i].type.indexOf("image") !== -1) {
           const blob = items[i].getAsFile();
-          if (blob) {
-            processImageWithAI(blob, !images.img1 ? 'img1' : 'img2');
-            break;
-          }
+          if (blob) { processImageWithAI(blob, !images.img1 ? 'img1' : 'img2'); break; }
         }
       }
     };
@@ -311,25 +396,26 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     return () => window.removeEventListener('paste', handlePaste);
   }, [images, scanStatus]);
 
-  // 🚀 3. GUARDADO REPARADO (LIMPIO, SIN NOTIFICACIONES QUE BLOQUEEN)
+  // ==========================================
+  // 💾 GUARDADO 
+  // ==========================================
   const handleSaveCierre = async () => {
     if (isSaving) return;
-    if (totalCalculado <= 0) return alert("Introduce algún importe para guardar la caja.");
-    if (totalRestaurante < 0) return alert("La venta de la tienda no puede ser mayor que el total de la caja.");
+    if (totalCalculadoBruto <= 0) return alert("Introduce algún importe para guardar la caja.");
+    if (totalRestauranteNeto < 0) return alert("La venta de la tienda no puede ser mayor que el total de la caja.");
 
     setIsSaving(true);
 
     try {
-      const newData = JSON.parse(JSON.stringify(data)); // Clon seguro
+      const newData = JSON.parse(JSON.stringify(data)); 
       const fechaSeleccionada = form.date;
       const descuadreFinal = descuadreVivo || 0;
 
-      // Inicializar colecciones
       if (!newData.cierres) newData.cierres = [];
       if (!newData.facturas) newData.facturas = [];
       if (!newData.banco) newData.banco = [];
 
-      // 1) GASTOS DE CAJA -> FACTURAS pagadas separadas
+      // 1) GASTOS DE CAJA
       if (gastosCaja.length > 0) {
         gastosCaja.forEach((g, idx) => {
           const imp = Num.parse(g.importe);
@@ -346,7 +432,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         });
       }
 
-      // 2) INGRESO A BANCO desde sobre
+      // 2) INGRESO A BANCO
       const dep = Num.parse(depositoBanco);
       if (dep > 0) {
         newData.banco.unshift({
@@ -359,30 +445,34 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
       // 3) CIERRES Y FACTURAS Z 
       const cierreRestId = `ZR-${fechaSeleccionada.replace(/-/g, '')}`;
       const cierreRest: Cierre = {
-        id: cierreRestId, date: fechaSeleccionada, totalVenta: Num.round2(totalRestaurante),
+        id: cierreRestId, date: fechaSeleccionada, 
+        totalVenta: totalRestauranteNeto, 
         efectivo: Num.parse(form.efectivo), tarjeta: Num.parse(form.tarjeta),
-        apps: (Num.parse(form.glovo) + Num.parse(form.uber) + Num.parse(form.madisa) + Num.parse(form.deliveroo)),
-        descuadre: descuadreFinal, notas: form.notas, conciliado_banco: false, unitId: 'REST'
+        apps: appsNetas, 
+        descuadre: descuadreFinal, 
+        notas: `[Bruto Ticket: ${appsBrutas.toFixed(2)}€] ${form.notas}`.trim(), 
+        conciliado_banco: false, unitId: 'REST'
       };
       upsertFactura(newData.cierres, cierreRest, 'id');
 
       const fIdxRest = newData.facturas.findIndex((f: any) => f.num === cierreRestId);
-      const baseR = Num.round2(totalRestaurante / 1.10);
-      const taxR  = Num.round2(totalRestaurante - baseR);
+      const baseR = Num.round2(totalRestauranteNeto / 1.10);
+      const taxR  = Num.round2(totalRestauranteNeto - baseR);
       upsertFactura(newData.facturas, {
         id: fIdxRest >= 0 ? newData.facturas[fIdxRest].id : `f-zr-${Date.now()}`,
         num: cierreRestId, date: fechaSeleccionada, prov: "Z DIARIO", cliente: "Z DIARIO",
-        total: Num.round2(totalRestaurante), base: baseR, tax: taxR,
+        total: totalRestauranteNeto, base: baseR, tax: taxR,
         paid: fIdxRest >= 0 ? newData.facturas[fIdxRest].paid : false,
         reconciled: fIdxRest >= 0 ? newData.facturas[fIdxRest].reconciled : false,
         unidad_negocio: 'REST'
       }, 'num');
 
+      // TIENDA SEPARADA
       if (totalTienda > 0) {
         const cierreShopId = `ZS-${fechaSeleccionada.replace(/-/g, '')}`;
         const cierreShop: Cierre = {
           id: cierreShopId, date: fechaSeleccionada, totalVenta: Num.round2(totalTienda),
-          efectivo: 0, tarjeta: 0, apps: 0, descuadre: 0, notas: 'Venta separada de la caja general',
+          efectivo: 0, tarjeta: 0, apps: 0, descuadre: 0, notas: 'Venta separada de caja general',
           conciliado_banco: false, unitId: 'SHOP'
         };
         upsertFactura(newData.cierres, cierreShop, 'id');
@@ -400,18 +490,17 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         }, 'num');
       }
 
-      // 🚀 GUARDADO SEGURO
       await onSave(newData);
 
-      // RESET GLOBAL TRAS GUARDAR CON ÉXITO
-      setForm({ date: new Date().toLocaleDateString('sv-SE'), efectivo: '', tarjeta: '', glovo: '', uber: '', madisa: '', deliveroo: '', cajaFisica: '', tienda: '', notas: '' });
+      // RESET
+      setForm({ date: new Date().toLocaleDateString('sv-SE'), efectivo: '', tarjeta: '', glovo: '', uber: '', madisa: '', apperStreet: '', cajaFisica: '', tienda: '', notas: '' });
       setImages({ img1: null, img2: null });
       setGastosCaja([]);
       setDepositoBanco('');
       if (images.img1) URL.revokeObjectURL(images.img1);
       if (images.img2) URL.revokeObjectURL(images.img2);
       
-      alert("✅ ¡Cierre de caja guardado correctamente!");
+      alert("✅ ¡Cierre guardado con éxito! (Netos aplicados correctamente)");
 
     } catch (e: any) {
       console.error('Guardar cierre falló:', e);
@@ -438,13 +527,17 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   return (
     <div className={cn("animate-fade-in space-y-6 pb-24", scanStatus === 'loading' && "transition-none")}>
       
-      {/* OVERLAY SUTIL DE VOZ (Arriba, sin bloquear) */}
+      {/* OVERLAY GRABACIÓN */}
       {isRecording && (
         <div 
           className="fixed top-4 left-1/2 -translate-x-1/2 z-[400] px-6 py-3 rounded-full bg-rose-600 text-white text-xs font-black shadow-2xl animate-pulse flex items-center gap-3 cursor-pointer border-2 border-rose-400" 
           onClick={toggleRecording}
         >
-          <Mic className="w-5 h-5 animate-bounce" /> Grabando... ¡PULSA AQUÍ PARA DETENER!
+          <Mic className="w-5 h-5 animate-bounce" /> 
+          <div>
+             <p>Grabando con IA...</p>
+             <p className="text-[8px] opacity-80 text-center font-normal">{voskReady ? "Vosk activo en fondo" : "Cargando Vosk..."}</p>
+          </div>
         </div>
       )}
 
@@ -502,8 +595,13 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
             <h3 className="text-xl font-black text-slate-800">Nuevo Cierre Z</h3>
           </div>
           <div className="flex gap-2">
-            <button onClick={toggleRecording} disabled={scanStatus === 'loading' || isSaving} className={cn("px-6 py-2 rounded-xl text-[10px] font-black transition shadow-lg flex items-center gap-2", isRecording ? "bg-rose-500 text-white" : "bg-slate-900 text-white hover:bg-slate-800", (scanStatus === 'loading' || isSaving) && "opacity-50 cursor-not-allowed")}>
-              <Mic className="w-3 h-3" /> <span>DICTAR VOZ</span>
+            <button 
+              onClick={toggleRecording} 
+              disabled={scanStatus === 'loading' || isSaving} 
+              className={cn("px-6 py-2 rounded-xl text-[10px] font-black transition shadow-lg flex items-center gap-2", isRecording ? "bg-rose-500 text-white" : "bg-slate-900 text-white hover:bg-slate-800", (scanStatus === 'loading' || isSaving) && "opacity-50 cursor-not-allowed")}
+            >
+              {isRecording ? <Square className="w-3 h-3" /> : <Mic className="w-3 h-3" />}
+              <span>{isRecording ? "DETENER" : "DICTAR VOZ (GEMINI + VOSK)"}</span>
             </button>
           </div>
         </div>
@@ -539,13 +637,21 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
           </div>
           
           <div className="space-y-4">
-            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">2. Apps y Separación</h4>
+            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">2. Software y Apps (Bruto)</h4>
             <div className="grid grid-cols-2 gap-2">
               <input type="number" placeholder="Glovo" value={form.glovo} onChange={(e) => setForm({...form, glovo: e.target.value})} className="p-3 bg-orange-50/50 rounded-xl font-bold text-sm outline-none" />
               <input type="number" placeholder="Uber" value={form.uber} onChange={(e) => setForm({...form, uber: e.target.value})} className="p-3 bg-indigo-50/50 rounded-xl font-bold text-sm outline-none" />
               <input type="number" placeholder="Madisa" value={form.madisa} onChange={(e) => setForm({...form, madisa: e.target.value})} className="p-3 bg-rose-50/50 rounded-xl font-bold text-sm outline-none" />
-              <input type="number" placeholder="Deliveroo" value={form.deliveroo} onChange={(e) => setForm({...form, deliveroo: e.target.value})} className="p-3 bg-teal-50/50 rounded-xl font-bold text-sm outline-none" />
+              <input type="number" placeholder="ApperStreet" value={form.apperStreet} onChange={(e) => setForm({...form, apperStreet: e.target.value})} className="p-3 bg-teal-50/50 rounded-xl font-bold text-sm outline-none" />
             </div>
+            
+            <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+               <div className="flex justify-between items-center text-[9px] font-black text-slate-400 uppercase">
+                  <span>Bruto Ticket: {appsBrutas.toFixed(2)}€</span>
+                  <span className="text-orange-500">NETO REAL: {appsNetas.toFixed(2)}€</span>
+               </div>
+            </div>
+
             <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100 relative mt-4">
               <label className="text-[9px] font-black text-emerald-700 uppercase block mb-2">Desvío a Tienda Sakes</label>
               <input type="number" placeholder="0.00" value={form.tienda} onChange={(e) => setForm({...form, tienda: e.target.value})} className="w-full p-3 bg-white rounded-xl text-lg font-black outline-none focus:ring-2 ring-emerald-500/30 text-emerald-700" />
@@ -576,9 +682,16 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
                 )}
               </AnimatePresence>
             </div>
+            
             <div className="pt-4 border-t border-slate-100 flex justify-between items-end">
-               <div><span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest block mb-0.5">Restaurante</span><span className="text-xl font-black text-indigo-600">{totalRestaurante.toFixed(2)}€</span></div>
-               <div className="text-right"><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Caja Total</span><span className="text-3xl font-black text-slate-800 tracking-tighter">{totalCalculado.toFixed(2)}€</span></div>
+               <div>
+                  <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest block mb-0.5">Restaurante Neto</span>
+                  <span className="text-xl font-black text-indigo-600">{totalRestauranteNeto.toFixed(2)}€</span>
+               </div>
+               <div className="text-right">
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Caja Bruta Total</span>
+                  <span className="text-3xl font-black text-slate-800 tracking-tighter">{totalCalculadoBruto.toFixed(2)}€</span>
+               </div>
             </div>
           </div>
         </div>
@@ -593,7 +706,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
 
         <div className="mt-6 border-t border-slate-100 pt-6">
           <button onClick={handleSaveCierre} disabled={isSaving || scanStatus === 'loading'} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-sm shadow-2xl hover:bg-indigo-600 transition-all flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-            {isSaving ? "GUARDANDO..." : "GUARDAR CIERRE DIARIO"}
+            {isSaving ? "GUARDANDO..." : `GUARDAR CIERRE (${totalRestauranteNeto.toFixed(2)}€ REALES)`}
           </button>
         </div>
       </div>
