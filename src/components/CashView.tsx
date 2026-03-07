@@ -19,12 +19,7 @@ const CASH_UNITS: { id: CashBusinessUnit; name: string; icon: any; color: string
 
 /* =======================================================
  * 🛡️ CONFIGURACIÓN DE COMISIONES (¡MODIFICA ESTO LUEGO!)
- * =======================================================
- * Instrucciones: Cuando mires tus contratos, cambia el 0 por tu porcentaje.
- * Ejemplo: Si Glovo te cobra 32%, pon 0.32
- * Si ApperStreet te cobra 12%, pon 0.12
- * Si Madisa es tu software y no cobra por pedido, déjalo en 0.
- */
+ * ======================================================= */
 const COMISIONES = {
   glovo: 0.0,       // <-- Pon tu % de Glovo aquí
   uber: 0.0,        // <-- Pon tu % de Uber aquí
@@ -124,10 +119,10 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   const audioChunksRef = useRef<Blob[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
-  // 📝 FORMULARIO DE CAJA (Actualizado con ApperStreet)
+  // 📝 FORMULARIO DE CAJA (Actualizado con TPV1, TPV2 y AMEX)
   const [form, setForm] = useState({
     date: new Date().toLocaleDateString('sv-SE'),
-    efectivo: '', tarjeta: '', glovo: '', uber: '', madisa: '', apperStreet: '',
+    efectivo: '', tpv1: '', tpv2: '', amex: '', glovo: '', uber: '', madisa: '', apperStreet: '',
     cajaFisica: '', tienda: '', notas: ''
   });
 
@@ -138,9 +133,15 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   // ==========================================
   // 🧠 CÁLCULOS NETOS (APPS Y TOTALES)
   // ==========================================
+  
+  // Total de todas las tarjetas sumadas
+  const totalTarjetas = useMemo(() => {
+    return Num.parse(form.tpv1) + Num.parse(form.tpv2) + Num.parse(form.amex);
+  }, [form.tpv1, form.tpv2, form.amex]);
+
   const appsBrutas = useMemo(() => {
     return Num.parse(form.glovo) + Num.parse(form.uber) + Num.parse(form.madisa) + Num.parse(form.apperStreet);
-  }, [form]);
+  }, [form.glovo, form.uber, form.madisa, form.apperStreet]);
 
   const appsNetas = useMemo(() => {
     const g = Num.parse(form.glovo) * (1 - COMISIONES.glovo);
@@ -148,18 +149,18 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     const m = Num.parse(form.madisa) * (1 - COMISIONES.madisa);
     const a = Num.parse(form.apperStreet) * (1 - COMISIONES.apperStreet);
     return Num.round2(g + u + m + a);
-  }, [form]);
+  }, [form.glovo, form.uber, form.madisa, form.apperStreet]);
 
   const totalCalculadoBruto = useMemo(() => {
-    return Num.parse(form.efectivo) + Num.parse(form.tarjeta) + appsBrutas;
-  }, [form, appsBrutas]);
+    return Num.parse(form.efectivo) + totalTarjetas + appsBrutas;
+  }, [form.efectivo, totalTarjetas, appsBrutas]);
 
   const totalTienda = useMemo(() => Num.parse(form.tienda), [form.tienda]);
   
   // Total restaurante REAL que entra al negocio
   const totalRestauranteNeto = useMemo(() => {
-    return (Num.parse(form.efectivo) + Num.parse(form.tarjeta) + appsNetas) - totalTienda;
-  }, [form.efectivo, form.tarjeta, appsNetas, totalTienda]);
+    return (Num.parse(form.efectivo) + totalTarjetas + appsNetas) - totalTienda;
+  }, [form.efectivo, totalTarjetas, appsNetas, totalTienda]);
 
   const descuadreVivo = useMemo(() => {
     const cajaF = Num.parse(form.cajaFisica);
@@ -230,7 +231,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
 
       const ai = new GoogleGenAI({ apiKey });
       const prompt = `Analiza este ticket de cierre de caja. Devuelve SOLO JSON con:
-      {"fecha":"YYYY-MM-DD", "efectivo":0, "tarjeta":0, "glovo":0, "uber":0, "sobre_cash":0, "gastos":0, "venta_tienda":0, "notas":""}`;
+      {"fecha":"YYYY-MM-DD", "efectivo":0, "tpv1":0, "tpv2":0, "amex":0, "glovo":0, "uber":0, "sobre_cash":0, "gastos":0, "venta_tienda":0, "notas":""}`;
 
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
@@ -333,7 +334,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
 
       const ai = new GoogleGenAI({ apiKey });
       const prompt = `Transcribe y extrae los datos de caja. Devuelve SOLO JSON con:
-      { "efectivo":0, "tarjeta":0, "glovo":0, "uber":0, "apperStreet":0, "sobre_cash":0, "gastos":0, "venta_tienda":0, "notas":"" }`;
+      { "efectivo":0, "tpv1":0, "tpv2":0, "amex":0, "glovo":0, "uber":0, "apperStreet":0, "sobre_cash":0, "gastos":0, "venta_tienda":0, "notas":"" }`;
 
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
@@ -370,7 +371,9 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
       ...prev,
       date: rawJson.fecha ? normalizeDate(rawJson.fecha) : prev.date,
       efectivo: String(asNum(rawJson.efectivo) || prev.efectivo),
-      tarjeta: String(asNum(rawJson.tarjeta) || prev.tarjeta),
+      tpv1: String(asNum(rawJson.tpv1) || prev.tpv1),
+      tpv2: String(asNum(rawJson.tpv2) || prev.tpv2),
+      amex: String(asNum(rawJson.amex) || prev.amex),
       glovo: String(asNum(rawJson.glovo) || prev.glovo),
       uber: String(asNum(rawJson.uber) || prev.uber),
       apperStreet: String(asNum(rawJson.apperStreet) || prev.apperStreet),
@@ -444,13 +447,18 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
 
       // 3) CIERRES Y FACTURAS Z 
       const cierreRestId = `ZR-${fechaSeleccionada.replace(/-/g, '')}`;
+      
+      // Construimos un desglose para no perder la información en el futuro
+      const infoTarjetas = `[Tarjetas -> TPV1: ${form.tpv1||0}€ | TPV2: ${form.tpv2||0}€ | AMEX: ${form.amex||0}€]`;
+
       const cierreRest: Cierre = {
         id: cierreRestId, date: fechaSeleccionada, 
         totalVenta: totalRestauranteNeto, 
-        efectivo: Num.parse(form.efectivo), tarjeta: Num.parse(form.tarjeta),
+        efectivo: Num.parse(form.efectivo), 
+        tarjeta: totalTarjetas, // Se guarda la suma para mantener compatibilidad
         apps: appsNetas, 
         descuadre: descuadreFinal, 
-        notas: `[Bruto Ticket: ${appsBrutas.toFixed(2)}€] ${form.notas}`.trim(), 
+        notas: `${infoTarjetas} [Bruto Ticket Apps: ${appsBrutas.toFixed(2)}€] ${form.notas}`.trim(), 
         conciliado_banco: false, unitId: 'REST'
       };
       upsertFactura(newData.cierres, cierreRest, 'id');
@@ -493,7 +501,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
       await onSave(newData);
 
       // RESET
-      setForm({ date: new Date().toLocaleDateString('sv-SE'), efectivo: '', tarjeta: '', glovo: '', uber: '', madisa: '', apperStreet: '', cajaFisica: '', tienda: '', notas: '' });
+      setForm({ date: new Date().toLocaleDateString('sv-SE'), efectivo: '', tpv1: '', tpv2: '', amex: '', glovo: '', uber: '', madisa: '', apperStreet: '', cajaFisica: '', tienda: '', notas: '' });
       setImages({ img1: null, img2: null });
       setGastosCaja([]);
       setDepositoBanco('');
@@ -632,8 +640,20 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
           <div className="space-y-4">
             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">1. Fecha y Totales Caja</h4>
             <input type="date" value={form.date} onChange={(e) => setForm({...form, date: e.target.value})} className="w-full p-3 bg-slate-50 rounded-xl text-sm font-bold border-0 outline-none focus:ring-2 ring-indigo-500/20" />
-            <input type="number" placeholder="Efectivo Ticket Z" value={form.efectivo} onChange={(e) => setForm({...form, efectivo: e.target.value})} className="w-full p-4 bg-slate-50 rounded-2xl text-lg font-black outline-none focus:ring-2 ring-indigo-500/20" />
-            <input type="number" placeholder="Tarjeta TPV" value={form.tarjeta} onChange={(e) => setForm({...form, tarjeta: e.target.value})} className="w-full p-4 bg-slate-50 rounded-2xl text-lg font-black outline-none focus:ring-2 ring-indigo-500/20" />
+            
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+              <label className="text-[10px] font-black text-slate-500 uppercase mb-2 block">Efectivo (Billetes/Monedas)</label>
+              <input type="number" placeholder="Efectivo Ticket Z" value={form.efectivo} onChange={(e) => setForm({...form, efectivo: e.target.value})} className="w-full p-3 bg-white rounded-xl text-lg font-black outline-none focus:ring-2 ring-emerald-500/20" />
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+              <label className="text-[10px] font-black text-slate-500 uppercase mb-2 block">Tarjetas TPV y Amex</label>
+              <div className="grid grid-cols-2 gap-2 mb-2">
+                <input type="number" placeholder="TPV 1" value={form.tpv1} onChange={(e) => setForm({...form, tpv1: e.target.value})} className="w-full p-3 bg-white rounded-xl font-bold outline-none focus:ring-2 ring-indigo-500/20" />
+                <input type="number" placeholder="TPV 2" value={form.tpv2} onChange={(e) => setForm({...form, tpv2: e.target.value})} className="w-full p-3 bg-white rounded-xl font-bold outline-none focus:ring-2 ring-indigo-500/20" />
+              </div>
+              <input type="number" placeholder="AMEX" value={form.amex} onChange={(e) => setForm({...form, amex: e.target.value})} className="w-full p-3 bg-blue-50 rounded-xl font-bold outline-none focus:ring-2 ring-blue-500/20 text-blue-700" />
+            </div>
           </div>
           
           <div className="space-y-4">
