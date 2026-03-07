@@ -1,13 +1,14 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   Building2, Search, Trash2, Clipboard, Upload, Zap, 
   CheckCircle2, ArrowRight, TrendingUp, TrendingDown, 
   Scale, Settings, RefreshCw, ShoppingCart, Eraser,
   AlertTriangle, Eye, EyeOff, Sparkles, Filter,
-  History, Calendar, Info, BarChart3, PieChart
+  History, Calendar, Info, BarChart3, PieChart,
+  ArrowUpRight, ArrowDownLeft, Check, X as CloseIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { AppData, Albaran, Factura } from '../types';
+import { AppData, Albaran, Factura, BankMovement } from '../types';
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
 import { proxyFetch } from '../services/api';
@@ -46,8 +47,8 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
   const [selectedBankId, setSelectedBankId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isMagicLoading, setIsMagicLoading] = useState(false);
+  const [isSwipeMode, setIsSwipeMode] = useState(false);
   
-  // 🚀 NUEVO: Estado de filtro rápido y Pestañas
   type BankFilter = 'all' | 'pending' | 'unmatched' | 'suspicious' | 'duplicate' | 'reviewed';
   const [viewFilter, setViewFilter] = useState<BankFilter>('pending');
   const [activeTab, setActiveTab] = useState<'list' | 'insights'>('list');
@@ -58,7 +59,6 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
 
   // --- CALCULATIONS ---
 
-  // 🚀 NUEVO: Datos para el gráfico de flujo de caja (30 días)
   const cashFlowData = useMemo(() => {
     const days = 30;
     const result = [];
@@ -83,7 +83,6 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
     return result;
   }, [data.banco]);
 
-  // 🚀 NUEVO: Detección de Cierres de Caja Pendientes
   const pendingCajas = useMemo(() => {
     return (data.cierres || []).filter((c: any) => {
       const isCardMatched = (data.banco || []).some((b: any) => 
@@ -103,7 +102,6 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
     const matched = movements.length - pending.length;
     const percent = movements.length > 0 ? Math.round((matched / movements.length) * 100) : 0;
     
-    // Mini tendencia (últimos 10)
     const trend = movements.slice(-10).map((m: any) => Num.parse(m.amount));
     
     return { saldo, percent, pending: pending.length, total: movements.length, matched, trend };
@@ -436,7 +434,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
 
   return (
     <div className="animate-fade-in space-y-6 pb-24">
-      {/* Tabs de Navegación Estilo Holded */}
+      {/* Tabs de Navegación */}
       <div className="flex gap-4 border-b border-slate-100 pb-4">
         <button 
           onClick={() => setActiveTab('list')}
@@ -460,7 +458,6 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
 
       {activeTab === 'insights' ? (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Gráfico de Flujo de Caja */}
           <div className="lg:col-span-8 bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
             <div className="flex justify-between items-center mb-8">
               <div>
@@ -511,7 +508,6 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
             </div>
           </div>
 
-          {/* Cierres de Caja Pendientes */}
           <div className="lg:col-span-4 space-y-6">
             <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
               <h4 className="text-[10px] font-black text-slate-400 uppercase mb-4 flex items-center gap-2">
@@ -610,6 +606,13 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
                 <RefreshCw className="w-4 h-4" /> ANALIZAR BANDERAS
               </button>
 
+              <button 
+                onClick={() => setIsSwipeMode(true)}
+                className="bg-indigo-50 text-indigo-600 px-5 py-3 rounded-xl text-[10px] font-black hover:bg-indigo-100 transition shadow-sm flex items-center gap-2"
+              >
+                <Sparkles className="w-4 h-4" /> MODO SWIPE (TINDER)
+              </button>
+
               <button onClick={handleAutoCleanup} className="bg-rose-50 text-rose-600 px-5 py-3 rounded-xl text-[10px] font-black hover:bg-rose-100 transition shadow-sm flex items-center gap-2 ml-auto">
                 <Eraser className="w-4 h-4" /> LIMPIAR FANTASMAS
               </button>
@@ -626,6 +629,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
                   className="w-full bg-transparent text-xs font-bold outline-none text-slate-600 h-8"
                 />
               </div>
+              
               <div className="flex flex-wrap gap-2 px-2">
                 {[
                   {k:'all', label:'Todo'}, {k:'pending', label:'Pdte.'}, 
@@ -648,7 +652,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
                   </button>
                 )}
               </div>
-              
+
               <div className="flex justify-between px-2 mt-2">
                 <span className="text-[9px] font-bold text-slate-400 uppercase">Vista Actual</span>
                 <button onClick={handleNuke} className="text-[9px] font-bold text-rose-400 hover:text-rose-600 flex items-center gap-1">
@@ -717,16 +721,17 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
                             {Num.parse(selectedItem.amount) > 0 ? 'INGRESO' : 'GASTO'}
                           </span>
                           
-                          {/* Botón Revisado */}
-                          {!(selectedItem as any).reviewed ? (
-                            <button onClick={() => toggleReviewed(selectedItem.id, true)} className="text-[9px] font-black text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded hover:bg-emerald-100 border border-emerald-200 flex items-center gap-1">
-                              <Eye className="w-3 h-3" /> MARCAR REVISADO
-                            </button>
-                          ) : (
-                            <button onClick={() => toggleReviewed(selectedItem.id, false)} className="text-[9px] font-black text-slate-500 bg-slate-50 px-3 py-1.5 rounded hover:bg-slate-100 border border-slate-200 flex items-center gap-1">
-                              <EyeOff className="w-3 h-3" /> DESMARCAR
-                            </button>
-                          )}
+                          <div className="flex gap-2">
+                            {!(selectedItem as any).reviewed ? (
+                              <button onClick={() => toggleReviewed(selectedItem.id, true)} className="text-[9px] font-black text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded hover:bg-emerald-100 border border-emerald-200 flex items-center gap-1">
+                                <Eye className="w-3 h-3" /> MARCAR REVISADO
+                              </button>
+                            ) : (
+                              <button onClick={() => toggleReviewed(selectedItem.id, false)} className="text-[9px] font-black text-slate-500 bg-slate-50 px-3 py-1.5 rounded hover:bg-slate-100 border border-slate-200 flex items-center gap-1">
+                                <EyeOff className="w-3 h-3" /> DESMARCAR REVISIÓN
+                              </button>
+                            )}
+                          </div>
                         </div>
                         
                         <h3 className="font-black text-2xl mt-4 leading-tight text-slate-800">{selectedItem.desc}</h3>
@@ -743,7 +748,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
                         {matches.length > 0 && (
                           <div className="mb-8">
                             <h4 className="text-[10px] font-black text-slate-400 uppercase mb-4 flex items-center gap-2">
-                              <Zap className="w-3 h-3 text-amber-500" />
+                              <Sparkles className="w-3 h-3 text-amber-500" />
                               Coincidencias Sugeridas
                             </h4>
                             <div className="space-y-3">
@@ -790,7 +795,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
                             { label: 'Otros Ingresos', icon: TrendingUp, type: 'INCOME' as const }
                           ] : [
                             { label: 'Gasto Fijo', icon: Zap, type: 'FIXED_EXPENSE' as const },
-                            { label: 'Comisión Bancaria', icon: Building2, type: 'ALBARAN' as const },
+                            { label: 'Comisión Bancaria', icon: Building2, type: 'FIXED_EXPENSE' as const },
                             { label: 'Suministros', icon: Zap, type: 'FIXED_EXPENSE' as const },
                             { label: 'Personal', icon: TrendingDown, type: 'FIXED_EXPENSE' as const },
                             { label: 'Alquiler', icon: Scale, type: 'FIXED_EXPENSE' as const }
@@ -822,6 +827,245 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
           </div>
         </>
       )}
+
+      {/* --- SWIPE RECONCILER MODAL --- */}
+      <AnimatePresence>
+        {isSwipeMode && (
+          <SwipeReconciler 
+            data={data} 
+            onSave={onSave} 
+            onClose={() => setIsSwipeMode(false)} 
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+// --- SWIPE RECONCILER COMPONENT VIP ---
+
+interface SwipeReconcilerProps {
+  data: AppData;
+  onSave: (newData: AppData) => Promise<void>;
+  onClose: () => void;
+}
+
+const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, onClose }) => {
+  const pendingMovements = useMemo(() => {
+    return (data.banco || []).filter((b: any) => b.status === 'pending');
+  }, [data.banco]);
+
+  const [currentIndex, setCurrentIndex] = useState(0);
+  
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') next();
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [currentIndex, pendingMovements.length]);
+
+  const next = () => {
+    setCurrentIndex(prev => prev + 1);
+  };
+
+  if (pendingMovements.length === 0 || currentIndex >= pendingMovements.length) {
+    return (
+      <div className="fixed inset-0 z-[1000] flex justify-center items-center p-4">
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-slate-900/95 backdrop-blur-xl" />
+        <motion.div 
+          initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} 
+          className="relative z-10 flex flex-col items-center text-center"
+        >
+          <div className="w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center mb-6 shadow-[0_0_60px_-10px_rgba(16,185,129,0.5)]">
+            <CheckCircle2 className="w-12 h-12 text-white" />
+          </div>
+          <h2 className="text-4xl font-black text-white tracking-tighter mb-2">¡Todo al día!</h2>
+          <p className="text-emerald-400 font-bold uppercase tracking-widest mb-8">No hay más movimientos pendientes</p>
+          <button onClick={onClose} className="bg-white text-slate-900 px-8 py-4 rounded-full font-black text-sm hover:scale-105 transition shadow-xl">
+            VOLVER AL PANEL
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  const currentItem = pendingMovements[currentIndex];
+
+  const matches = useMemo(() => {
+    if (!currentItem) return [];
+    const amt = Math.abs(Num.parse(currentItem.amount));
+    const results: any[] = [];
+
+    if (Num.parse(currentItem.amount) > 0) {
+      data.cierres?.forEach((c: any) => {
+        if (Math.abs(Num.parse(c.tarjeta) - amt) <= 2) {
+          const zNum = `Z-${c.date.replace(/-/g, '')}`;
+          const fZ = data.facturas?.find((f: any) => f.num === zNum);
+          if (fZ && !fZ.reconciled) {
+            results.push({ type: 'FACTURA Z', id: fZ.id, date: c.date, title: `Cierre Caja ${c.date}`, amount: Num.parse(c.tarjeta), color: 'emerald' });
+          }
+        }
+      });
+      data.facturas?.forEach((f: any) => {
+        if (f.cliente !== "Z DIARIO" && !f.reconciled && Num.parse(f.total) > 0 && Math.abs(Num.parse(f.total) - amt) <= 2) {
+          results.push({ type: 'FACTURA CLIENTE', id: f.id, date: f.date, title: `Fac ${f.num} (${f.cliente})`, amount: Num.parse(f.total), color: 'teal' });
+        }
+      });
+    } else {
+      data.albaranes?.forEach((a: any) => {
+        if (!a.reconciled && Math.abs(Num.parse(a.total) - amt) <= 2) {
+          results.push({ type: 'ALBARÁN', id: a.id, date: a.date, title: `${a.prov} (${a.num})`, amount: Num.parse(a.total), color: 'indigo' });
+        }
+      });
+      data.facturas?.forEach((f: any) => {
+        if (Num.parse(f.total) < 0 && !f.reconciled && Math.abs(Math.abs(Num.parse(f.total)) - amt) <= 2) {
+          results.push({ type: 'FACTURA PROV', id: f.id, date: f.date, title: `Fac ${f.num} (${f.prov || 'Prov'})`, amount: Math.abs(Num.parse(f.total)), color: 'rose' });
+        }
+      });
+    }
+    return results;
+  }, [currentItem, data.cierres, data.facturas, data.albaranes]);
+
+  const handleLink = async (matchType: string, docId: string) => {
+    const newData = { ...data };
+    const bItem: any = newData.banco.find((b: any) => b.id === currentItem.id);
+    if (!bItem) return;
+
+    if (matchType === 'ALBARÁN') {
+      const alb = newData.albaranes.find((a: any) => a.id === docId);
+      if (alb) { alb.reconciled = true; alb.paid = true; }
+      bItem.link = { type: 'ALBARAN', id: docId }; 
+    } else {
+      const fac = newData.facturas.find((f: any) => f.id === docId);
+      if (fac) { fac.reconciled = true; fac.paid = true; bItem.link = { type: 'FACTURA', id: docId }; }
+    }
+
+    bItem.status = 'matched';
+    await onSave(newData);
+  };
+
+  const progressPercent = Math.round((currentIndex / pendingMovements.length) * 100);
+
+  return (
+    <div className="fixed inset-0 z-[1000] flex justify-center items-center p-4 overflow-hidden">
+      <motion.div 
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-900/95 backdrop-blur-xl"
+      />
+      
+      <div className="relative z-10 w-full max-w-lg flex flex-col items-center">
+        <div className="w-full flex justify-between items-center mb-6 px-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center shadow-lg">
+              <Sparkles className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h3 className="text-white font-black text-lg leading-none">Swipe Mode</h3>
+              <p className="text-indigo-400 text-[10px] font-black uppercase tracking-widest mt-1">
+                {pendingMovements.length - currentIndex} RESTANTES
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-white/40 hover:text-white hover:rotate-90 transition-all">
+            <CloseIcon className="w-8 h-8" />
+          </button>
+        </div>
+
+        <AnimatePresence mode="popLayout">
+          <motion.div 
+            key={currentItem.id}
+            initial={{ scale: 0.9, opacity: 0, y: 50 }}
+            animate={{ scale: 1, opacity: 1, y: 0, x: 0, rotate: 0 }}
+            exit={{ scale: 0.9, opacity: 0, x: -200, rotate: -10 }} 
+            transition={{ type: "spring", stiffness: 300, damping: 25 }}
+            drag="x"
+            dragConstraints={{ left: 0, right: 0 }}
+            dragElastic={0.7}
+            onDragEnd={(e, { offset, velocity }) => {
+              const swipeThreshold = -50;
+              if (offset.x < swipeThreshold || velocity.x < -500) {
+                next();
+              }
+            }}
+            className="w-full bg-white rounded-[3rem] p-8 shadow-2xl flex flex-col min-h-[500px] cursor-grab active:cursor-grabbing"
+          >
+            <div className="text-center mb-8 pointer-events-none">
+              <span className={cn(
+                "text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest mb-4 inline-block",
+                Num.parse(currentItem.amount) > 0 ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"
+              )}>
+                {Num.parse(currentItem.amount) > 0 ? 'Ingreso detectado' : 'Gasto detectado'}
+              </span>
+              <h2 className="text-2xl font-black text-slate-800 leading-tight mb-2 line-clamp-2">{currentItem.desc}</h2>
+              <p className="text-5xl font-black text-slate-900 tracking-tighter">{Num.fmt(currentItem.amount)}</p>
+              <p className="text-[10px] text-slate-400 font-bold mt-3 uppercase tracking-widest bg-slate-50 inline-block px-3 py-1 rounded-lg">Fecha: {currentItem.date}</p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 mb-6">
+              {matches.length > 0 ? (
+                <div className="space-y-3">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 text-center">Coincidencias (Tap para enlazar)</p>
+                  {matches.map((m: any, idx: number) => (
+                    <motion.div 
+                      key={idx}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      onClick={() => handleLink(m.type, m.id)}
+                      className={cn(
+                        "flex justify-between items-center p-5 rounded-[2rem] border-2 cursor-pointer transition-all shadow-sm hover:shadow-md",
+                        m.color === 'emerald' ? "bg-emerald-50 border-emerald-100 hover:border-emerald-300" : 
+                        m.color === 'teal' ? "bg-teal-50 border-teal-100 hover:border-teal-300" :
+                        m.color === 'indigo' ? "bg-indigo-50 border-indigo-100 hover:border-indigo-300" : "bg-rose-50 border-rose-100 hover:border-rose-300"
+                      )}
+                    >
+                      <div className="text-left">
+                        <span className={cn(
+                          "text-[8px] font-black uppercase tracking-widest",
+                          m.color === 'emerald' ? "text-emerald-700" : 
+                          m.color === 'teal' ? "text-teal-700" :
+                          m.color === 'indigo' ? "text-indigo-700" : "text-rose-700"
+                        )}>{m.type}</span>
+                        <p className="text-xs font-black text-slate-800 mt-1">{m.title}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-black text-sm text-slate-800">{Num.fmt(m.amount)}</p>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-center opacity-30 py-10 pointer-events-none">
+                  <Search className="w-12 h-12 mb-4" />
+                  <p className="text-xs font-black uppercase tracking-widest">No hay coincidencias claras</p>
+                  <p className="text-[10px] font-bold mt-1">Sáltalo o usa la lista manual</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-4 mt-auto">
+              <button 
+                onClick={next}
+                className="flex-1 bg-slate-100 text-slate-400 py-5 rounded-[2rem] font-black text-xs uppercase tracking-widest hover:bg-slate-200 hover:text-slate-600 transition flex items-center justify-center gap-2"
+              >
+                <ArrowDownLeft className="w-4 h-4 rotate-45" /> SALTAR
+              </button>
+            </div>
+          </motion.div>
+        </AnimatePresence>
+
+        <div className="mt-8 w-full px-8">
+          <div className="h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
+            <motion.div 
+              initial={{ width: 0 }} 
+              animate={{ width: `${progressPercent}%` }} 
+              className="h-full bg-indigo-500 rounded-full" 
+            />
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
