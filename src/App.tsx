@@ -3,11 +3,11 @@ import {
   LayoutDashboard, Package, Wallet, ChefHat, Users, History, Settings, Search,
   ArrowUpRight, ArrowDownRight, TrendingUp, AlertCircle, X, Download, RefreshCw,
   FileText, Truck, Scale, Zap, Building2, PieChart, Lock, Handshake, Import, Database,
-  Sparkles // ✨ IMPORTAMOS EL ICONO DE LAS ESTRELLITAS
+  Sparkles 
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-// 🚀 IMPORTAMOS NUESTRO NUEVO HOOK Y SUPABASE
+// 🚀 IMPORTAMOS SUPABASE Y TU HOOK
 import { supabase } from './services/supabase';
 import { useArumeData } from './hooks/useArumeData';
 
@@ -27,14 +27,20 @@ import { MenuView } from './components/MenuView';
 import { CierreContableView } from './components/CierreContableView';
 import { StockView } from './components/StockView';
 import { DashboardView } from './components/DashboardView';
-import { AIConsultant } from './components/AIConsultant'; // 🤖 IMPORTAMOS TU NUEVA IA
+import { AIConsultant } from './components/AIConsultant'; 
 import { NavButton } from './components/NavButton';
 import { SettingsModal } from './components/SettingsModal';
 
-// --- Main App ---
+/* =======================================================
+ * 🛡️ ESCUDO ANTI-FALLOS (Recomendación de Copilot)
+ * ======================================================= */
+const jsonSafeClone = <T,>(obj: T): T => {
+  try { return JSON.parse(JSON.stringify(obj)); } catch { return obj; }
+};
 
+// --- Main App ---
 export default function App() {
-  // 🚀 CONECTAMOS EL CABLE A LA BASE DE DATOS
+  // 🚀 CONEXIÓN A BASE DE DATOS
   const { data: db, loading, saveData, setData, reloadData } = useArumeData();
 
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -52,11 +58,11 @@ export default function App() {
     }
   }, [isConfigOpen]);
 
-  // Realtime Subscription (Suscripción a la nube)
+  // 🚀 Realtime Subscription MEJORADO (Captura INSERT y UPDATE)
   useEffect(() => {
     const channel = supabase.channel('arume-data')
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'arume_data' }, payload => {
-        console.log('🔄 Cambio detectado desde n8n u otra pestaña!', payload);
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'arume_data' }, payload => {
+        console.log('🔄 Cambio detectado en arume_data:', payload.eventType);
         reloadData();
       })
       .subscribe();
@@ -66,14 +72,14 @@ export default function App() {
     };
   }, [reloadData]);
 
-  // Auto-migración (Lógica de revisión de datos)
+  // Auto-migración y setup inicial
   useEffect(() => {
     if (db && !db.config?.n8nUrlBanco) {
       let finalData = { ...db };
       let needsUpdate = false;
 
       const keys = ['banco','platos','recetas','ingredientes','ventas_menu','cierres','facturas','albaranes','gastos_fijos','activos','proveedores','cierres_mensuales'];
-      keys.forEach(k => { if(!finalData[k]) { finalData[k] = []; needsUpdate = true; } });
+      keys.forEach(k => { if(!finalData[k as keyof AppData]) { (finalData as any)[k] = []; needsUpdate = true; } });
       if(!finalData.diario) { finalData.diario = []; needsUpdate = true; }
       if(!finalData.control_pagos) { finalData.control_pagos = {}; needsUpdate = true; }
       if(!finalData.priceHistory) { finalData.priceHistory = {}; needsUpdate = true; }
@@ -98,11 +104,25 @@ export default function App() {
     }
   }, [db, setData]);
 
+  // 🚀 GUARDADO HÍBRIDO (El corazón que nunca falla)
   const handleSave = async (newData: AppData) => {
+    const payload = jsonSafeClone(newData);
+
+    // 1. Guardado Local (Inmediato, tu salvavidas si no hay internet)
     try {
-      await saveData(newData);
+      localStorage.setItem('arume_erp_backup', JSON.stringify(payload));
+      setData(payload); // Actualiza la UI visualmente al instante
     } catch (e) {
-      console.error("Error guardando:", e);
+      console.warn("Aviso: Memoria local llena, pero seguimos intentando la nube.");
+    }
+
+    // 2. Guardado en Supabase a través de tu Hook
+    try {
+      await saveData(payload);
+      console.log("✅ Guardado en Supabase OK");
+    } catch (e) {
+      console.error("❌ Error guardando en Supabase. Se han guardado los datos localmente en tu dispositivo.", e);
+      // Opcional: Mostrar un pequeño toast o alerta de que estás offline
     }
   };
 
@@ -117,7 +137,7 @@ export default function App() {
   }
 
   // ⚠️ SI NO HAY DATOS (Pantalla de Restaurar Backup)
-  if (!db) {
+  if (!db || Object.keys(db).length === 0) {
     return (
       <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-6 text-center animate-fade-in">
         <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center shadow-xl mb-6">
@@ -159,7 +179,7 @@ export default function App() {
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard': return <DashboardView data={db} />;
-      case 'ia': return <AIConsultant data={db} />; // 🤖 AÑADIMOS LA PANTALLA DE LA IA
+      case 'ia': return <AIConsultant data={db} />; 
       case 'diario': return <CashView data={db} onSave={handleSave} />;
       case 'importador': return <ImportView data={db} onSave={handleSave} onNavigate={setActiveTab} />;
       case 'facturas': return <InvoicesView data={db} onSave={handleSave} />;
@@ -168,7 +188,7 @@ export default function App() {
       case 'liquidez': return <LiquidacionesView data={db} onSave={handleSave} />;
       case 'banco': return <BancoView data={db} onSave={handleSave} />;
       case 'fixed': return <FixedExpensesView data={db} onSave={handleSave} />;
-      case 'informes': return <ReportsView db={db} />;
+      case 'informes': return <ReportsView data={db} />;
       case 'menus': return <MenuView db={db} onSave={handleSave} />;
       case 'cierre': return <CierreContableView data={db} onSave={handleSave} />;
       case 'stock': return <StockView data={db} onSave={handleSave} />;
@@ -230,10 +250,7 @@ export default function App() {
         <nav id="navbar-container">
           <div className="flex items-center justify-between w-full overflow-x-auto gap-4 px-6 py-3 no-scrollbar">
             <NavButton icon={LayoutDashboard} label="Dash" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />
-            
-            {/* ✨ AÑADIMOS EL BOTÓN EN EL MENÚ INFERIOR ✨ */}
             <NavButton icon={Sparkles} label="IA" active={activeTab === 'ia'} onClick={() => setActiveTab('ia')} />
-            
             <NavButton icon={Wallet} label="Diar" active={activeTab === 'diario'} onClick={() => setActiveTab('diario')} />
             <NavButton icon={Import} label="Impo" active={activeTab === 'importador'} onClick={() => setActiveTab('importador')} />
             <NavButton icon={FileText} label="Fact" active={activeTab === 'facturas'} onClick={() => setActiveTab('facturas')} />
