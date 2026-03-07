@@ -2,7 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { 
   Package, Search, Plus, Minus, AlertCircle, TrendingDown, 
   TrendingUp, History, ArrowRight, RefreshCw, Zap, 
-  ShoppingBag, Info, Utensils, Bike, Store, SplitSquareHorizontal
+  ShoppingBag, Info, Utensils, Store, SplitSquareHorizontal,
+  Hotel // 🚀 MEJORA: Icono cambiado de Bike a Hotel
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppData, Ingrediente, KardexEntry } from '../types';
@@ -16,16 +17,17 @@ interface StockViewProps {
   onSave: (newData: AppData) => Promise<void>;
 }
 
+// 🚀 MEJORA: Tipos alineados con la nueva visión B2B
 type BusinessUnit = 'REST' | 'DLV' | 'SHOP';
 
 const UNIT_CONFIG = {
   'REST': { name: 'Restaurante Arume', icon: Utensils, color: 'bg-rose-600', text: 'text-rose-600', bg: 'bg-rose-50', aiRole: 'Jefe de Cocina y Maitre' },
-  'DLV': { name: 'Delivery Arume', icon: Bike, color: 'bg-orange-500', text: 'text-orange-500', bg: 'bg-orange-50', aiRole: 'Gestor de Operaciones de Delivery' },
+  // 🚀 MEJORA: Nombre, icono y rol de IA actualizados para Hoteles
+  'DLV': { name: 'Catering Hoteles', icon: Hotel, color: 'bg-amber-500', text: 'text-amber-500', bg: 'bg-amber-50', aiRole: 'Gestor B2B de Cuentas de Hoteles' },
   'SHOP': { name: 'Boutique de Sakes', icon: Store, color: 'bg-indigo-600', text: 'text-indigo-600', bg: 'bg-indigo-50', aiRole: 'Sumiller experto en Sakes' }
 };
 
 export const StockView: React.FC<StockViewProps> = ({ data, onSave }) => {
-  // 🚀 NUEVO: Estado para controlar en qué Unidad de Negocio estamos
   const [activeUnit, setActiveUnit] = useState<BusinessUnit>('SHOP');
   
   const [searchTerm, setSearchTerm] = useState('');
@@ -46,11 +48,19 @@ export const StockView: React.FC<StockViewProps> = ({ data, onSave }) => {
     });
   }, [data.ingredientes, activeUnit]);
 
+  // 🚀 MEJORA: Categorías por defecto más apropiadas para cada bloque
   const familias = useMemo(() => {
     const famsFromData = new Set(unitIngredients.map(i => i.fam));
-    const defaults = activeUnit === 'SHOP' 
-      ? ['Todas', 'Junmai', 'Ginjo', 'Daiginjo', 'Nigori', 'Espumosos']
-      : ['Todas', 'Materia Prima', 'Bebidas', 'Embalaje'];
+    let defaults = ['Todas'];
+    
+    if (activeUnit === 'SHOP') {
+      defaults = ['Todas', 'Junmai', 'Ginjo', 'Daiginjo', 'Nigori', 'Espumosos'];
+    } else if (activeUnit === 'REST') {
+      defaults = ['Todas', 'Fresco', 'Despensa', 'Bebidas', 'Limpieza'];
+    } else if (activeUnit === 'DLV') {
+      defaults = ['Todas', 'Materia Prima', 'Envases B2B', 'Merchandising'];
+    }
+
     return famsFromData.size > 0 ? ['Todas', ...Array.from(famsFromData)] : defaults;
   }, [unitIngredients, activeUnit]);
 
@@ -76,11 +86,11 @@ export const StockView: React.FC<StockViewProps> = ({ data, onSave }) => {
       date: new Date().toISOString().split('T')[0],
       qty: Math.abs(adjustValue),
       type: adjustValue > 0 ? 'IN' : 'OUT',
-      unit: selectedIng.unit || 'Botella',
+      unit: selectedIng.unit || 'uds',
       price: selectedIng.cost,
       reason: adjustReason,
       user: 'Gerencia',
-      unidad_negocio: activeUnit // 🚀 CRÍTICO: Trazabilidad para el reparto de beneficios
+      unidad_negocio: activeUnit 
     } as any;
 
     const newIngredientes = data.ingredientes.map(i => 
@@ -138,7 +148,7 @@ export const StockView: React.FC<StockViewProps> = ({ data, onSave }) => {
 
   return (
     <div className="animate-fade-in space-y-6 pb-24">
-      {/* 🚀 Selector Multi-Unidad de Negocio */}
+      {/* Selector Multi-Unidad de Negocio */}
       <div className="bg-slate-100 p-1.5 rounded-3xl flex gap-1 shadow-inner overflow-x-auto no-scrollbar">
         {(Object.keys(UNIT_CONFIG) as BusinessUnit[]).map((unit) => {
           const Config = UNIT_CONFIG[unit];
