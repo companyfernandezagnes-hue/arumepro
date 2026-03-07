@@ -7,7 +7,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { AppData, Albaran } from '../types';
 import { Num, ArumeEngine } from '../services/engine';
 import { cn } from '../lib/utils';
-import { proxyFetch } from '../services/api';
 import { NotificationService } from '../services/notifications'; 
 import { GoogleGenAI } from "@google/genai";
 
@@ -25,15 +24,64 @@ const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string
   { id: 'CORP', name: 'Socios / Corp', icon: Users, color: 'text-slate-600', bg: 'bg-slate-100' },
 ];
 
-const REAL_PARTNERS = ['PAU', 'JERONI', 'AGNES', 'ONLY ONE', 'TIENDA DE SAKES'];
+/* =======================================================
+ * 🛡️ FUNCIONES PRO: IA INDESTRUCTIBLE
+ * ======================================================= */
+
+// Extractor JSON Seguro (Respaldo)
+const extractJSON = (rawText: string) => {
+  try {
+    if (!rawText) throw new Error("Respuesta vacía");
+    const clean = rawText.replace(/(?:json)?/gi, '').replace(/\uFEFF/g, '').trim();
+    const start = clean.indexOf('{');
+    const end = clean.lastIndexOf('}');
+    if (start === -1 || end === -1 || end <= start) throw new Error("No se detectó JSON");
+    return JSON.parse(clean.substring(start, end + 1));
+  } catch (err) {
+    console.error("Fallo al parsear IA:", rawText);
+    throw new Error("La IA no devolvió JSON válido.");
+  }
+};
+
+// Compresor Eficiente para imágenes pesadas
+const compressImage = async (file: File | Blob): Promise<string> => {
+  const MAX_BYTES = 4 * 1024 * 1024; // Límite seguro
+  const MAX_W = 1600, MAX_H = 1600; // Un poco más de resolución para leer textos pequeños
+
+  const bitmap = await createImageBitmap(file);
+  let { width, height } = bitmap;
+  const ratio = Math.min(MAX_W / width, MAX_H / height, 1);
+  const w = Math.max(1, Math.round(width * ratio));
+  const h = Math.max(1, Math.round(height * ratio));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d', { alpha: false });
+  ctx?.drawImage(bitmap, 0, 0, w, h);
+
+  const blob: Blob = await new Promise((resolve) =>
+    canvas.toBlob((b) => resolve(b as Blob), 'image/jpeg', 0.8)
+  );
+
+  const finalBlob = blob.size > MAX_BYTES
+    ? await new Promise<Blob>(res => canvas.toBlob((b) => res(b as Blob), 'image/jpeg', 0.6))
+    : blob;
+
+  const b64 = await new Promise<string>((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve((fr.result as string).split(',')[1]);
+    fr.onerror = reject;
+    fr.readAsDataURL(finalBlob);
+  });
+
+  return `data:image/jpeg;base64,${b64}`;
+};
 
 export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const [searchQ, setSearchQ] = useState('');
   const [selectedUnit, setSelectedUnit] = useState<BusinessUnit | 'ALL'>('ALL'); 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [priceAlerts, setPriceAlerts] = useState<{n: string, old: number, new: number}[]>([]);
-  
-  // 🚀 NUEVO: Previsualización de la imagen pegada desde WhatsApp
   const [scannedImage, setScannedImage] = useState<string | null>(null);
   
   const [form, setForm] = useState({
@@ -109,68 +157,59 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     return { grandTotal, taxes };
   }, [analyzedItems]);
 
-  const handleQuickAdd = () => {
-    const t = Num.parse(quickCalc.total);
-    if (t > 0 && quickCalc.name) {
-      const calc = ArumeEngine.calcularImpuestos(t, quickCalc.iva as any);
-      const newLine = `1x ${quickCalc.name} ${quickCalc.iva}% ${calc.total.toFixed(2)}`;
-      setForm(prev => ({ ...prev, text: prev.text ? `${prev.text}\n${newLine}` : newLine }));
-      setQuickCalc({ name: '', total: '', iva: 10 });
-    }
-  };
-
-  // 🚀 NÚCLEO DE IA AISLADO (Sirve para archivos subidos y para pegar de WhatsApp)
-  const processImageWithAI = async (file: File) => {
+  // 🚀 NÚCLEO DE IA BLINDADO PARA ALBARANES
+  const processImageWithAI = async (file: File | Blob) => {
     const apiKey = localStorage.getItem('gemini_api_key');
-    if (!apiKey) {
-      alert("⚠️ Conecta tu IA primero en la pestaña 'IA' (Menú inferior).");
-      return;
-    }
+    if (!apiKey) return alert("⚠️ Conecta tu IA primero en Configuración.");
 
     setIsAnalyzing(true);
     setPriceAlerts([]);
     
     try {
-      // 1. Mostrar la imagen en pantalla para control visual
+      // 1. Mostrar preview original rápidamente
       const reader = new FileReader();
       reader.onload = (e) => setScannedImage(e.target?.result as string);
       reader.readAsDataURL(file);
 
-      // 2. Preparar archivo para la IA
-      const buffer = await file.arrayBuffer();
-      const base64String = btoa(new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), ''));
+      // 2. Comprimir para el envío a Gemini
+      const base64Image = await compressImage(file);
+      const base64Data = base64Image.split(',')[1];
         
-      const ai = new GoogleGenAI({ apiKey: apiKey });
+      const ai = new GoogleGenAI({ apiKey });
       
-      const prompt = `Analiza esta factura o ticket de compra de un grupo hostelero. Extrae los siguientes datos y responde EXCLUSIVAMENTE en formato JSON:
-      1. proveedor: Nombre del proveedor
-      2. fecha: Fecha en formato YYYY-MM-DD
-      3. lineas: Desglose de productos en texto puro, cada producto en una línea nueva con el formato exacto: 'Cantidad Nombre PrecioTotal'. (Ejemplo: '5 kg Salmón 150.00').
-      4. unidad: ¡REGLA DE NEGOCIO CRÍTICA! Analiza la DIRECCIÓN de entrega en la factura y el TIPO DE PRODUCTOS para decidir a qué bloque va:
-         - Si la dirección es "Calle Catalunya" (o Catalunya):
-             * Si los productos son mayoritariamente bebidas (Sakes, vinos) -> el valor debe ser "SHOP" (Tienda).
-             * Si los productos son comida, frescos o envases -> el valor debe ser "DLV" (Catering Hoteles).
-         - Si la dirección es "Avenida Argentina" (o Av. Argentina) -> el valor debe ser "REST" (Restaurante).
-         - Si no pone dirección, adivina por el proveedor: proveedores de alcohol="SHOP", proveedores de comida generales="REST".`;
+      const prompt = `Analiza esta factura o albarán de compra. Responde SOLO con un objeto JSON:
+      {
+        "proveedor": "Nombre del proveedor",
+        "fecha": "YYYY-MM-DD",
+        "lineas": "1x Producto A 10.50\\n2kg Producto B 20.00",
+        "unidad": "REST"
+      }
+      REGLAS:
+      - 'lineas' debe ser un string con saltos de línea (\\n). Formato estricto: Cantidad Nombre PrecioTotal (Ej: 5 kg Salmón 150.00). Usa punto para decimales.
+      - Para 'unidad', mira la dirección de entrega:
+        * "Calle Catalunya": bebidas/sakes="SHOP", comida/envases="DLV".
+        * "Avenida Argentina": "REST".
+        * Si no hay dirección, adivina por el proveedor (Licor="SHOP", Comida="REST").`;
 
+      // ⚠️ Configuración forzada a JSON
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
         contents: [{ role: "user", parts: [
-            { inlineData: { data: base64String, mimeType: file.type } },
-            { text: prompt }
+            { text: prompt }, 
+            { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
         ]}],
+        config: { responseMimeType: "application/json", temperature: 0.1 }
       });
 
-      const textRes = response.text?.replace(/```json/g, '').replace(/```/g, '').trim();
-      const res = JSON.parse(textRes || '{}');
+      const raw = response.text || "";
+      const res = extractJSON(raw); // Extractor seguro
         
       const newLines = (res.lineas || '').split('\n').map(parseSmartLine).filter(Boolean);
       const alerts: any[] = [];
       
       newLines.forEach((nl: any) => {
         const history = data.albaranes?.flatMap(a => a.items || [])
-          .filter(i => norm(i.n) === norm(nl.n))
-          .sort((a, b) => 0); 
+          .filter(i => norm(i.n) === norm(nl.n));
         
         const lastPrice = history && history.length > 0 ? history[history.length - 1].unit : null;
         if (lastPrice && nl.unit > lastPrice * 1.05) { 
@@ -180,7 +219,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
       setPriceAlerts(alerts);
       
-      // La IA rellena, pero tú tienes la última palabra
       setForm(prev => ({
         ...prev,
         prov: res.proveedor || prev.prov,
@@ -189,9 +227,9 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         unitId: (res.unidad as BusinessUnit) || 'REST' 
       }));
 
-    } catch (err) {
-      console.error(err);
-      alert("Error leyendo el ticket con IA. Verifica que la imagen sea nítida.");
+    } catch (err: any) {
+      console.error("Error Scanner Albaranes:", err);
+      alert(`⚠️ Problema leyendo el albarán: ${err?.message ?? 'Prueba con más luz o acercando la foto.'}`);
       setScannedImage(null);
     } finally {
       setIsAnalyzing(false);
@@ -204,9 +242,9 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     e.target.value = '';
   };
 
-  // 🚀 MAGIA DE WHATSAPP: Pegar imagen (Ctrl+V) en cualquier parte de la pantalla
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
+      if (isAnalyzing) return;
       const items = e.clipboardData?.items;
       if (!items) return;
       
@@ -215,7 +253,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
           const blob = items[i].getAsFile();
           if (blob) {
             processImageWithAI(blob);
-            break; // Solo procesamos la primera imagen que encuentre
+            break;
           }
         }
       }
@@ -223,7 +261,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [data]);
+  }, [data, isAnalyzing]);
 
   const handleSaveAlbaran = async () => {
     if (!form.prov) return alert("Por favor, introduce el nombre del proveedor.");
@@ -287,7 +325,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
     setForm({ prov: '', date: new Date().toISOString().split('T')[0], num: '', socio: 'Arume', notes: '', text: '', paid: false, forceDup: false, unitId: 'REST' });
     setPriceAlerts([]);
-    setScannedImage(null); // Limpiamos la imagen tras guardar
+    setScannedImage(null); 
     alert("¡Albarán guardado correctamente en su bloque!");
   };
 
@@ -332,7 +370,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [data.albaranes, searchQ, selectedUnit]);
 
-  // EL RESTO DEL CÓDIGO (La interfaz HTML) se mantiene exactamente igual, solo añadimos la previsualización de la foto
 
   return (
     <div className="animate-fade-in space-y-6 pb-24">
@@ -344,7 +381,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       <header className="flex flex-col md:flex-row justify-between items-center bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 gap-4">
         <div>
           <h2 className="text-xl font-black text-slate-800 tracking-tighter">Compras & Gastos</h2>
-          <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest">Multi-Local IA Activa</p>
+          <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest">Multi-Local IA Activa PRO</p>
         </div>
         <div className="flex gap-2 items-center flex-wrap justify-center">
           
@@ -381,11 +418,11 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
             <Layers className="w-4 h-4" /> AGRUPAR
           </button>
 
-          {/* 🚀 BOTÓN IA Y AVISO DE PORTAPAPELES */}
-          <label className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-5 py-3 rounded-2xl text-[10px] font-black hover:shadow-lg hover:scale-105 transition cursor-pointer shadow-md flex items-center gap-2">
+          {/* 🚀 BOTÓN IA (Deshabilitado si está analizando) */}
+          <label className={cn("bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-5 py-3 rounded-2xl text-[10px] font-black transition shadow-md flex items-center gap-2", isAnalyzing ? "opacity-50 cursor-wait" : "hover:shadow-lg hover:scale-105 cursor-pointer")}>
             <Camera className="w-4 h-4" />
-            <span>SUBIR IMAGEN O (Ctrl+V)</span>
-            <input type="file" onChange={handleDirectScan} className="hidden" accept="image/*, application/pdf" />
+            <span>{isAnalyzing ? 'PROCESANDO...' : 'SUBIR IMAGEN O (Ctrl+V)'}</span>
+            <input type="file" disabled={isAnalyzing} onChange={handleDirectScan} className="hidden" accept="image/*, application/pdf" />
           </label>
         </div>
       </header>
@@ -445,7 +482,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
             {isAnalyzing && (
               <div className="absolute inset-0 bg-white/95 z-20 flex flex-col items-center justify-center text-center p-4 backdrop-blur-sm">
                 <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-3"></div>
-                <p className="text-xs font-black text-indigo-600 animate-pulse uppercase tracking-widest">IA analizando origen...</p>
+                <p className="text-xs font-black text-indigo-600 animate-pulse uppercase tracking-widest">IA analizando origen y datos...</p>
               </div>
             )}
 
@@ -594,8 +631,9 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
             </div>
 
             <button 
+              disabled={isAnalyzing}
               onClick={handleSaveAlbaran}
-              className="w-full mt-4 bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-xl hover:bg-indigo-700 transition active:scale-95"
+              className="w-full mt-4 bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-xl hover:bg-indigo-700 transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               GUARDAR COMPRA
             </button>
