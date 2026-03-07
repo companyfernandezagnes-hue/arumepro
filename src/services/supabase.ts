@@ -1,12 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
+import { AppData } from '../types';
 
+// 1. Conexión con TUS credenciales exactas (URL y Clave Pública)
 const SUPABASE_URL = "https://awbgboucnbsuzojocbuy.supabase.co";
-const SUPABASE_KEY = "sb_secret_NkfohnwdWUybssY1sBFZEg_h-CVLF7c";
+const SUPABASE_KEY = "sb_publishable_drOQ5PsFA8eox_aRTXNATQ_5kibM6ST";
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// SOLO para desarrollo
-if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+// 2. SOLO para desarrollo (Para poder hacer pruebas desde la consola si hace falta)
+if (typeof window !== 'undefined') {
   // @ts-ignore
   window.supabase = supabase;
 }
@@ -14,6 +16,7 @@ if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
 // ================ Utilidades Robustas ==================
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
+// Sistema de reintentos: Si el internet falla 1 segundo, lo vuelve a intentar solo sin que te des cuenta
 async function withRetries<T>(fn: () => Promise<T>, { retries = 3, baseMs = 700, maxMs = 3000 } = {}): Promise<T> {
   let attempt = 0;
   while (true) {
@@ -29,6 +32,7 @@ async function withRetries<T>(fn: () => Promise<T>, { retries = 3, baseMs = 700,
   }
 }
 
+// Evita que la app se quede "colgada" pensando para siempre
 async function withTimeout<T>(p: Promise<T>, ms = 8000): Promise<T> {
   const ac = new AbortController();
   const to = setTimeout(() => ac.abort(), ms);
@@ -42,8 +46,7 @@ async function withTimeout<T>(p: Promise<T>, ms = 8000): Promise<T> {
   }
 }
 
-// ================== Lectura ============================
-
+// ================== Lectura de Datos ============================
 export async function fetchArumeData(retries = 3): Promise<{ data: AppData | null; meta?: { updated_at?: string; version?: number } }> {
   try {
     const exec = async () => {
@@ -55,7 +58,7 @@ export async function fetchArumeData(retries = 3): Promise<{ data: AppData | nul
         
       if (error) throw error;
       
-      // 🚀 EL FIX DE LA MATRIOSKA (Desenvolver los datos si están doblemente anidados)
+      // 🚀 EL FIX DE LA MATRIOSKA (Desenvolver los datos si están doblemente anidados al cargar backups)
       let rawData = data?.data;
       if (rawData && typeof rawData === 'object' && 'data' in rawData && !rawData.banco) {
          console.warn("⚠️ Efecto Matrioska detectado al LEER. Desenvolviendo JSON...");
@@ -76,8 +79,7 @@ export async function fetchArumeData(retries = 3): Promise<{ data: AppData | nul
   }
 }
 
-// ================ Escritura con Concurrencia ===========
-
+// ================ Escritura de Datos ===========================
 export async function saveArumeData(
   data: AppData,
   opts?: { lastKnownUpdatedAt?: string; lastKnownVersion?: number; silent?: boolean; retries?: number }
@@ -85,7 +87,7 @@ export async function saveArumeData(
   const { lastKnownUpdatedAt, lastKnownVersion, silent = false, retries = 3 } = (opts || {});
 
   try {
-    // 🚀 EL FIX DE LA MATRIOSKA (Evitar que se guarde doblemente anidado al subir un Backup)
+    // 🚀 EL FIX DE LA MATRIOSKA AL GUARDAR
     let cleanData = data;
     if (cleanData && typeof cleanData === 'object' && 'data' in cleanData && !(cleanData as any).banco) {
        console.warn("⚠️ Efecto Matrioska detectado al GUARDAR. Limpiando JSON...");
@@ -107,7 +109,7 @@ export async function saveArumeData(
     const meta = await withRetries(() => withTimeout(readMeta()), { retries });
 
     if (lastKnownUpdatedAt && meta?.updated_at && meta.updated_at !== lastKnownUpdatedAt) {
-      if (!silent) alert('⚠️ Se detectaron cambios de otro usuario. Recarga la página.');
+      if (!silent) alert('⚠️ Se detectaron cambios de otro usuario. Recarga la página para no sobreescribir datos.');
       return { ok: false, conflict: true };
     }
 
@@ -126,7 +128,7 @@ export async function saveArumeData(
     return { ok: true, newMeta: { updated_at: up?.updated_at, version: up?.version } };
 
   } catch (error: any) {
-    if (!silent) alert("⚠️ Problema de conexión. No se ha guardado.");
+    if (!silent) alert("⚠️ Problema de conexión. No se ha podido guardar en la nube.");
     return { ok: false, error: error.message };
   }
 }
