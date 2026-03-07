@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
-  Calendar, ChevronLeft, ChevronRight, CreditCard, Banknote, Truck, Sparkles, 
-  Plus, Trash2, CheckCircle2, Clock, AlertTriangle, RefreshCw, Image as ImageIcon, 
-  Scan, FileText, Building2, ShoppingBag, Layers, SplitSquareHorizontal, Mic, Square
+  ChevronLeft, ChevronRight, CreditCard, Banknote, Truck, Sparkles, 
+  Trash2, CheckCircle2, Clock, AlertTriangle, RefreshCw, Image as ImageIcon, 
+  Scan, Building2, ShoppingBag, Layers, SplitSquareHorizontal, Mic, Square
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppData, Cierre, Factura } from '../types';
@@ -24,10 +24,35 @@ interface CashViewProps {
 }
 
 /* =======================================================
- * 🛡️ FUNCIONES PRO: INDESTRUCTIBILIDAD DE IA
+ * 🛡️ NÚCLEO DE ROBUSTEZ Y NORMALIZACIÓN (Nivel Arquitectura)
  * ======================================================= */
 
-// 1. Extractor JSON Respaldo (Si falla el modo JSON nativo)
+// 1. Helpers Numéricos y Fechas (El equivalente a Zod pero nativo)
+const asNum = (v: any, d = 0) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+};
+
+const normalizeDate = (s?: string) => {
+  const v = String(s ?? '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  const m = v.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD local
+};
+
+const parseIA = (raw: any) => ({
+  fecha: normalizeDate(raw?.fecha),
+  efectivo: asNum(raw?.efectivo),
+  tarjeta: asNum(raw?.tarjeta),
+  glovo: asNum(raw?.glovo),
+  uber: asNum(raw?.uber),
+  sobre_cash: asNum(raw?.sobre_cash),
+  gastos: asNum(raw?.gastos),
+  venta_tienda: asNum(raw?.venta_tienda),
+  notas: String(raw?.notas || "")
+});
+
+// 2. Extractor JSON Seguro (Respaldo)
 const extractJSON = (rawText: string) => {
   try {
     if (!rawText) throw new Error("Respuesta vacía");
@@ -38,13 +63,13 @@ const extractJSON = (rawText: string) => {
     return JSON.parse(clean.substring(start, end + 1));
   } catch (err) {
     console.error("Fallo al parsear IA:", rawText);
-    throw new Error("La IA no devolvió JSON válido.");
+    return {}; // Fallback silencioso para no romper la app
   }
 };
 
-// 2. Compresor Eficiente (Para que no falle si subes fotos de 15MB)
+// 3. Compresor de Imágenes Ultra-Eficiente (Bitmap + Blob = Menos RAM)
 const compressImage = async (file: File | Blob): Promise<string> => {
-  const MAX_BYTES = 4 * 1024 * 1024; // 4MB
+  const MAX_BYTES = 4 * 1024 * 1024; // Límite seguro
   const MAX_W = 1200, MAX_H = 1200;
 
   const bitmap = await createImageBitmap(file);
@@ -76,19 +101,37 @@ const compressImage = async (file: File | Blob): Promise<string> => {
   return `data:image/jpeg;base64,${b64}`;
 };
 
+// 4. Limpiador de MIME para Audio (Cross-Browser)
+const cleanMime = (t: string) => {
+  const base = (t || '').split(';')[0].trim().toLowerCase();
+  const ok = ['audio/webm', 'audio/ogg', 'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/mp4'];
+  return ok.includes(base) ? base : 'audio/webm';
+};
+
+// 5. Upsert de Base de Datos (Idempotencia Z)
+function upsertFactura(list: any[], item: any, key = 'num') {
+  const idx = list.findIndex(x => x[key] === item[key]);
+  if (idx >= 0) list[idx] = { ...list[idx], ...item };
+  else list.unshift(item);
+}
+
+
+/* =======================================================
+ * COMPONENTE PRINCIPAL
+ * ======================================================= */
 export const CashView = ({ data, onSave }: CashViewProps) => {
-  const [currentFilterDate, setCurrentFilterDate] = useState(new Date().toISOString().slice(0, 7));
+  const [currentFilterDate, setCurrentFilterDate] = useState(new Date().toLocaleDateString('sv-SE').slice(0, 7));
   const [selectedUnit, setSelectedUnit] = useState<CashBusinessUnit | 'ALL'>('ALL'); 
   const [scanStatus, setScanStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [images, setImages] = useState<{ img1: string | null, img2: string | null }>({ img1: null, img2: null });
   
-  // 🎙️ Estados para grabación de voz
+  // 🎙️ Estados Grabación
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
   const [form, setForm] = useState({
-    date: new Date().toISOString().split('T')[0],
+    date: new Date().toLocaleDateString('sv-SE'),
     efectivo: '', tarjeta: '', glovo: '', uber: '', madisa: '', deliveroo: '',
     cajaFisica: '', tienda: '', notas: '', chkGastoCaja: false
   });
@@ -129,7 +172,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     setCurrentFilterDate(`${y}-${String(m).padStart(2, '0')}`);
   };
 
-  // 🚀 1. LÓGICA DE ESCANEO DE IMAGEN
+  // 🚀 1. LÓGICA DE ESCANEO DE IMAGEN (100% Blindada)
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, slot: 'img1' | 'img2') => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -138,7 +181,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   };
 
   const processImageWithAI = async (file: File | Blob, slot: 'img1' | 'img2' = 'img1') => {
-    const apiKey = localStorage.getItem('gemini_api_key');
+    const apiKey = sessionStorage.getItem('gemini_api_key') || localStorage.getItem('gemini_api_key');
     if (!apiKey) return alert("⚠️ No tienes la clave de IA conectada. Ve a Configuración.");
 
     setScanStatus('loading');
@@ -155,12 +198,12 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         "fecha":"YYYY-MM-DD",
         "efectivo":0, "tarjeta":0, "glovo":0, "uber":0, "sobre_cash":0, "gastos":0, "venta_tienda":0, "notas":""
       }
-      REGLAS:
-      - Todos los números en decimal con punto (no coma).
-      - Si no hay valor, usa 0.
-      - Busca CASH/CONTADO/EFECTIVO/TARJETA/CARD.
-      - Ventas de Sakes/Botellas/Tienda -> "venta_tienda".
-      - "sobre_cash" es el dinero físico contado (sin sumar fondo).`;
+      REGLAS ESTRICTAS:
+      - Todos los valores numéricos como número (no string). Separador decimal: punto.
+      - Si un dato no está explícito -> 0.
+      - "venta_tienda" = ventas de Sakes/Botellas/Tienda.
+      - "sobre_cash" = dinero físico contado (NO sumes fondo).
+      - Responde ÚNICAMENTE con el JSON.`;
 
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
@@ -168,32 +211,35 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         config: { responseMimeType: "application/json", temperature: 0.1 }
       });
 
+      // Extracción y Normalización Segura
       const raw = response.text || "";
-      const ia = extractJSON(raw);
+      const rawJson = raw.includes('{') ? extractJSON(raw) : JSON.parse(raw || '{}');
+      const safe = parseIA(rawJson);
 
       setForm(prev => ({
         ...prev,
-        date: ia.fecha || prev.date,
-        efectivo: ia.efectivo?.toString?.() ?? prev.efectivo,
-        tarjeta: ia.tarjeta?.toString?.() ?? prev.tarjeta,
-        glovo: ia.glovo?.toString?.() ?? prev.glovo,
-        uber: ia.uber?.toString?.() ?? prev.uber,
-        tienda: ia.venta_tienda?.toString?.() ?? prev.tienda,
-        cajaFisica: (typeof ia.sobre_cash === 'number' && !Number.isNaN(ia.sobre_cash)) ? (ia.sobre_cash + 300).toFixed(2) : prev.cajaFisica,
-        notas: (ia.gastos && ia.gastos > 0) ? `Gastos IA: ${ia.gastos}€. ${ia.notas || ''}` : (ia.notas || prev.notas),
-        chkGastoCaja: (ia.gastos && ia.gastos > 0) ? true : prev.chkGastoCaja,
+        date: safe.fecha || prev.date,
+        efectivo: String(safe.efectivo || prev.efectivo),
+        tarjeta: String(safe.tarjeta || prev.tarjeta),
+        glovo: String(safe.glovo || prev.glovo),
+        uber: String(safe.uber || prev.uber),
+        tienda: String(safe.venta_tienda || prev.tienda),
+        cajaFisica: safe.sobre_cash > 0 ? (safe.sobre_cash + 300).toFixed(2) : prev.cajaFisica,
+        notas: safe.gastos > 0 ? `Gastos IA: ${safe.gastos}€. ${safe.notas || ''}` : (safe.notas || prev.notas),
+        chkGastoCaja: safe.gastos > 0 ? true : prev.chkGastoCaja,
       }));
+      
       setScanStatus('success');
     } catch (error: any) {
       console.error("Error Scanner PRO:", error);
       setScanStatus('error');
-      alert(`⚠️ Problema con la IA: ${error?.message ?? 'Falló la lectura'}`);
+      alert(`⚠️ Problema con la IA: ${error?.message ?? 'Prueba con otra foto.'}`);
     } finally {
       setTimeout(() => setScanStatus('idle'), 4000);
     }
   };
 
-  // 🚀 2. MAGIA DE AUDIO: DICTADO ROBUSTO
+  // 🚀 2. MAGIA DE AUDIO: Límite 60s y MimeType Limpio
   const toggleRecording = async () => {
     if (isRecording) {
       mediaRecorderRef.current?.stop();
@@ -213,29 +259,29 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
       };
 
       mediaRecorder.onstop = async () => {
-        const mimeType = mediaRecorder.mimeType || 'audio/webm';
+        const mimeType = cleanMime(mediaRecorder.mimeType);
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
         await processAudioWithAI(audioBlob, mimeType);
       };
 
       mediaRecorder.start();
       setIsRecording(true);
+
+      // Timeout de seguridad: parar a los 60s
+      setTimeout(() => {
+        if (mediaRecorder.state === 'recording') mediaRecorder.stop();
+      }, 60000);
+
     } catch (err) {
       alert("⚠️ No se pudo acceder al micrófono. Da permisos en tu navegador.");
     }
   };
 
   const processAudioWithAI = async (audioBlob: Blob, mimeType: string) => {
-    const apiKey = localStorage.getItem('gemini_api_key');
+    const apiKey = sessionStorage.getItem('gemini_api_key') || localStorage.getItem('gemini_api_key');
     if (!apiKey) return alert("⚠️ No tienes la clave de IA conectada.");
 
     setScanStatus('loading');
-
-    const cleanMimeType = (() => {
-      const t = (mimeType || '').split(';')[0].trim().toLowerCase();
-      if (['audio/webm', 'audio/ogg', 'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/mp4'].includes(t)) return t;
-      return 'audio/webm';
-    })();
 
     const base64Audio = await new Promise<string>((resolve, reject) => {
       const fr = new FileReader();
@@ -246,49 +292,44 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
 
     try {
       const ai = new GoogleGenAI({ apiKey });
-
-      const prompt = `Escucha este mensaje de voz sobre el cierre de caja y devuelve SOLO JSON con:
+      const prompt = `Transcribe la voz sobre el cierre de caja y devuelve SOLO JSON con:
       {
         "efectivo":0, "tarjeta":0, "glovo":0, "uber":0, "sobre_cash":0, "gastos":0, "venta_tienda":0, "notas":""
       }
-      REGLAS:
-      - Números como número (no string) y con punto.
-      - Sakes/Botellas/Tienda -> "venta_tienda".
-      - Dinero físico contado -> "sobre_cash".
-      - Si no se menciona, 0.`;
+      REGLAS: Números como número. Sakes/Botellas -> "venta_tienda". Dinero físico contado -> "sobre_cash".`;
 
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: base64Audio, mimeType: cleanMimeType } }] }],
+        contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: base64Audio, mimeType } }] }],
         config: { responseMimeType: "application/json", temperature: 0.1 }
       });
 
       const raw = response.text || "";
-      const ia = extractJSON(raw);
+      const rawJson = raw.includes('{') ? extractJSON(raw) : JSON.parse(raw || '{}');
+      const safe = parseIA(rawJson);
 
       setForm(prev => ({
         ...prev,
-        efectivo: ia.efectivo?.toString?.() ?? prev.efectivo,
-        tarjeta: ia.tarjeta?.toString?.() ?? prev.tarjeta,
-        glovo: ia.glovo?.toString?.() ?? prev.glovo,
-        uber: ia.uber?.toString?.() ?? prev.uber,
-        tienda: ia.venta_tienda?.toString?.() ?? prev.tienda,
-        cajaFisica: (typeof ia.sobre_cash === 'number' && !Number.isNaN(ia.sobre_cash)) ? (ia.sobre_cash + 300).toFixed(2) : prev.cajaFisica,
-        notas: (ia.gastos && ia.gastos > 0) ? `Gastos IA (Voz): ${ia.gastos}€. ${ia.notas || ''}` : (ia.notas || prev.notas),
-        chkGastoCaja: (ia.gastos && ia.gastos > 0) ? true : prev.chkGastoCaja
+        efectivo: String(safe.efectivo || prev.efectivo),
+        tarjeta: String(safe.tarjeta || prev.tarjeta),
+        glovo: String(safe.glovo || prev.glovo),
+        uber: String(safe.uber || prev.uber),
+        tienda: String(safe.venta_tienda || prev.tienda),
+        cajaFisica: safe.sobre_cash > 0 ? (safe.sobre_cash + 300).toFixed(2) : prev.cajaFisica,
+        notas: safe.gastos > 0 ? `Gastos IA (Voz): ${safe.gastos}€. ${safe.notas || ''}` : (safe.notas || prev.notas),
+        chkGastoCaja: safe.gastos > 0 ? true : prev.chkGastoCaja
       }));
 
       setScanStatus('success');
     } catch (error: any) {
       console.error("Error Audio IA:", error);
       setScanStatus('error');
-      alert("⚠️ La IA no entendió el audio o el JSON falló.");
+      alert("⚠️ La IA no entendió el audio.");
     } finally {
       setTimeout(() => setScanStatus('idle'), 4000);
     }
   };
 
-  // Pegar Imagen con Ctrl+V
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
       if (scanStatus === 'loading') return;
@@ -308,7 +349,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     return () => window.removeEventListener('paste', handlePaste);
   }, [images, scanStatus]);
 
-  // 🚀 3. GUARDAR EL CIERRE Y SEPARAR B2B
+  // 🚀 3. GUARDAR EL CIERRE (Con Upsert Idempotente)
   const handleSaveCierre = async () => {
     if (totalCalculado <= 0) return alert("Introduce algún importe para guardar la caja.");
     if (totalRestaurante < 0) return alert("La venta de la tienda no puede ser mayor que el total de la caja.");
@@ -333,53 +374,48 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     if (!newData.cierres) newData.cierres = [];
     if (!newData.facturas) newData.facturas = [];
 
+    // Cierre Restaurante (Modificado para no duplicar si se edita el mismo día)
+    const cierreRestId = `ZR-${fechaSeleccionada.replace(/-/g, '')}`;
     const cierreRest: Cierre = {
-      id: Date.now().toString() + '-R',
-      date: fechaSeleccionada, totalVenta: totalRestaurante,
+      id: cierreRestId, date: fechaSeleccionada, totalVenta: totalRestaurante,
       efectivo: Num.parse(form.efectivo), tarjeta: Num.parse(form.tarjeta),
       apps: (Num.parse(form.glovo) + Num.parse(form.uber) + Num.parse(form.madisa) + Num.parse(form.deliveroo)),
       descuadre: descuadreFinal, notas: form.notas, conciliado_banco: false, unitId: 'REST' 
     };
 
-    const idxRest = newData.cierres.findIndex(c => c.date === fechaSeleccionada && c.unitId === 'REST');
-    if (idxRest >= 0) newData.cierres[idxRest] = cierreRest;
-    else newData.cierres.unshift(cierreRest);
+    upsertFactura(newData.cierres, cierreRest, 'id');
 
-    const fIdxRest = newData.facturas.findIndex(f => f.num === `ZR-${fechaSeleccionada.replace(/-/g, '')}`);
-    newData.facturas.push({
-      id: fIdxRest >= 0 ? newData.facturas[fIdxRest].id : `zr-${Date.now()}`,
-      num: `ZR-${fechaSeleccionada.replace(/-/g, '')}`, date: fechaSeleccionada, prov: "Z DIARIO", cliente: "Z DIARIO",
-      total: totalRestaurante, base: Num.round2(totalRestaurante / 1.10), tax: Num.round2(totalRestaurante - (totalRestaurante / 1.10)),
-      paid: fIdxRest >= 0 && newData.facturas[fIdxRest].reconciled ? true : false,
-      reconciled: fIdxRest >= 0 && newData.facturas[fIdxRest].reconciled ? true : false,
+    // Factura Restaurante (Upsert Seguro)
+    const fIdxRest = newData.facturas.findIndex(f => f.num === cierreRestId);
+    upsertFactura(newData.facturas, {
+      id: fIdxRest >= 0 ? newData.facturas[fIdxRest].id : `f-zr-${Date.now()}`,
+      num: cierreRestId, date: fechaSeleccionada, prov: "Z DIARIO", cliente: "Z DIARIO",
+      total: totalRestaurante.toString(), base: Num.round2(totalRestaurante / 1.10).toString(), tax: Num.round2(totalRestaurante - (totalRestaurante / 1.10)).toString(),
+      paid: fIdxRest >= 0 ? newData.facturas[fIdxRest].paid : false,
+      reconciled: fIdxRest >= 0 ? newData.facturas[fIdxRest].reconciled : false,
       unidad_negocio: 'REST' 
     });
 
     if (totalTienda > 0) {
+      const cierreShopId = `ZS-${fechaSeleccionada.replace(/-/g, '')}`;
       const cierreShop: Cierre = {
-        id: Date.now().toString() + '-S', date: fechaSeleccionada, totalVenta: totalTienda,
+        id: cierreShopId, date: fechaSeleccionada, totalVenta: totalTienda,
         efectivo: 0, tarjeta: 0, apps: 0, descuadre: 0, notas: 'Venta separada de la caja general',
         conciliado_banco: false, unitId: 'SHOP' 
       };
 
-      const idxShop = newData.cierres.findIndex(c => c.date === fechaSeleccionada && c.unitId === 'SHOP');
-      if (idxShop >= 0) newData.cierres[idxShop] = cierreShop;
-      else newData.cierres.unshift(cierreShop);
+      upsertFactura(newData.cierres, cierreShop, 'id');
 
-      const fIdxShop = newData.facturas.findIndex(f => f.num === `ZS-${fechaSeleccionada.replace(/-/g, '')}`);
-      newData.facturas.push({
-        id: fIdxShop >= 0 ? newData.facturas[fIdxShop].id : `zs-${Date.now()}`,
-        num: `ZS-${fechaSeleccionada.replace(/-/g, '')}`, date: fechaSeleccionada, prov: "Z DIARIO", cliente: "Z DIARIO",
-        total: totalTienda, base: Num.round2(totalTienda / 1.21), tax: Num.round2(totalTienda - (totalTienda / 1.21)),
-        paid: fIdxShop >= 0 && newData.facturas[fIdxShop].reconciled ? true : false,
-        reconciled: fIdxShop >= 0 && newData.facturas[fIdxShop].reconciled ? true : false,
+      const fIdxShop = newData.facturas.findIndex(f => f.num === cierreShopId);
+      upsertFactura(newData.facturas, {
+        id: fIdxShop >= 0 ? newData.facturas[fIdxShop].id : `f-zs-${Date.now()}`,
+        num: cierreShopId, date: fechaSeleccionada, prov: "Z DIARIO", cliente: "Z DIARIO",
+        total: totalTienda.toString(), base: Num.round2(totalTienda / 1.21).toString(), tax: Num.round2(totalTienda - (totalTienda / 1.21)).toString(),
+        paid: fIdxShop >= 0 ? newData.facturas[fIdxShop].paid : false,
+        reconciled: fIdxShop >= 0 ? newData.facturas[fIdxShop].reconciled : false,
         unidad_negocio: 'SHOP' 
       });
     }
-
-    if (fIdxRest >= 0) newData.facturas.splice(fIdxRest, 1);
-    const fIdxShopOld = newData.facturas.findIndex(f => f.num === `ZS-${fechaSeleccionada.replace(/-/g, '')}`);
-    if (fIdxShopOld >= 0) newData.facturas.splice(fIdxShopOld, 1);
 
     await onSave(newData);
     
@@ -394,7 +430,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     
     await NotificationService.sendAlert(newData, msg, 'INFO');
     
-    setForm({ date: new Date().toISOString().split('T')[0], efectivo: '', tarjeta: '', glovo: '', uber: '', madisa: '', deliveroo: '', cajaFisica: '', tienda: '', notas: '', chkGastoCaja: false });
+    setForm({ date: new Date().toLocaleDateString('sv-SE'), efectivo: '', tarjeta: '', glovo: '', uber: '', madisa: '', deliveroo: '', cajaFisica: '', tienda: '', notas: '', chkGastoCaja: false });
     setImages({ img1: null, img2: null });
   };
 
@@ -403,9 +439,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     const newData = { ...data };
     const c = newData.cierres.find((x: any) => x.id === id);
     if (c) {
-      const blockPrefix = c.unitId === 'SHOP' ? 'S' : 'R';
-      const zNum = `Z${blockPrefix}-${c.date.replace(/-/g, '')}`;
-      newData.facturas = newData.facturas.filter((f: any) => f.num !== zNum);
+      newData.facturas = newData.facturas.filter((f: any) => f.num !== c.id);
       newData.cierres = newData.cierres.filter((x: any) => x.id !== id);
       await onSave(newData);
     }
@@ -415,8 +449,8 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   const nombreMes = new Date(Number(year), Number(month) - 1).toLocaleString('es-ES', { month: 'long', year: 'numeric' }).toUpperCase();
 
   return (
-    <div className="animate-fade-in space-y-6 pb-24">
-      {/* Header y Navegación Mes */}
+    <div className="animate-fade-in space-y-6 pb-24" aria-busy={scanStatus === 'loading'}>
+      {/* Header */}
       <header className="flex flex-col md:flex-row justify-between items-center bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 gap-4">
         <div>
           <h2 className="text-xl font-black text-slate-800 tracking-tight">Control de Caja Unificada</h2>
@@ -473,7 +507,6 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
           </div>
           
           <div className="flex gap-2">
-            {/* 🎙️ BOTÓN DICTADO DE VOZ */}
             <button 
               onClick={toggleRecording}
               disabled={scanStatus === 'loading'}
@@ -496,7 +529,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
               {images.img1 ? (
                 <div className="relative w-full h-full p-2">
                   <img src={images.img1} className="w-full h-full object-cover rounded-2xl" alt="Ticket Principal" />
-                  <button onClick={(e) => { e.preventDefault(); setImages(prev => ({...prev, img1: null})); }} className="absolute top-4 right-4 bg-rose-500 text-white p-1.5 rounded-full shadow-lg hover:bg-rose-600 transition"><Trash2 className="w-4 h-4" /></button>
+                  <button disabled={scanStatus === 'loading'} onClick={(e) => { e.preventDefault(); setImages(prev => ({...prev, img1: null})); }} className="absolute top-4 right-4 bg-rose-500 text-white p-1.5 rounded-full shadow-lg hover:bg-rose-600 transition"><Trash2 className="w-4 h-4" /></button>
                   {scanStatus === 'loading' && <div className="absolute inset-0 bg-slate-900/60 rounded-2xl flex flex-col items-center justify-center backdrop-blur-sm"><RefreshCw className="w-8 h-8 text-white animate-spin mb-2" /><span className="text-[10px] font-black text-white uppercase tracking-widest">Leyendo...</span></div>}
                 </div>
               ) : (
@@ -513,7 +546,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
               {images.img2 ? (
                 <div className="relative w-full h-full p-2">
                   <img src={images.img2} className="w-full h-full object-cover rounded-2xl" alt="Sobre o TPV" />
-                  <button onClick={(e) => { e.preventDefault(); setImages(prev => ({...prev, img2: null})); }} className="absolute top-4 right-4 bg-rose-500 text-white p-1.5 rounded-full shadow-lg hover:bg-rose-600 transition"><Trash2 className="w-4 h-4" /></button>
+                  <button disabled={scanStatus === 'loading'} onClick={(e) => { e.preventDefault(); setImages(prev => ({...prev, img2: null})); }} className="absolute top-4 right-4 bg-rose-500 text-white p-1.5 rounded-full shadow-lg hover:bg-rose-600 transition"><Trash2 className="w-4 h-4" /></button>
                 </div>
               ) : (
                 <div className="flex flex-col items-center">
@@ -530,30 +563,30 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
           <div className="space-y-4">
             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">1. Fecha y Totales Caja</h4>
-            <input type="date" value={form.date} onChange={(e) => setForm({...form, date: e.target.value})} className="w-full p-3 bg-slate-50 rounded-xl text-sm font-bold border-0 outline-none focus:ring-2 ring-indigo-500/20" />
-            <input type="number" placeholder="Efectivo Ticket Z" value={form.efectivo} onChange={(e) => setForm({...form, efectivo: e.target.value})} className="w-full p-4 bg-slate-50 rounded-2xl text-lg font-black outline-none focus:ring-2 ring-indigo-500/20" />
-            <input type="number" placeholder="Tarjeta TPV" value={form.tarjeta} onChange={(e) => setForm({...form, tarjeta: e.target.value})} className="w-full p-4 bg-slate-50 rounded-2xl text-lg font-black outline-none focus:ring-2 ring-indigo-500/20" />
+            <input disabled={scanStatus === 'loading'} type="date" value={form.date} onChange={(e) => setForm({...form, date: e.target.value})} className="w-full p-3 bg-slate-50 rounded-xl text-sm font-bold border-0 outline-none focus:ring-2 ring-indigo-500/20" />
+            <input disabled={scanStatus === 'loading'} type="number" placeholder="Efectivo Ticket Z" value={form.efectivo} onChange={(e) => setForm({...form, efectivo: e.target.value})} className="w-full p-4 bg-slate-50 rounded-2xl text-lg font-black outline-none focus:ring-2 ring-indigo-500/20" />
+            <input disabled={scanStatus === 'loading'} type="number" placeholder="Tarjeta TPV" value={form.tarjeta} onChange={(e) => setForm({...form, tarjeta: e.target.value})} className="w-full p-4 bg-slate-50 rounded-2xl text-lg font-black outline-none focus:ring-2 ring-indigo-500/20" />
           </div>
           
           <div className="space-y-4">
             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">2. Apps y Separación</h4>
             <div className="grid grid-cols-2 gap-2">
-              <input type="number" placeholder="Glovo" value={form.glovo} onChange={(e) => setForm({...form, glovo: e.target.value})} className="p-3 bg-orange-50/50 rounded-xl font-bold text-sm outline-none focus:ring-2 ring-orange-500/30" />
-              <input type="number" placeholder="Uber" value={form.uber} onChange={(e) => setForm({...form, uber: e.target.value})} className="p-3 bg-indigo-50/50 rounded-xl font-bold text-sm outline-none focus:ring-2 ring-indigo-500/30" />
-              <input type="number" placeholder="Madisa" value={form.madisa} onChange={(e) => setForm({...form, madisa: e.target.value})} className="p-3 bg-rose-50/50 rounded-xl font-bold text-sm outline-none" />
-              <input type="number" placeholder="Deliveroo" value={form.deliveroo} onChange={(e) => setForm({...form, deliveroo: e.target.value})} className="p-3 bg-teal-50/50 rounded-xl font-bold text-sm outline-none" />
+              <input disabled={scanStatus === 'loading'} type="number" placeholder="Glovo" value={form.glovo} onChange={(e) => setForm({...form, glovo: e.target.value})} className="p-3 bg-orange-50/50 rounded-xl font-bold text-sm outline-none focus:ring-2 ring-orange-500/30" />
+              <input disabled={scanStatus === 'loading'} type="number" placeholder="Uber" value={form.uber} onChange={(e) => setForm({...form, uber: e.target.value})} className="p-3 bg-indigo-50/50 rounded-xl font-bold text-sm outline-none focus:ring-2 ring-indigo-500/30" />
+              <input disabled={scanStatus === 'loading'} type="number" placeholder="Madisa" value={form.madisa} onChange={(e) => setForm({...form, madisa: e.target.value})} className="p-3 bg-rose-50/50 rounded-xl font-bold text-sm outline-none" />
+              <input disabled={scanStatus === 'loading'} type="number" placeholder="Deliveroo" value={form.deliveroo} onChange={(e) => setForm({...form, deliveroo: e.target.value})} className="p-3 bg-teal-50/50 rounded-xl font-bold text-sm outline-none" />
             </div>
             <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100 relative overflow-hidden mt-4">
               <ShoppingBag className="absolute -right-2 -top-2 w-12 h-12 text-emerald-500 opacity-10" />
               <label className="text-[9px] font-black text-emerald-700 uppercase block mb-2">Desvío a Tienda Sakes</label>
-              <input type="number" placeholder="0.00" value={form.tienda} onChange={(e) => setForm({...form, tienda: e.target.value})} className="w-full p-3 bg-white rounded-xl text-lg font-black outline-none focus:ring-2 ring-emerald-500/30 text-emerald-700" />
+              <input disabled={scanStatus === 'loading'} type="number" placeholder="0.00" value={form.tienda} onChange={(e) => setForm({...form, tienda: e.target.value})} className="w-full p-3 bg-white rounded-xl text-lg font-black outline-none focus:ring-2 ring-emerald-500/30 text-emerald-700" />
             </div>
           </div>
 
           <div className="space-y-4">
             <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">3. Arqueo y Balance</h4>
             <div>
-              <input type="number" placeholder="Dinero Físico en la Caja" value={form.cajaFisica} onChange={(e) => setForm({...form, cajaFisica: e.target.value})} className={cn("w-full p-4 rounded-2xl text-2xl font-black outline-none transition-colors", descuadreVivo !== null && Math.abs(descuadreVivo) > 2 ? "bg-rose-900 text-white shadow-[0_0_15px_rgba(225,29,72,0.3)] ring-2 ring-rose-500" : "bg-slate-900 text-emerald-400")} />
+              <input disabled={scanStatus === 'loading'} type="number" placeholder="Dinero Físico" value={form.cajaFisica} onChange={(e) => setForm({...form, cajaFisica: e.target.value})} className={cn("w-full p-4 rounded-2xl text-2xl font-black outline-none transition-colors", descuadreVivo !== null && Math.abs(descuadreVivo) > 2 ? "bg-rose-900 text-white shadow-[0_0_15px_rgba(225,29,72,0.3)] ring-2 ring-rose-500" : "bg-slate-900 text-emerald-400")} />
               <p className="text-[9px] text-slate-400 font-bold uppercase mt-1 ml-2">Fondo de caja: 300.00€</p>
               <AnimatePresence>
                 {descuadreVivo !== null && (
@@ -572,10 +605,10 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
 
         <div className="flex flex-col gap-3 mt-8 border-t border-slate-100 pt-6">
           <div className="flex items-center gap-2 px-4 py-3 bg-slate-50 rounded-2xl border border-slate-200 w-fit">
-            <input type="checkbox" id="chkGastoCaja" checked={form.chkGastoCaja} onChange={(e) => setForm({...form, chkGastoCaja: e.target.checked})} className="w-5 h-5 accent-indigo-600 cursor-pointer" />
+            <input disabled={scanStatus === 'loading'} type="checkbox" id="chkGastoCaja" checked={form.chkGastoCaja} onChange={(e) => setForm({...form, chkGastoCaja: e.target.checked})} className="w-5 h-5 accent-indigo-600 cursor-pointer" />
             <label htmlFor="chkGastoCaja" className="text-[10px] font-black text-slate-600 uppercase cursor-pointer">¿Has pagado algo sacando efectivo hoy?</label>
           </div>
-          <button disabled={scanStatus === 'loading'} onClick={handleSaveCierre} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-sm shadow-2xl hover:bg-indigo-600 transition-all active:scale-95 flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">GUARDAR Y SEPARAR CUENTAS</button>
+          <button disabled={scanStatus === 'loading'} onClick={handleSaveCierre} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-sm shadow-2xl hover:bg-indigo-600 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">GUARDAR Y SEPARAR CUENTAS</button>
         </div>
       </div>
 
@@ -584,9 +617,9 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         <div className="flex justify-between items-center px-6"><h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Historial de Cierres</h3></div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {kpis.cierresMes.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((c: any) => {
-            const blockPrefix = c.unitId === 'SHOP' ? 'S' : 'R';
-            const fZ = data.facturas?.find((f: any) => f.num === `Z${blockPrefix}-${c.date.replace(/-/g,'')}`);
             const unitConfig = CASH_UNITS.find(u => u.id === (c.unitId || 'REST'));
+            const fZ = data.facturas?.find((f: any) => f.num === c.id); // Validamos directo con el ID idempotente
+
             return (
               <div key={c.id} className={cn("bg-white p-5 rounded-[2rem] border shadow-sm flex justify-between items-center group relative hover:shadow-md transition", fZ?.reconciled ? 'border-emerald-200' : 'border-slate-100')}>
                 <div>
