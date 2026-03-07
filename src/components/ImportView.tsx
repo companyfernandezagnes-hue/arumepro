@@ -8,7 +8,8 @@ import {
   ArrowRight,
   FileText,
   Sparkles,
-  Loader2
+  Loader2,
+  Send
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import * as XLSX from 'xlsx';
@@ -16,6 +17,9 @@ import { GoogleGenAI } from "@google/genai";
 import { AppData } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
+
+// Conexión con tu flujo de automatización
+const n8nWebhookURL = "https://n8n.permatunnelopen.org/webhook/albaranes-ai";
 
 interface ImportViewProps {
   data: AppData;
@@ -34,6 +38,16 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
   } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
+  // Generador de Hash para evitar duplicados (Igual que en n8n)
+  const generarHash = async (prov: string, num: string, date: string, total: number) => {
+    const text = `${prov.toLowerCase().trim()}|${num.toLowerCase().trim()}|${date}|${total.toFixed(2)}`;
+    const encoder = new TextEncoder();
+    const data = encoder.encode(text);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement> | React.DragEvent) => {
     let file: File | undefined;
     
@@ -45,17 +59,15 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
 
     if (!file) return;
 
-    // Si es modo PDF, lo mandamos a la IA
     if (importMode === 'pdf') {
       if (file.type !== 'application/pdf') {
-        alert("Por favor, sube un archivo PDF válido.");
+        alert("⚠️ Por favor, sube un archivo PDF válido.");
         return;
       }
       await escanearFacturaConIA(file);
       return;
     }
 
-    // Si es Excel (TPV o Albaranes)
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
@@ -85,7 +97,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     setProcessedData(null);
 
     try {
-      // Convertir PDF a Base64
       const buffer = await file.arrayBuffer();
       const base64String = btoa(new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), ''));
 
@@ -99,7 +110,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
             parts: [
               { inlineData: { data: base64String, mimeType: "application/pdf" } },
               { text: `Extrae de esta factura los siguientes datos en formato JSON estricto: 
-              "proveedor" (nombre), "fecha" (YYYY-MM-DD), "total" (número total con IVA), "iva" (número del importe del IVA), "base" (número de la base imponible). No incluyas markdown, solo el JSON puro.` }
+              "proveedor" (nombre), "fecha" (YYYY-MM-DD), "num_factura" (número identificador), "total" (número total con IVA), "iva" (número del importe del IVA), "base" (número de la base imponible). No incluyas markdown, solo el JSON puro.` }
             ]
           }
         ],
@@ -110,22 +121,33 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
 
       if (!datosIA.proveedor) throw new Error("No se pudo leer el proveedor");
 
+      const prov = datosIA.proveedor;
+      const numFactura = datosIA.num_factura || `S/N-${Math.floor(Math.random() * 1000)}`;
+      const fecha = datosIA.fecha || DateUtil.today();
+      const totalPdf = Num.parse(datosIA.total || 0);
+      
+      const hashFactura = await generarHash(prov, numFactura, fecha, totalPdf);
+
       setProcessedData({
         facturaPdf: {
           id: `fac-ia-${Date.now()}`,
-          prov: datosIA.proveedor,
-          date: datosIA.fecha || DateUtil.today(),
+          hash: hashFactura,
+          proveedor: prov,
+          num_factura: numFactura,
+          fecha: fecha,
           base: Num.parse(datosIA.base || 0),
           iva: Num.parse(datosIA.iva || 0),
-          total: Num.parse(datosIA.total || 0),
-          status: 'verificada',
-          notas: "Escaneada con IA ✨"
+          total_pdf: totalPdf,
+          pagada: false, // CLAVE PARA TU ATRASO: Entra como pendiente
+          cuadra: false, // CLAVE: Falso hasta que el sistema lo verifique
+          status: 'pendiente',
+          notas: "Escaneada manualmente con IA ✨"
         }
       });
 
     } catch (error) {
       console.error("Error AI PDF:", error);
-      alert("Hubo un error al escanear el PDF con la IA. Inténtalo de nuevo.");
+      alert("Hubo un error al escanear el PDF con la IA. Revisa el documento e inténtalo de nuevo.");
     } finally {
       setIsScanning(false);
     }
@@ -136,7 +158,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     else procesarAlbaranesExcel(filas);
   };
 
-  // ... (Aquí van las funciones que ya tenías de procesarAlbaranesExcel y procesarDatosDelTPV, no las he tocado)
   const procesarAlbaranesExcel = (filas: any[]) => {
     if (filas.length === 0) return alert("El archivo está vacío");
     const agrupados: Record<string, any> = {};
@@ -181,6 +202,19 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     });
   };
 
+  // Función opcional para mandar al webhook de automatización
+  const enviarAN8n = async (datosFactura: any) => {
+    try {
+      await fetch(n8nWebhookURL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(datosFactura)
+      });
+    } catch (e) {
+      console.warn("No se pudo conectar con el webhook de n8n", e);
+    }
+  };
+
   const handleConfirm = async () => {
     if (!processedData) return;
 
@@ -201,8 +235,12 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     } else if (importMode === 'pdf' && processedData.facturaPdf) {
       if (!newData.facturas) newData.facturas = [];
       newData.facturas.push(processedData.facturaPdf);
+      
+      // Enviamos copia a tu sistema n8n para que verifique si cuadra
+      await enviarAN8n(processedData.facturaPdf);
+      
       await onSave(newData);
-      onNavigate('facturas');
+      onNavigate('facturas'); // Aquí es donde verás la lista ordenada
     }
     alert("¡Datos integrados en el ERP con éxito!");
   };
@@ -253,7 +291,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
             </div>
             <div>
               <p className="text-sm font-black text-slate-600">
-                {isScanning ? "La IA está leyendo el documento..." : "Pulsa aquí o arrastra tu archivo"}
+                {isScanning ? "El Cerebro IA está leyendo el documento..." : "Pulsa aquí o arrastra tu archivo"}
               </p>
               <p className="text-[10px] text-slate-400 mt-1 font-bold uppercase tracking-widest">
                 {importMode === 'pdf' ? "Formatos: .pdf" : "Formatos: .xlsx, .csv"}
@@ -279,15 +317,18 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
                 <>
                   <div className="flex justify-between items-center">
                     <span className="text-[10px] font-black text-emerald-800 uppercase">Proveedor</span>
-                    <span className="text-xs font-bold text-emerald-700">{processedData.facturaPdf.prov}</span>
+                    <span className="text-xs font-bold text-emerald-700">{processedData.facturaPdf.proveedor}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-black text-emerald-800 uppercase">Nº Factura</span>
+                    <span className="text-xs font-bold text-emerald-700">{processedData.facturaPdf.num_factura}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-[10px] font-black text-emerald-800 uppercase">Total Factura</span>
-                    <span className="text-xs font-bold text-emerald-700">{Num.fmt(processedData.facturaPdf.total)}</span>
+                    <span className="text-xs font-bold text-emerald-700">{Num.fmt(processedData.facturaPdf.total_pdf)}</span>
                   </div>
                 </>
               )}
-              {/* ... Los otros datos de TPV o Albaranes ... */}
               {importMode === 'tpv' && (
                 <div className="flex justify-between items-center">
                     <span className="text-[10px] font-black text-emerald-800 uppercase">Total Venta</span>
@@ -298,7 +339,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
 
             <button onClick={handleConfirm} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-4 rounded-2xl transition shadow-lg flex items-center justify-center gap-2 group">
               <Database className="w-4 h-4" />
-              <span>GUARDAR EN EL CEREBRO</span>
+              <span>GUARDAR EN PENDIENTES</span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </button>
           </motion.div>
