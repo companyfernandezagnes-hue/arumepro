@@ -1,13 +1,15 @@
 import React, { useState, useMemo } from 'react';
 import { 
-  Truck, Search, Plus, Zap, Download, Trash2, 
+  Truck, Search, Plus, Zap, Download, Trash2, Camera, AlertTriangle,
   CheckCircle2, Clock, FileSpreadsheet, Calculator
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppData, Albaran } from '../types';
-import { Num, ArumeEngine } from '../services/engine';
+import { Num, ArumeEngine, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
 import { proxyFetch } from '../services/api';
+import { NotificationService } from '../services/notifications'; // 🚀 AÑADIDO: Avisos de stock
+import { GoogleGenAI } from "@google/genai"; // 🚀 AÑADIDO: Motor de IA
 
 interface AlbaranesViewProps {
   data: AppData;
@@ -20,6 +22,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const [activeFilter, setActiveFilter] = useState<'Todos' | 'Arume' | 'Socios'>('Todos');
   const [searchQ, setSearchQ] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [priceAlerts, setPriceAlerts] = useState<{n: string, old: number, new: number}[]>([]); // 🚀 ALERTA PRECIOS
   
   // Form State
   const [form, setForm] = useState({
@@ -33,16 +36,13 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     forceDup: false
   });
 
-  // 🚀 NUEVO: Estado para la Calculadora Rápida de IVA
   const [quickCalc, setQuickCalc] = useState({ name: '', total: '', iva: 10 });
-
-  // Modal State
   const [editingAlbaran, setEditingAlbaran] = useState<Albaran | null>(null);
 
   // --- HELPERS ---
   const norm = (s: string) => (s || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
-  // 🚀 NUEVO: Autocompletar proveedores basado en histórico
+  // Autocompletar proveedores basado en histórico
   const uniqueProviders = useMemo(() => {
     const provs = (data.albaranes || []).map(a => a.prov).filter(Boolean);
     return Array.from(new Set(provs)).sort();
@@ -57,8 +57,8 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     else if (clean.match(/\b4\s?%/)) rate = 4;
     
     const upper = clean.toUpperCase();
-    if (upper.includes("ALCOHOL") || upper.includes("GINEBRA") || upper.includes("SERV")) rate = 21;
-    if (upper.includes("PAN ") || upper.includes("HUEVO") || upper.includes("LECHE")) rate = 4;
+    if (upper.includes("ALCOHOL") || upper.includes("GINEBRA") || upper.includes("SERV") || upper.includes("VINO")) rate = 21;
+    if (upper.includes("PAN ") || upper.includes("HUEVO") || upper.includes("LECHE") || upper.includes("FRUTA")) rate = 4;
 
     const numbers = [...clean.matchAll(/(\d+\.\d{2})/g)].map(m => parseFloat(m[1]));
     if (numbers.length === 0) return null;
@@ -66,10 +66,10 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     const totalLine = numbers[numbers.length - 1]; 
     
     let qty = 1;
-    const qtyMatch = clean.match(/^(\d+(\.\d{1,3})?)\s*(kg|uds|x|\*)/i);
+    const qtyMatch = clean.match(/^(\d+(\.\d{1,3})?)\s*(kg|uds|x|\*|l|gr)/i);
     if (qtyMatch) qty = parseFloat(qtyMatch[1]);
 
-    let name = clean.replace(totalLine.toString(), '').replace(/\d+(\.\d{1,3})?\s*(kg|uds|x|\*)/i, '').replace(/\b(4|10|21)\s?%/, '').replace(/\.{2,}/g, '').trim();
+    let name = clean.replace(totalLine.toString(), '').replace(/\d+(\.\d{1,3})?\s*(kg|uds|x|\*|l|gr)/i, '').replace(/\b(4|10|21)\s?%/, '').replace(/\.{2,}/g, '').trim();
     if (name.length < 2) name = "Varios Indefinido";
 
     const unitPrice = qty > 0 ? totalLine / qty : totalLine;
@@ -101,31 +101,90 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
   // --- ACTIONS ---
   
-  // 🚀 NUEVO: Insertar desde Calculadora Rápida
   const handleQuickAdd = () => {
     const t = Num.parse(quickCalc.total);
     if (t > 0 && quickCalc.name) {
-      // Usamos el motor para asegurar precisión decimal
       const calc = ArumeEngine.calcularImpuestos(t, quickCalc.iva as any);
       const newLine = `1x ${quickCalc.name} ${quickCalc.iva}% ${calc.total.toFixed(2)}`;
       
-      setForm(prev => ({ 
-        ...prev, 
-        text: prev.text ? `${prev.text}\n${newLine}` : newLine 
-      }));
-      setQuickCalc({ name: '', total: '', iva: 10 }); // Reset
+      setForm(prev => ({ ...prev, text: prev.text ? `${prev.text}\n${newLine}` : newLine }));
+      setQuickCalc({ name: '', total: '', iva: 10 });
     }
   };
 
-  // 🚀 NUEVO: Importador de CSV de n8n
+  // 🚀 ESCÁNER DE IA DIRECTO (Gemini en tu navegador, sin n8n)
+  const handleDirectScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const apiKey = localStorage.getItem('gemini_api_key');
+    if (!apiKey) {
+      alert("⚠️ Conecta tu IA primero en la pestaña 'IA' (Menú inferior).");
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setPriceAlerts([]);
+    try {
+      const buffer = await file.arrayBuffer();
+      const base64String = btoa(new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), ''));
+        
+      const ai = new GoogleGenAI({ apiKey: apiKey });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [
+          {
+            role: "user",
+            parts: [
+              { inlineData: { data: base64String, mimeType: file.type } },
+              { text: "Analiza esta factura. Extrae: 1. Nombre Proveedor. 2. Fecha (YYYY-MM-DD). 3. Líneas de productos en formato exacto: 'Cantidad Nombre PrecioTotal'. Responde SOLO en JSON con campos: proveedor, fecha, lineas (string con saltos de línea)." }
+            ]
+          }
+        ],
+      });
+
+      const textRes = response.text?.replace(/```json/g, '').replace(/```/g, '').trim();
+      const res = JSON.parse(textRes || '{}');
+        
+      // 🚀 DETECTOR DE SUBIDA DE PRECIOS
+      const newLines = (res.lineas || '').split('\n').map(parseSmartLine).filter(Boolean);
+      const alerts: any[] = [];
+      
+      newLines.forEach((nl: any) => {
+        const history = data.albaranes?.flatMap(a => a.items || [])
+          .filter(i => norm(i.n) === norm(nl.n))
+          .sort((a, b) => 0); 
+        
+        const lastPrice = history && history.length > 0 ? history[history.length - 1].unit : null;
+        if (lastPrice && nl.unit > lastPrice * 1.05) { // Si sube más de un 5%
+          alerts.push({ n: nl.n, old: lastPrice, new: nl.unit });
+        }
+      });
+
+      setPriceAlerts(alerts);
+      setForm(prev => ({
+        ...prev,
+        prov: res.proveedor || prev.prov,
+        date: res.fecha || prev.date,
+        text: res.lineas || prev.text
+      }));
+    } catch (err) {
+      console.error(err);
+      alert("Error leyendo el ticket con IA. Verifica que la imagen sea nítida.");
+    } finally {
+      setIsAnalyzing(false);
+      e.target.value = '';
+    }
+  };
+
   const handleCSVImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    // ... (Tu código de handleCSVImport se mantiene EXACTAMENTE igual)
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsAnalyzing(true);
     try {
       const text = await file.text();
-      // Lector CSV robusto para comillas (ej: "AGUA, SIERRA")
       const parseCSVLine = (str: string) => {
         const re = /(?:\"([^\"]*(?:\"\"[^\"]*)*)\"|([^,\r\n]*))/g;
         let result = [], match;
@@ -139,13 +198,12 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
       const newAlbaranesMap = new Map<string, Albaran>();
 
-      for(let i = 1; i < lines.length; i++) { // Saltamos la cabecera
+      for(let i = 1; i < lines.length; i++) { 
         const cols = parseCSVLine(lines[i]);
         if (cols.length < 8) continue;
 
-        // Columnas Excel: 0=Fecha, 1=Prov, 2=nº albaran, 3=nombre, 4=Cantidad, 5=Precio Base, 6=IVA, 7=total, 8=Link Drive
         let rawDate = cols[0];
-        let date = rawDate.includes('/') ? rawDate.split('/').reverse().join('-') : rawDate; // Convierte 02/02/2026 a 2026-02-02
+        let date = rawDate.includes('/') ? rawDate.split('/').reverse().join('-') : rawDate; 
         let prov = cols[1];
         let num = cols[2] || "S/N";
         let name = cols[3];
@@ -176,7 +234,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         alb.taxes = Num.round2(alb.taxes + tax);
       }
 
-      // Evitar duplicados revisando si ya existe un albarán con esa fecha, num y proveedor
       const finalAlbaranes = Array.from(newAlbaranesMap.values()).filter(newAlb => 
         !(data.albaranes || []).some(oldAlb => 
           oldAlb.date === newAlb.date && norm(oldAlb.prov) === norm(newAlb.prov) && oldAlb.num === newAlb.num
@@ -194,39 +251,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     } catch (err) {
       console.error(err);
       alert("⚠️ Error leyendo el archivo CSV. Asegúrate de que es el formato de n8n.");
-    } finally {
-      setIsAnalyzing(false);
-      e.target.value = '';
-    }
-  };
-
-  const handleN8NScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setIsAnalyzing(true);
-    try {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = async () => {
-        const base64Image = reader.result;
-        const n8nWebhookURL = "https://n8n.permatunnelopen.org/webhook/albaranes-ai";
-        
-        const responseData = await proxyFetch(n8nWebhookURL, {
-          method: 'POST',
-          body: { image: base64Image, fileName: file.name }
-        });
-        
-        setForm(prev => ({
-          ...prev,
-          prov: responseData.proveedor || prev.prov,
-          date: responseData.fecha ? responseData.fecha.split('T')[0] : prev.date,
-          text: responseData.lineasTexto || prev.text
-        }));
-      };
-    } catch (err) {
-      console.error(err);
-      alert("⚠️ Error de conexión con n8n. Asegúrate de que el webhook esté activo.");
     } finally {
       setIsAnalyzing(false);
       e.target.value = '';
@@ -270,7 +294,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     } else {
       const taxesArray = Object.values(liveTotals.taxes) as { b: number; i: number }[];
       const newAlbaran: Albaran = {
-        // 🚀 FIX: Usamos un ID más robusto anti-colisiones como aconsejó GPT
         id: `man-${Date.now()}-${Math.random().toString(36).substring(2)}`,
         prov: form.prov,
         date: form.date,
@@ -290,17 +313,14 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     }
 
     await onSave(newData);
+    
+    // 🚀 AUTOMATIZACIÓN: Chequeo de Stock Crítico tras guardar
+    if (NotificationService && NotificationService.checkCriticalStock) {
+       NotificationService.checkCriticalStock(newData).catch(e => console.error("Error stock:", e));
+    }
 
-    setForm({
-      prov: '',
-      date: new Date().toISOString().split('T')[0],
-      num: '',
-      socio: 'Arume',
-      notes: '',
-      text: '',
-      paid: false,
-      forceDup: false
-    });
+    setForm({ prov: '', date: new Date().toISOString().split('T')[0], num: '', socio: 'Arume', notes: '', text: '', paid: false, forceDup: false });
+    setPriceAlerts([]);
   };
 
   const handleDelete = async (id: string) => {
@@ -346,7 +366,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
   return (
     <div className="animate-fade-in space-y-6 pb-24">
-      {/* 🚀 NUEVO: Datalist para el buscador inteligente de proveedores */}
       <datalist id="providers-list">
         {uniqueProviders.map(p => <option key={p} value={p} />)}
       </datalist>
@@ -355,22 +374,21 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       <header className="flex flex-col md:flex-row justify-between items-center bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 gap-4">
         <div>
           <h2 className="text-xl font-black text-slate-800 tracking-tighter">Albaranes & Gastos</h2>
-          <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest">Control Financiero v13.0</p>
+          <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest">Control Financiero v13.5</p>
         </div>
         <div className="flex gap-2 items-center flex-wrap justify-center">
           
-          {/* 🚀 BOTÓN NUEVO: Importar CSV de n8n */}
           <label className="bg-gradient-to-r from-emerald-500 to-green-600 text-white px-5 py-3 rounded-2xl text-[10px] font-black hover:shadow-lg hover:scale-105 transition cursor-pointer shadow-md flex items-center gap-2">
             <FileSpreadsheet className="w-4 h-4" />
             <span>SINCRONIZAR CSV</span>
             <input type="file" onChange={handleCSVImport} className="hidden" accept=".csv" />
           </label>
 
-          {/* Botón Escanear Original */}
+          {/* 🚀 BOTÓN NUEVO IA LOCAL */}
           <label className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-5 py-3 rounded-2xl text-[10px] font-black hover:shadow-lg hover:scale-105 transition cursor-pointer shadow-md flex items-center gap-2">
-            <Zap className="w-4 h-4" />
+            <Camera className="w-4 h-4" />
             <span>ESCANEAR TICKET (IA)</span>
-            <input type="file" onChange={handleN8NScan} className="hidden" accept="image/*, application/pdf" />
+            <input type="file" onChange={handleDirectScan} className="hidden" accept="image/*, application/pdf" />
           </label>
         </div>
       </header>
@@ -401,13 +419,27 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
             {isAnalyzing && (
               <div className="absolute inset-0 bg-white/95 z-20 flex flex-col items-center justify-center text-center p-4 backdrop-blur-sm">
                 <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-3"></div>
-                <p className="text-xs font-black text-indigo-600 animate-pulse uppercase tracking-widest">Sincronizando n8n...</p>
+                <p className="text-xs font-black text-indigo-600 animate-pulse uppercase tracking-widest">Leyendo Documento...</p>
               </div>
             )}
 
             <h3 className="text-sm font-black text-slate-800 mb-4 flex items-center gap-2">
               <Plus className="w-4 h-4 text-indigo-500" /> Nueva Compra
             </h3>
+
+            {/* 🚀 ALERTA DE PRECIOS */}
+            {priceAlerts.length > 0 && (
+              <div className="mb-4 p-3 bg-rose-50 border border-rose-100 rounded-2xl space-y-2 animate-bounce-subtle">
+                <p className="text-[10px] font-black text-rose-600 uppercase flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" /> ¡Aviso de Subida de Precios!
+                </p>
+                {priceAlerts.map((alt, i) => (
+                  <p key={i} className="text-[9px] text-rose-500 font-bold">
+                    {alt.n}: Costaba {Num.fmt(alt.old)} → <span className="font-black underline">Ahora {Num.fmt(alt.new)}</span>
+                  </p>
+                ))}
+              </div>
+            )}
 
             <div className="space-y-3 mb-4">
               <input 
@@ -443,7 +475,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
               </select>
             </div>
 
-            {/* 🚀 NUEVO: Calculadora Rápida de IVA */}
             <div className="bg-slate-100 rounded-xl p-3 mb-3 flex gap-2 items-center">
               <Calculator className="w-4 h-4 text-slate-400 shrink-0" />
               <input 
@@ -615,7 +646,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                     </div>
                   ))}
                   
-                  {/* Desglose de IVA en el modal */}
                   <div className="mt-4 pt-2 border-t border-slate-300 border-dashed flex justify-between text-[10px] text-slate-500 font-bold">
                     <span>Base: {Num.fmt(editingAlbaran.base || 0)}</span>
                     <span>IVA: {Num.fmt(editingAlbaran.taxes || 0)}</span>
