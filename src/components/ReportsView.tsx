@@ -1,677 +1,810 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  TrendingUp, 
-  BarChart3, 
-  PieChart, 
-  Calendar, 
-  ChevronLeft, 
-  ChevronRight, 
-  Download, 
-  Zap, 
-  Scale, 
-  Calculator,
-  ArrowUpRight,
-  ArrowDownRight,
-  Info,
-  Bot
+  Truck, Search, Plus, Zap, Download, Trash2, Camera, AlertTriangle,
+  CheckCircle2, Clock, FileSpreadsheet, Calculator, Building2, ShoppingBag, Users, Hotel, Layers, Image as ImageIcon
 } from 'lucide-react';
-import { AppData } from '../types';
-import { ArumeEngine, Num } from '../services/engine';
 import { motion, AnimatePresence } from 'motion/react';
-import { NotificationService } from '../services/notifications';
-import { Send } from 'lucide-react';
+import { AppData, Albaran } from '../types';
+import { Num, ArumeEngine } from '../services/engine';
+import { cn } from '../lib/utils';
+import { NotificationService } from '../services/notifications'; 
+import { GoogleGenAI } from "@google/genai";
 
-interface ReportsViewProps {
-  db: AppData;
+interface AlbaranesViewProps {
+  data: AppData;
+  onSave: (newData: AppData) => Promise<void>;
 }
 
-type TabType = 'pnl' | 'fiscal' | 'kpis';
+export type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
 
-export const ReportsView: React.FC<ReportsViewProps> = ({ db }) => {
-  const [activeTab, setActiveTab] = useState<TabType>('pnl');
-  const today = new Date();
-  const [month, setMonth] = useState(today.getMonth());
-  const [year, setYear] = useState(today.getFullYear());
-  const [quarter, setQuarter] = useState(Math.ceil((today.getMonth() + 1) / 3));
-  const [iaAnalysis, setIaAnalysis] = useState<string | null>(null);
+const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string; bg: string }[] = [
+  { id: 'REST', name: 'Restaurante', icon: Building2, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+  { id: 'DLV', name: 'Catering Hoteles', icon: Hotel, color: 'text-amber-600', bg: 'bg-amber-50' },
+  { id: 'SHOP', name: 'Tienda Sake', icon: ShoppingBag, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+  { id: 'CORP', name: 'Socios / Corp', icon: Users, color: 'text-slate-600', bg: 'bg-slate-100' },
+];
+
+/* =======================================================
+ * 🛡️ FUNCIONES PRO: IA INDESTRUCTIBLE
+ * ======================================================= */
+
+// Extractor JSON Seguro (Respaldo)
+const extractJSON = (rawText: string) => {
+  try {
+    if (!rawText) throw new Error("Respuesta vacía");
+    const clean = rawText.replace(/(?:json)?/gi, '').replace(/\uFEFF/g, '').trim();
+    const start = clean.indexOf('{');
+    const end = clean.lastIndexOf('}');
+    if (start === -1 || end === -1 || end <= start) throw new Error("No se detectó JSON");
+    return JSON.parse(clean.substring(start, end + 1));
+  } catch (err) {
+    console.error("Fallo al parsear IA:", rawText);
+    throw new Error("La IA no devolvió JSON válido.");
+  }
+};
+
+// Compresor Eficiente para imágenes pesadas
+const compressImage = async (file: File | Blob): Promise<string> => {
+  const MAX_BYTES = 4 * 1024 * 1024; // Límite seguro
+  const MAX_W = 1600, MAX_H = 1600; // Un poco más de resolución para leer textos pequeños
+
+  const bitmap = await createImageBitmap(file);
+  let { width, height } = bitmap;
+  const ratio = Math.min(MAX_W / width, MAX_H / height, 1);
+  const w = Math.max(1, Math.round(width * ratio));
+  const h = Math.max(1, Math.round(height * ratio));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d', { alpha: false });
+  ctx?.drawImage(bitmap, 0, 0, w, h);
+
+  const blob: Blob = await new Promise((resolve) =>
+    canvas.toBlob((b) => resolve(b as Blob), 'image/jpeg', 0.8)
+  );
+
+  const finalBlob = blob.size > MAX_BYTES
+    ? await new Promise<Blob>(res => canvas.toBlob((b) => res(b as Blob), 'image/jpeg', 0.6))
+    : blob;
+
+  const b64 = await new Promise<string>((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve((fr.result as string).split(',')[1]);
+    fr.onerror = reject;
+    fr.readAsDataURL(finalBlob);
+  });
+
+  return `data:image/jpeg;base64,${b64}`;
+};
+
+export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
+  const [searchQ, setSearchQ] = useState('');
+  const [selectedUnit, setSelectedUnit] = useState<BusinessUnit | 'ALL'>('ALL'); 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [priceAlerts, setPriceAlerts] = useState<{n: string, old: number, new: number}[]>([]);
+  const [scannedImage, setScannedImage] = useState<string | null>(null);
+  
+  const [form, setForm] = useState({
+    prov: '',
+    date: new Date().toISOString().split('T')[0],
+    num: '',
+    socio: 'Arume',
+    notes: '',
+    text: '',
+    paid: false,
+    forceDup: false,
+    unitId: 'REST' as BusinessUnit 
+  });
 
-  const changeMonth = (delta: number) => {
-    let newMonth = month + delta;
-    let newYear = year;
-    if (newMonth > 11) {
-      newMonth = 0;
-      newYear++;
-    } else if (newMonth < 0) {
-      newMonth = 11;
-      newYear--;
-    }
-    setMonth(newMonth);
-    setYear(newYear);
+  const [quickCalc, setQuickCalc] = useState({ name: '', total: '', iva: 10 });
+  const [editingAlbaran, setEditingAlbaran] = useState<Albaran | null>(null);
+
+  const norm = (s: string) => (s || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+  const uniqueProviders = useMemo(() => {
+    const provs = (data.albaranes || []).map(a => a.prov).filter(Boolean);
+    return Array.from(new Set(provs)).sort();
+  }, [data.albaranes]);
+
+  const parseSmartLine = (line: string) => {
+    let clean = line.replace(/[€$]/g, '').replace(/,/g, '.').trim();
+    if (!clean || clean.length < 5) return null;
+
+    let rate = 10; 
+    if (clean.match(/\b21\s?%/)) rate = 21;
+    else if (clean.match(/\b4\s?%/)) rate = 4;
+    
+    const upper = clean.toUpperCase();
+    if (upper.includes("ALCOHOL") || upper.includes("GINEBRA") || upper.includes("SERV") || upper.includes("VINO") || upper.includes("SAKE")) rate = 21;
+    if (upper.includes("PAN ") || upper.includes("HUEVO") || upper.includes("LECHE") || upper.includes("FRUTA")) rate = 4;
+
+    const numbers = [...clean.matchAll(/(\d+\.\d{2})/g)].map(m => parseFloat(m[1]));
+    if (numbers.length === 0) return null;
+
+    const totalLine = numbers[numbers.length - 1]; 
+    
+    let qty = 1;
+    const qtyMatch = clean.match(/^(\d+(\.\d{1,3})?)\s*(kg|uds|x|\*|l|gr)/i);
+    if (qtyMatch) qty = parseFloat(qtyMatch[1]);
+
+    let name = clean.replace(totalLine.toString(), '').replace(/\d+(\.\d{1,3})?\s*(kg|uds|x|\*|l|gr)/i, '').replace(/\b(4|10|21)\s?%/, '').replace(/\.{2,}/g, '').trim();
+    if (name.length < 2) name = "Varios Indefinido";
+
+    const unitPrice = qty > 0 ? totalLine / qty : totalLine;
+    const baseLine = totalLine / (1 + rate / 100);
+    const taxLine = totalLine - baseLine;
+
+    return { q: qty, n: name, t: totalLine, rate, base: baseLine, tax: taxLine, unit: unitPrice };
   };
 
-  const changeQuarter = (q: number) => {
-    setQuarter(q);
-  };
+  const analyzedItems = useMemo(() => {
+    return form.text.split('\n').map(parseSmartLine).filter(Boolean);
+  }, [form.text]);
 
-  // --- MOTOR FISCAL (IVA 303) ---
-  const calcularModelo303 = () => {
-    const monthsInTrim = [(quarter - 1) * 3, (quarter - 1) * 3 + 1, (quarter - 1) * 3 + 2];
-    
-    const inPeriod = (dateStr: string) => {
-      if (!dateStr) return false;
-      const d = new Date(dateStr);
-      return d.getFullYear() === year && monthsInTrim.includes(d.getMonth());
-    };
+  const liveTotals = useMemo(() => {
+    const taxes: Record<number, { b: number; i: number }> = { 4: { b: 0, i: 0 }, 10: { b: 0, i: 0 }, 21: { b: 0, i: 0 } };
+    let grandTotal = 0;
 
-    // A. IVA DEVENGADO (VENTAS)
-    let devengado = { base: 0, iva: 0, total: 0 };
-    
-    (db.cierres || []).filter(z => inPeriod(z.date)).forEach(z => {
-      const total = Num.parse(z.totalVenta);
-      const base = total / 1.10; // Estándar hostelería 10%
-      devengado.base += base;
-      devengado.iva += (total - base);
-      devengado.total += total;
-    });
-
-    (db.facturas || []).filter(f => inPeriod(f.date) && !String(f.num).startsWith('Z-')).forEach(f => {
-      const total = Num.parse(f.total);
-      let base = f.base ? Num.parse(f.base) : (total / 1.10);
-      let tax = f.tax ? Num.parse(f.tax) : (total - base);
-      devengado.base += base;
-      devengado.iva += tax;
-      devengado.total += total;
-    });
-
-    // B. IVA DEDUCIBLE (GASTOS)
-    let deducible = { base4: 0, iva4: 0, base10: 0, iva10: 0, base21: 0, iva21: 0, total: 0 };
-
-    (db.albaranes || []).filter(a => inPeriod(a.date)).forEach(a => {
-      const total = Num.parse(a.total);
-      const prov = (a.prov || '').toLowerCase();
-      let tipo = 10; 
-
-      if (prov.match(/luz|agua|tel|gestor|seguro|alquiler|reparacion|maquinaria|limpieza|amazon/)) tipo = 21;
-      else if (prov.match(/pan|leche|huevo|fruta|verdura|harina/)) tipo = 4;
-      else if (prov.match(/alcohol|bebida|vino|cerveza|licor/)) tipo = 21;
-
-      const div = 1 + (tipo / 100);
-      const base = total / div;
-      const quota = total - base;
-
-      if (tipo === 4) { deducible.base4 += base; deducible.iva4 += quota; }
-      else if (tipo === 10) { deducible.base10 += base; deducible.iva10 += quota; }
-      else if (tipo === 21) { deducible.base21 += base; deducible.iva21 += quota; }
-      deducible.total += total;
-    });
-
-    // Sumar Gastos Fijos (Prorrateados para el trimestre)
-    (db.gastos_fijos || []).filter(g => g.active !== false).forEach(g => {
-      let amount = Num.parse(g.amount);
-      // Ajustar al trimestre
-      if (g.freq === 'mensual') amount *= 3;
-      else if (g.freq === 'anual') amount /= 4;
-      else if (g.freq === 'semanal') amount *= 13; // 13 semanas en un trimestre aprox
-      
-      if (g.cat !== 'personal') { 
-        const base = amount / 1.21;
-        deducible.base21 += base;
-        deducible.iva21 += (amount - base);
-        deducible.total += amount;
+    analyzedItems.forEach(it => {
+      if (it) {
+        if (!taxes[it.rate]) taxes[it.rate] = { b: 0, i: 0 };
+        taxes[it.rate].b += it.base;
+        taxes[it.rate].i += it.tax;
+        grandTotal += it.t;
       }
     });
 
-    const totalSoportado = deducible.iva4 + deducible.iva10 + deducible.iva21;
-    const resultado = devengado.iva - totalSoportado;
+    return { grandTotal, taxes };
+  }, [analyzedItems]);
 
-    return { devengado, deducible, resultado, totalSoportado };
-  };
+  // 🚀 NÚCLEO DE IA BLINDADO PARA ALBARANES
+  const processImageWithAI = async (file: File | Blob) => {
+    const apiKey = localStorage.getItem('gemini_api_key');
+    if (!apiKey) return alert("⚠️ Conecta tu IA primero en Configuración.");
 
-  // --- MOTOR IRPF (Modelo 130) ---
-  const calcularModelo130 = () => {
-    const ivaData = calcularModelo303();
-    const baseVentas = ivaData.devengado.base;
-    const baseCompras = ivaData.deducible.base4 + ivaData.deducible.base10 + ivaData.deducible.base21;
-    
-    // Gastos de personal (estimados para el trimestre)
-    let personalQ = 0;
-    (db.gastos_fijos || []).filter(g => g.active !== false && g.cat === 'personal').forEach(g => {
-      let val = Num.parse(g.amount);
-      if (g.freq === 'mensual') val *= 3;
-      else if (g.freq === 'anual') val /= 4;
-      else if (g.freq === 'semanal') val *= 13;
-      personalQ += val;
-    });
-
-    const beneficio = baseVentas - baseCompras - personalQ;
-    const cuotaIRPF = beneficio > 0 ? beneficio * 0.20 : 0;
-
-    return { beneficio, cuotaIRPF };
-  };
-
-  const exportIVA = () => {
-    const data = calcularModelo303();
-    const csv = `CONCEPTO;BASE;IVA\n` +
-                `Repercutido;${data.devengado.base.toFixed(2)};${data.devengado.iva.toFixed(2)}\n` +
-                `Soportado 4%;${data.deducible.base4.toFixed(2)};${data.deducible.iva4.toFixed(2)}\n` +
-                `Soportado 10%;${data.deducible.base10.toFixed(2)};${data.deducible.iva10.toFixed(2)}\n` +
-                `Soportado 21%;${data.deducible.base21.toFixed(2)};${data.deducible.iva21.toFixed(2)}\n` +
-                `RESULTADO LIQUIDACION;;${data.resultado.toFixed(2)}`;
-    
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `IVA_T${quarter}_${year}.csv`;
-    link.click();
-  };
-
-  const analizarConIA = async () => {
     setIsAnalyzing(true);
-    setIaAnalysis(null);
+    setPriceAlerts([]);
     
-    const profitData = ArumeEngine.getProfit(db, month, year);
-    
-    // Recopilamos datos para el análisis
-    const inMonth = (d: string) => { 
-      const date = new Date(d); 
-      return date.getMonth() === month && date.getFullYear() === year; 
-    };
-    const ventasZ = (db.cierres || []).filter(z => inMonth(z.date));
-    const numTickets = ventasZ.reduce((acc, z) => acc + (parseInt(z.tickets) || 0), 0); 
-    const ticketMedio = numTickets > 0 ? profitData.ingresos.caja / numTickets : 0;
-
-    const payload = {
-      mes: `${month + 1}-${year}`,
-      ingresos: profitData.ingresos.total,
-      beneficio: profitData.neto,
-      foodCostPct: profitData.ratios.foodCost,
-      drinkCostPct: profitData.ratios.drinkCost,
-      staffCostPct: profitData.ratios.staffCost,
-      primeCostPct: profitData.ratios.primeCost,
-      ticketMedio: ticketMedio
-    };
-
     try {
-      const n8nUrl = db.config?.n8nUrlIA;
-      
-      if (n8nUrl) {
-        const response = await fetch(n8nUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+      // 1. Mostrar preview original rápidamente
+      const reader = new FileReader();
+      reader.onload = (e) => setScannedImage(e.target?.result as string);
+      reader.readAsDataURL(file);
 
-        if (!response.ok) throw new Error("Error en el servidor de n8n");
-        const result = await response.json();
-        setIaAnalysis(result.analisis || result.texto || "Análisis completado sin comentarios.");
-      } else {
-        // Simulación si no hay URL
-        await new Promise(resolve => setTimeout(resolve, 2000));
+      // 2. Comprimir para el envío a Gemini
+      const base64Image = await compressImage(file);
+      const base64Data = base64Image.split(',')[1];
         
-        let consejo = "";
-        if (profitData.ratios.primeCost > 65) {
-          consejo = "⚠️ Tu Prime Cost está por encima del 65%. Debes revisar urgentemente los costes de personal o renegociar con proveedores de alimentación.";
-        } else if (profitData.ratios.foodCost > 30) {
-          consejo = "🍲 El Food Cost es elevado. Considera revisar las mermas en cocina o ajustar los precios de los platos con menor margen.";
-        } else if (profitData.neto < 0) {
-          consejo = "📉 El mes ha cerrado en pérdidas. Es vital reducir los gastos de estructura fijos o aumentar el ticket medio mediante venta sugestiva.";
-        } else {
-          consejo = "✅ ¡Buen trabajo! Los ratios están bajo control. Podrías invertir un poco más en marketing para aumentar el volumen de clientes ahora que el margen es saludable.";
-        }
-        setIaAnalysis(consejo);
+      const ai = new GoogleGenAI({ apiKey });
+      
+      const prompt = `Analiza esta factura o albarán de compra. Responde SOLO con un objeto JSON:
+      {
+        "proveedor": "Nombre del proveedor",
+        "fecha": "YYYY-MM-DD",
+        "lineas": "1x Producto A 10.50\\n2kg Producto B 20.00",
+        "unidad": "REST"
       }
-    } catch (error) {
-      console.error(error);
-      setIaAnalysis("Error al conectar con el analista IA.");
+      REGLAS:
+      - 'lineas' debe ser un string con saltos de línea (\\n). Formato estricto: Cantidad Nombre PrecioTotal (Ej: 5 kg Salmón 150.00). Usa punto para decimales.
+      - Para 'unidad', mira la dirección de entrega:
+        * "Calle Catalunya": bebidas/sakes="SHOP", comida/envases="DLV".
+        * "Avenida Argentina": "REST".
+        * Si no hay dirección, adivina por el proveedor (Licor="SHOP", Comida="REST").`;
+
+      // ⚠️ Configuración forzada a JSON
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [
+            { text: prompt }, 
+            { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
+        ]}],
+        config: { responseMimeType: "application/json", temperature: 0.1 }
+      });
+
+      const raw = response.text || "";
+      const res = extractJSON(raw); // Extractor seguro
+        
+      const newLines = (res.lineas || '').split('\n').map(parseSmartLine).filter(Boolean);
+      const alerts: any[] = [];
+      
+      newLines.forEach((nl: any) => {
+        const history = data.albaranes?.flatMap(a => a.items || [])
+          .filter(i => norm(i.n) === norm(nl.n));
+        
+        const lastPrice = history && history.length > 0 ? history[history.length - 1].unit : null;
+        if (lastPrice && nl.unit > lastPrice * 1.05) { 
+          alerts.push({ n: nl.n, old: lastPrice, new: nl.unit });
+        }
+      });
+
+      setPriceAlerts(alerts);
+      
+      setForm(prev => ({
+        ...prev,
+        prov: res.proveedor || prev.prov,
+        date: res.fecha || prev.date,
+        text: res.lineas || prev.text,
+        unitId: (res.unidad as BusinessUnit) || 'REST' 
+      }));
+
+    } catch (err: any) {
+      console.error("Error Scanner Albaranes:", err);
+      alert(`⚠️ Problema leyendo el albarán: ${err?.message ?? 'Prueba con más luz o acercando la foto.'}`);
+      setScannedImage(null);
     } finally {
       setIsAnalyzing(false);
     }
   };
 
-  const profitData = ArumeEngine.getProfit(db, month, year);
-  const mesNombre = new Date(year, month).toLocaleDateString('es-ES', { month: 'long' });
-
-  const enviarResumenTelegram = async () => {
-    const p = profitData;
-    const msg = `📊 *RESUMEN MENSUAL: ${mesNombre.toUpperCase()} ${year}*\n\n` +
-      `💰 *Ingresos:* ${Num.fmt(p.ingresos.total)}\n` +
-      `📉 *Gastos:* ${Num.fmt(p.gastos.total)}\n` +
-      `✨ *Beneficio:* ${Num.fmt(p.neto)}\n\n` +
-      `*Ratios Clave:*\n` +
-      `🍔 Food Cost: ${p.ratios.foodCost.toFixed(1)}%\n` +
-      `👥 Staff Cost: ${p.ratios.staffCost.toFixed(1)}%\n` +
-      `⚡ Prime Cost: ${p.ratios.primeCost.toFixed(1)}%\n\n` +
-      `_Enviado desde Arume ERP_`;
-    
-    await NotificationService.sendAlert(db, msg, 'INFO');
-    alert("Resumen enviado a Telegram.");
+  const handleDirectScan = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) processImageWithAI(file);
+    e.target.value = '';
   };
+
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      if (isAnalyzing) return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf("image") !== -1) {
+          const blob = items[i].getAsFile();
+          if (blob) {
+            processImageWithAI(blob);
+            break;
+          }
+        }
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [data, isAnalyzing]);
+
+  const handleSaveAlbaran = async () => {
+    if (!form.prov) return alert("Por favor, introduce el nombre del proveedor.");
+
+    const newData = { ...data };
+    if (!newData.albaranes) newData.albaranes = [];
+
+    const existingIdx = newData.albaranes.findIndex(a => 
+      !a.invoiced && 
+      norm(a.prov) === norm(form.prov) && 
+      a.date === form.date && 
+      a.socio === form.socio &&
+      a.unitId === form.unitId
+    );
+
+    if (existingIdx !== -1 && !form.forceDup) {
+      const existing = newData.albaranes[existingIdx];
+      
+      const newItems = analyzedItems.filter(newItem => 
+        !(existing.items || []).some((oldItem: any) => 
+          norm(oldItem.n) === norm(newItem?.n || '') && 
+          Math.abs((oldItem.t || 0) - (newItem?.t || 0)) < 0.01
+        )
+      );
+
+      if (newItems.length > 0) {
+        existing.items = [...(existing.items || []), ...newItems.map(item => item!)];
+        existing.total = Num.round2((Num.parse(existing.total) || 0) + newItems.reduce((acc, it) => acc + (it?.t || 0), 0));
+        existing.base = Num.round2((Num.parse(existing.base) || 0) + newItems.reduce((acc, it) => acc + (it?.base || 0), 0));
+        existing.taxes = Num.round2((Num.parse(existing.taxes) || 0) + newItems.reduce((acc, it) => acc + (it?.tax || 0), 0));
+        existing.notes = existing.notes ? `${existing.notes} | ${form.notes}` : form.notes;
+        existing.paid = existing.paid || form.paid;
+      }
+    } else {
+      const taxesArray = Object.values(liveTotals.taxes) as { b: number; i: number }[];
+      const newAlbaran: Albaran = {
+        id: `man-${Date.now()}-${Math.random().toString(36).substring(2)}`,
+        prov: form.prov,
+        date: form.date,
+        num: form.num || "S/N",
+        socio: form.socio,
+        notes: form.notes,
+        items: analyzedItems.map(item => item!), 
+        total: Num.round2(liveTotals.grandTotal),
+        base: Num.round2(taxesArray.reduce((acc, t) => acc + t.b, 0)),
+        taxes: Num.round2(taxesArray.reduce((acc, t) => acc + t.i, 0)),
+        invoiced: false,
+        paid: form.paid,
+        status: 'ok',
+        reconciled: false,
+        unitId: form.unitId 
+      };
+      newData.albaranes.push(newAlbaran);
+    }
+
+    await onSave(newData);
+    
+    if (NotificationService && NotificationService.checkCriticalStock) {
+       NotificationService.checkCriticalStock(newData).catch(e => console.error("Error stock:", e));
+    }
+
+    setForm({ prov: '', date: new Date().toISOString().split('T')[0], num: '', socio: 'Arume', notes: '', text: '', paid: false, forceDup: false, unitId: 'REST' });
+    setPriceAlerts([]);
+    setScannedImage(null); 
+    alert("¡Albarán guardado correctamente en su bloque!");
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("¿Eliminar gasto permanentemente?")) return;
+    const newData = { ...data };
+    newData.albaranes = newData.albaranes.filter(a => a.id !== id);
+    await onSave(newData);
+    setEditingAlbaran(null);
+  };
+
+  const kpis = useMemo(() => {
+    const hoy = new Date();
+    const mesActual = hoy.getMonth();
+    const añoActual = hoy.getFullYear();
+    const trimActual = Math.floor(mesActual / 3) + 1;
+
+    let totalGlobal = 0, totalMes = 0, totalTrim = 0;
+
+    (data.albaranes || []).forEach(a => {
+      if (selectedUnit !== 'ALL' && (a.unitId || 'REST') !== selectedUnit) return;
+
+      const val = Num.parse(a.total);
+      totalGlobal += val;
+      const d = new Date(a.date);
+      if (d.getFullYear() === añoActual) {
+        if (d.getMonth() === mesActual) totalMes += val;
+        if ((Math.floor(d.getMonth() / 3) + 1) === trimActual) totalTrim += val;
+      }
+    });
+
+    return { totalGlobal, totalMes, totalTrim };
+  }, [data.albaranes, selectedUnit]);
+
+  const filteredAlbaranes = useMemo(() => {
+    return (data.albaranes || []).filter(a => {
+      const itemUnit = a.unitId || 'REST';
+      if (selectedUnit !== 'ALL' && itemUnit !== selectedUnit) return false;
+
+      const term = searchQ.toLowerCase();
+      return (a.prov || '').toLowerCase().includes(term) || (a.num || '').toLowerCase().includes(term);
+    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [data.albaranes, searchQ, selectedUnit]);
+
 
   return (
     <div className="animate-fade-in space-y-6 pb-24">
-      {/* Header & Tabs */}
-      <div className="flex flex-col gap-4">
-        <header className="flex justify-between items-center px-2">
-          <div>
-            <h2 className="text-2xl font-black text-slate-800">Informes 360º</h2>
-            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Analítica y Fiscalidad</p>
-          </div>
-          <div className="flex bg-white p-1 rounded-xl shadow-sm border border-slate-100">
-            <button 
-              onClick={() => setActiveTab('pnl')} 
-              className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition ${activeTab === 'pnl' ? 'bg-slate-800 text-white shadow' : 'text-slate-400 hover:bg-slate-50'}`}
-            >
-              Resultados
-            </button>
-            <button 
-              onClick={() => setActiveTab('fiscal')} 
-              className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition ${activeTab === 'fiscal' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:bg-slate-50'}`}
-            >
-              Fiscal (IVA)
-            </button>
-            <button 
-              onClick={() => setActiveTab('kpis')} 
-              className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase transition ${activeTab === 'kpis' ? 'bg-emerald-500 text-white shadow' : 'text-slate-400 hover:bg-slate-50'}`}
-            >
-              KPIs Pro
-            </button>
-          </div>
-        </header>
+      <datalist id="providers-list">
+        {uniqueProviders.map(p => <option key={p} value={p} />)}
+      </datalist>
+
+      {/* Header */}
+      <header className="flex flex-col md:flex-row justify-between items-center bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 gap-4">
+        <div>
+          <h2 className="text-xl font-black text-slate-800 tracking-tighter">Compras & Gastos</h2>
+          <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest">Multi-Local IA Activa PRO</p>
+        </div>
+        <div className="flex gap-2 items-center flex-wrap justify-center">
+          
+          <button 
+            onClick={async () => {
+              if (!confirm("¿Agrupar albaranes fragmentados? Esto unirá gastos del mismo día, proveedor y bloque.")) return;
+              const newData = { ...data };
+              const grouped: Record<string, Albaran> = {};
+              
+              (newData.albaranes || []).forEach(a => {
+                const targetKey = Object.keys(grouped).find(k => 
+                  !grouped[k].invoiced && 
+                  norm(grouped[k].prov) === norm(a.prov) && 
+                  grouped[k].date === a.date && 
+                  (grouped[k].unitId || 'REST') === (a.unitId || 'REST') 
+                );
+                
+                if (targetKey && !a.invoiced) {
+                  grouped[targetKey].items = [...(grouped[targetKey].items || []), ...(a.items || [])];
+                  grouped[targetKey].total = Num.round2(Num.parse(grouped[targetKey].total) + Num.parse(a.total));
+                  grouped[targetKey].base = Num.round2(Num.parse(grouped[targetKey].base) + Num.parse(a.base));
+                  grouped[targetKey].taxes = Num.round2(Num.parse(grouped[targetKey].taxes) + Num.parse(a.taxes));
+                } else {
+                  grouped[a.id] = { ...a };
+                }
+              });
+              
+              newData.albaranes = Object.values(grouped);
+              await onSave(newData);
+              alert("¡Albaranes agrupados con éxito!");
+            }}
+            className="bg-slate-100 text-slate-500 px-4 py-3 rounded-2xl text-[10px] font-black hover:bg-slate-200 transition shadow-sm flex items-center gap-1"
+          >
+            <Layers className="w-4 h-4" /> AGRUPAR
+          </button>
+
+          {/* 🚀 BOTÓN IA (Deshabilitado si está analizando) */}
+          <label className={cn("bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-5 py-3 rounded-2xl text-[10px] font-black transition shadow-md flex items-center gap-2", isAnalyzing ? "opacity-50 cursor-wait" : "hover:shadow-lg hover:scale-105 cursor-pointer")}>
+            <Camera className="w-4 h-4" />
+            <span>{isAnalyzing ? 'PROCESANDO...' : 'SUBIR IMAGEN O (Ctrl+V)'}</span>
+            <input type="file" disabled={isAnalyzing} onChange={handleDirectScan} className="hidden" accept="image/*, application/pdf" />
+          </label>
+        </div>
+      </header>
+
+      {/* Selector Multi-Bloque Global */}
+      <div className="flex flex-wrap gap-2 px-1">
+        <button
+          onClick={() => setSelectedUnit('ALL')}
+          className={cn(
+            "px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all border flex items-center gap-1.5",
+            selectedUnit === 'ALL' ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50"
+          )}
+        >
+          <Layers className="w-3 h-3" /> Ver Todos
+        </button>
+        {BUSINESS_UNITS.map(unit => (
+          <button
+            key={unit.id}
+            onClick={() => setSelectedUnit(unit.id)}
+            className={cn(
+              "px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all border flex items-center gap-1.5",
+              selectedUnit === unit.id 
+                ? `${unit.color.replace('text-', 'bg-')} text-white border-transparent shadow-md` 
+                : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50"
+            )}
+          >
+            <unit.icon className="w-3 h-3" />
+            {unit.name}
+          </button>
+        ))}
       </div>
 
-      <AnimatePresence mode="wait">
-        {activeTab === 'pnl' && (
-          <motion.div 
-            key="pnl"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="space-y-6"
-          >
-            {/* Month Selector */}
-            <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-slate-100">
-              <button onClick={() => changeMonth(-1)} className="w-10 h-10 rounded-full bg-slate-50 hover:bg-indigo-100 text-indigo-600 flex items-center justify-center transition">
-                <ChevronLeft className="w-5 h-5" />
-              </button>
-              <h3 className="text-sm font-black text-slate-800 uppercase flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-indigo-500" />
-                {mesNombre} {year}
-              </h3>
-              <button onClick={() => changeMonth(1)} className="w-10 h-10 rounded-full bg-slate-50 hover:bg-indigo-100 text-indigo-600 flex items-center justify-center transition">
-                <ChevronRight className="w-5 h-5" />
-              </button>
-            </div>
+      {/* KPIs Dinámicos */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white px-6 py-5 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center items-start">
+          <span className="text-[10px] font-black text-slate-400 uppercase mb-1">Gasto Histórico</span>
+          <span className="text-2xl font-black text-slate-800">{Num.fmt(kpis.totalGlobal)}</span>
+        </div>
+        <div className="bg-indigo-50 px-6 py-5 rounded-[2rem] border border-indigo-100 shadow-sm flex flex-col justify-center items-start relative overflow-hidden">
+          <Clock className="absolute -right-4 -top-4 w-24 h-24 opacity-10 text-indigo-500" />
+          <span className="text-[10px] font-black text-indigo-500 uppercase mb-1">Este Trimestre</span>
+          <span className="text-3xl font-black text-indigo-900">{Num.fmt(kpis.totalTrim)}</span>
+        </div>
+        <div className="bg-emerald-50 px-6 py-5 rounded-[2rem] border border-emerald-100 shadow-sm flex flex-col justify-center items-start relative overflow-hidden">
+          <CheckCircle2 className="absolute -right-4 -top-4 w-24 h-24 opacity-10 text-emerald-500" />
+          <span className="text-[10px] font-black text-emerald-600 uppercase mb-1">Este Mes</span>
+          <span className="text-3xl font-black text-emerald-900">{Num.fmt(kpis.totalMes)}</span>
+        </div>
+      </div>
 
-            <button 
-              onClick={enviarResumenTelegram}
-              className="w-full py-4 bg-white border border-slate-200 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-slate-50 transition shadow-sm"
-            >
-              <Send className="w-4 h-4 text-indigo-500" />
-              Enviar Resumen a Telegram
-            </button>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Form Column */}
+        <div className="lg:col-span-1 space-y-4">
+          <div className="bg-white p-6 rounded-[2.5rem] shadow-xl border-2 border-indigo-50 relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 via-indigo-500 to-rose-500"></div>
+            
+            {isAnalyzing && (
+              <div className="absolute inset-0 bg-white/95 z-20 flex flex-col items-center justify-center text-center p-4 backdrop-blur-sm">
+                <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+                <p className="text-xs font-black text-indigo-600 animate-pulse uppercase tracking-widest">IA analizando origen y datos...</p>
+              </div>
+            )}
 
-            {/* Net Profit Card */}
-            <div className="bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-xl text-center relative overflow-hidden">
-              <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-indigo-400 via-slate-900 to-slate-900"></div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 relative z-10">Beneficio Neto (Antes Impuestos)</p>
-              <p className={`text-5xl font-black relative z-10 ${profitData.neto >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {Num.fmt(profitData.neto)}
+            <h3 className="text-sm font-black text-slate-800 mb-4 flex items-center justify-between">
+              <span className="flex items-center gap-2"><Plus className="w-4 h-4 text-indigo-500" /> Nueva Factura</span>
+              <span className="text-[9px] text-slate-400 font-bold bg-slate-100 px-2 py-1 rounded">Soporta Ctrl+V 📋</span>
+            </h3>
+
+            {/* 🚀 PANEL DE CONTROL VISUAL (IMAGEN DEL TICKET) */}
+            <AnimatePresence>
+              {scannedImage && (
+                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="mb-4">
+                  <div className="relative w-full h-32 bg-slate-100 rounded-2xl overflow-hidden border border-slate-200">
+                    <img src={scannedImage} alt="Ticket Scaneado" className="w-full h-full object-cover opacity-80" />
+                    <button 
+                      onClick={() => setScannedImage(null)} 
+                      className="absolute top-2 right-2 bg-slate-900/50 text-white p-1.5 rounded-lg hover:bg-rose-500 transition"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                    <div className="absolute bottom-2 left-2 bg-indigo-600 text-white text-[8px] font-black px-2 py-1 rounded shadow-lg uppercase">
+                      Ticket Base
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* SELECTOR VISUAL DE UNIDAD DE NEGOCIO AL CREAR ALBARÁN */}
+            <div className={cn(
+              "mb-4 p-3 rounded-2xl border transition-colors",
+              form.unitId === 'REST' ? "bg-indigo-50/50 border-indigo-100" :
+              form.unitId === 'DLV' ? "bg-amber-50/50 border-amber-100" : "bg-emerald-50/50 border-emerald-100"
+            )}>
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 text-center flex justify-center items-center gap-1">
+                {scannedImage && <Sparkles className="w-3 h-3 text-indigo-500" />} Asignar a Bloque:
               </p>
-              <div className="mt-4 flex justify-center gap-4 relative z-10">
-                <div className="px-3 py-1 bg-white/5 rounded-full border border-white/10 text-[9px] font-bold uppercase text-slate-400">
-                  Margen: {((profitData.neto / (profitData.ingresos.total || 1)) * 100).toFixed(1)}%
-                </div>
-              </div>
-            </div>
-
-            {/* Breakdown List */}
-            <div className="space-y-3">
-              <div className="bg-white p-5 rounded-2xl border border-slate-100 flex justify-between items-center shadow-sm">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center">
-                    <ArrowUpRight className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-slate-700">Ingresos Totales</p>
-                    <p className="text-[9px] text-slate-400">Ventas Caja + Facturas B2B</p>
-                  </div>
-                </div>
-                <p className="text-lg font-black text-slate-800">{Num.fmt(profitData.ingresos.total)}</p>
-              </div>
-
-              <div className="bg-white p-5 rounded-2xl border border-slate-100 flex justify-between items-center shadow-sm">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-rose-100 text-rose-600 rounded-xl flex items-center justify-center">
-                    <ArrowDownRight className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-slate-700">Gastos Variables</p>
-                    <p className="text-[9px] text-slate-400">Mercaderías (Comida/Bebida)</p>
-                  </div>
-                </div>
-                <p className="text-lg font-black text-rose-500">-{Num.fmt(profitData.gastos.comida + profitData.gastos.bebida + profitData.gastos.otros)}</p>
-              </div>
-
-              <div className="bg-white p-5 rounded-2xl border border-slate-100 flex justify-between items-center shadow-sm">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center">
-                    <PieChart className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-slate-700">Estructura Fija</p>
-                    <p className="text-[9px] text-slate-400">Personal y Local</p>
-                  </div>
-                </div>
-                <p className="text-lg font-black text-rose-500">-{Num.fmt(profitData.gastos.personal + profitData.gastos.estructura)}</p>
-              </div>
-              
-              <div className="bg-white p-5 rounded-2xl border border-slate-100 flex justify-between items-center shadow-sm opacity-75">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-slate-100 text-slate-600 rounded-xl flex items-center justify-center">
-                    <Calculator className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold text-slate-700">Amortizaciones</p>
-                    <p className="text-[9px] text-slate-400">Desgaste maquinaria y activos</p>
-                  </div>
-                </div>
-                <p className="text-lg font-black text-slate-600">-{Num.fmt(profitData.gastos.amortizacion)}</p>
-              </div>
-            </div>
-          </motion.div>
-        )}
-
-        {activeTab === 'fiscal' && (
-          <motion.div 
-            key="fiscal"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="space-y-6"
-          >
-            {/* Quarter Selector */}
-            <div className="flex justify-center">
-              <div className="flex bg-slate-100 p-1 rounded-xl shadow-inner">
-                {[1, 2, 3, 4].map(q => (
-                  <button 
-                    key={q}
-                    onClick={() => changeQuarter(q)} 
-                    className={`px-6 py-2 rounded-lg text-[10px] font-black transition ${quarter === q ? 'bg-white shadow text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
+              <div className="grid grid-cols-2 gap-2">
+                {BUSINESS_UNITS.map(unit => (
+                  <button
+                    key={unit.id}
+                    onClick={() => setForm({ ...form, unitId: unit.id })}
+                    className={cn(
+                      "p-3 rounded-xl border-2 transition-all flex flex-col items-center gap-1.5",
+                      form.unitId === unit.id 
+                        ? `${unit.color.replace('text-', 'border-')} ${unit.bg} ${unit.color} shadow-sm` 
+                        : "border-slate-100 bg-white text-slate-400 grayscale hover:grayscale-0"
+                    )}
                   >
-                    T{q}
+                    <unit.icon className="w-4 h-4" />
+                    <span className="text-[8px] font-black uppercase text-center leading-tight">{unit.name}</span>
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* IVA Summary Card */}
-            {(() => {
-              const iva = calcularModelo303();
-              const irpf = calcularModelo130();
-              const totalPagar = (iva.resultado > 0 ? iva.resultado : 0) + irpf.cuotaIRPF;
+            {priceAlerts.length > 0 && (
+              <div className="mb-4 p-3 bg-rose-50 border border-rose-100 rounded-2xl space-y-2 animate-bounce-subtle">
+                <p className="text-[10px] font-black text-rose-600 uppercase flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" /> ¡Alerta de Precios!
+                </p>
+                {priceAlerts.map((alt, i) => (
+                  <p key={i} className="text-[9px] text-rose-500 font-bold">
+                    {alt.n}: Costaba {Num.fmt(alt.old)} → <span className="font-black underline">{Num.fmt(alt.new)}</span>
+                  </p>
+                ))}
+              </div>
+            )}
 
-              return (
-                <>
-                  <div className="bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-2xl relative overflow-hidden text-center">
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-rose-500 rounded-full blur-[100px] opacity-20 -mr-16 -mt-16"></div>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Total Estimado a Pagar (IVA + IRPF)</p>
-                    <h3 className="text-5xl md:text-6xl font-black tracking-tight mb-2">{Num.fmt(totalPagar)}</h3>
-                    <p className="text-xs text-slate-400">Previsión para el final del trimestre {quarter}T {year}</p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Modelo 303 */}
-                    <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden">
-                      <div className="flex justify-between items-center mb-6">
-                        <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-black uppercase">Modelo 303 (IVA)</span>
-                        <Scale className="w-5 h-5 text-indigo-500" />
-                      </div>
-                      
-                      <div className="space-y-4">
-                        <div className="flex justify-between items-end border-b border-slate-50 pb-2">
-                          <span className="text-xs font-bold text-slate-400">IVA Repercutido (+)</span>
-                          <span className="text-lg font-black text-slate-800">{Num.fmt(iva.devengado.iva)}</span>
-                        </div>
-                        <div className="flex justify-between items-end border-b border-slate-50 pb-2">
-                          <span className="text-xs font-bold text-slate-400">IVA Soportado (-)</span>
-                          <span className="text-lg font-black text-emerald-500">-{Num.fmt(iva.totalSoportado)}</span>
-                        </div>
-                        <div className="flex justify-between items-end pt-2">
-                          <span className="text-xs font-black text-slate-800 uppercase">Resultado IVA</span>
-                          <span className={`text-2xl font-black ${iva.resultado > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                            {Num.fmt(iva.resultado)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Modelo 130 */}
-                    <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden">
-                      <div className="flex justify-between items-center mb-6">
-                        <span className="px-3 py-1 bg-rose-50 text-rose-600 rounded-lg text-[10px] font-black uppercase">Modelo 130 (IRPF)</span>
-                        <Calculator className="w-5 h-5 text-rose-500" />
-                      </div>
-                      
-                      <div className="space-y-4">
-                        <div className="flex justify-between items-end border-b border-slate-50 pb-2">
-                          <span className="text-xs font-bold text-slate-400">Beneficio Neto (Trim.)</span>
-                          <span className="text-lg font-black text-slate-800">{Num.fmt(irpf.beneficio)}</span>
-                        </div>
-                        <div className="flex justify-between items-end border-b border-slate-50 pb-2">
-                          <span className="text-xs font-bold text-slate-400">Tipo Impositivo</span>
-                          <span className="text-lg font-black text-slate-400">20%</span>
-                        </div>
-                        <div className="flex justify-between items-end pt-2">
-                          <span className="text-xs font-black text-slate-800 uppercase">Cuota a Pagar</span>
-                          <span className="text-2xl font-black text-rose-500">{Num.fmt(irpf.cuotaIRPF)}</span>
-                        </div>
-                      </div>
-                      <p className="text-[9px] text-slate-300 mt-4 italic flex items-center gap-1">
-                        <Info className="w-3 h-3" />
-                        *Calculado como el 20% del rendimiento neto positivo.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Detailed Table */}
-                  <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden">
-                    <table className="w-full text-left border-collapse">
-                      <thead className="bg-slate-50 border-b border-slate-100">
-                        <tr>
-                          <th className="p-4 text-[9px] font-black text-slate-400 uppercase tracking-widest">Concepto</th>
-                          <th className="p-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right">Base</th>
-                          <th className="p-4 text-[9px] font-black text-slate-400 uppercase tracking-widest text-right">Cuota IVA</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-50 text-xs font-medium text-slate-600">
-                        <tr>
-                          <td className="p-4 font-bold text-slate-800">IVA Ventas (10% Est.)</td>
-                          <td className="p-4 text-right font-mono">{Num.fmt(iva.devengado.base)}</td>
-                          <td className="p-4 text-right font-bold text-emerald-600">{Num.fmt(iva.devengado.iva)}</td>
-                        </tr>
-                        <tr className="bg-rose-50/30">
-                          <td className="p-4 font-bold text-slate-800">Soportado 4%</td>
-                          <td className="p-4 text-right font-mono">{Num.fmt(iva.deducible.base4)}</td>
-                          <td className="p-4 text-right font-bold text-rose-500">{Num.fmt(iva.deducible.iva4)}</td>
-                        </tr>
-                        <tr className="bg-rose-50/30">
-                          <td className="p-4 font-bold text-slate-800">Soportado 10%</td>
-                          <td className="p-4 text-right font-mono">{Num.fmt(iva.deducible.base10)}</td>
-                          <td className="p-4 text-right font-bold text-rose-500">{Num.fmt(iva.deducible.iva10)}</td>
-                        </tr>
-                        <tr className="bg-rose-50/30">
-                          <td className="p-4 font-bold text-slate-800">Soportado 21%</td>
-                          <td className="p-4 text-right font-mono">{Num.fmt(iva.deducible.base21)}</td>
-                          <td className="p-4 text-right font-bold text-rose-500">{Num.fmt(iva.deducible.iva21)}</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-                  
-                  <button 
-                    onClick={exportIVA} 
-                    className="w-full py-4 bg-slate-100 text-slate-600 font-black text-xs rounded-2xl hover:bg-slate-200 transition flex items-center justify-center gap-2 border border-slate-200"
-                  >
-                    <Download className="w-4 h-4" />
-                    DESCARGAR CSV FISCAL
-                  </button>
-                </>
-              );
-            })()}
-          </motion.div>
-        )}
-
-        {activeTab === 'kpis' && (
-          <motion.div 
-            key="kpis"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="space-y-6"
-          >
-            {/* Month Selector */}
-            <div className="flex justify-between items-center bg-white p-4 rounded-2xl border border-slate-100">
-              <button onClick={() => changeMonth(-1)} className="w-10 h-10 rounded-full bg-slate-50 hover:bg-indigo-100 text-indigo-600 flex items-center justify-center transition">
-                <ChevronLeft className="w-5 h-5" />
-              </button>
-              <h3 className="text-sm font-black text-slate-800 uppercase">{mesNombre} {year}</h3>
-              <button onClick={() => changeMonth(1)} className="w-10 h-10 rounded-full bg-slate-50 hover:bg-indigo-100 text-indigo-600 flex items-center justify-center transition">
-                <ChevronRight className="w-5 h-5" />
-              </button>
+            <div className="space-y-3 mb-4">
+              <input 
+                value={form.prov}
+                onChange={(e) => setForm({ ...form, prov: e.target.value })}
+                list="providers-list"
+                type="text" 
+                placeholder="Proveedor (ej: Makro)" 
+                className="w-full p-3 bg-slate-50 rounded-xl text-sm font-bold border-0 outline-none focus:ring-2 focus:ring-indigo-500 transition"
+              />
+              <div className="flex gap-2">
+                <input 
+                  value={form.date}
+                  onChange={(e) => setForm({ ...form, date: e.target.value })}
+                  type="date" 
+                  className="flex-1 p-3 bg-slate-50 rounded-xl text-sm font-bold border-0 outline-none"
+                />
+                <input 
+                  value={form.num}
+                  onChange={(e) => setForm({ ...form, num: e.target.value })}
+                  type="text" 
+                  placeholder="Ref." 
+                  className="w-1/3 p-3 bg-slate-50 rounded-xl text-sm font-bold border-0 outline-none"
+                />
+              </div>
+              <input 
+                value={form.notes}
+                onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                type="text" 
+                placeholder="Notas (opcional)..." 
+                className="w-full p-3 bg-slate-50 rounded-xl text-xs border-0 outline-none"
+              />
             </div>
 
-            {/* KPI Grid */}
-            <div className="grid grid-cols-2 gap-4">
-              {(() => {
-                const inMonth = (d: string) => { 
-                  const date = new Date(d); 
-                  return date.getMonth() === month && date.getFullYear() === year; 
-                };
-                const ventasZ = (db.cierres || []).filter(z => inMonth(z.date));
-                const numTickets = ventasZ.reduce((acc, z) => acc + (parseInt(z.tickets) || 0), 0); 
-                const ticketMedio = numTickets > 0 ? profitData.ingresos.caja / numTickets : 0;
-
-                return (
-                  <>
-                    <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm text-center">
-                      <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-3">
-                        <Calculator className="w-6 h-6" />
-                      </div>
-                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Ticket Medio</p>
-                      <p className="text-2xl font-black text-slate-800">{Num.fmt(ticketMedio)}</p>
-                    </div>
-                    <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm text-center">
-                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3 ${profitData.ratios.primeCost > 65 ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                        <Zap className="w-6 h-6" />
-                      </div>
-                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Prime Cost</p>
-                      <p className={`text-2xl font-black ${profitData.ratios.primeCost > 65 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                        {profitData.ratios.primeCost.toFixed(1)}%
-                      </p>
-                      <p className="text-[8px] text-slate-400 mt-1">Objetivo: &lt; 65%</p>
-                    </div>
-                  </>
-                );
-              })()}
+            <textarea 
+              value={form.text}
+              onChange={(e) => setForm({ ...form, text: e.target.value })}
+              placeholder="Escribe líneas o pega la imagen...&#10;Ej: 5 kg Salmón 150.00" 
+              className="w-full h-32 bg-slate-50 rounded-2xl p-4 text-xs font-mono border-0 outline-none resize-none mb-3 shadow-inner focus:bg-white transition"
+            />
+            
+            <div className="mt-3 space-y-1 max-h-52 overflow-y-auto custom-scrollbar px-1 bg-slate-50/50 rounded-xl p-2 min-h-[50px]">
+              {analyzedItems.length > 0 ? analyzedItems.map((it, idx) => it && (
+                <div key={idx} className="flex justify-between items-center text-[10px] border-b border-slate-200 py-2 last:border-0">
+                  <span className="truncate pr-2 font-bold text-slate-700"><b>{it.q}x</b> {it.n} <span className="text-[8px] text-slate-400">({it.rate}%)</span></span>
+                  <span className="font-black text-slate-900 whitespace-nowrap">{Num.fmt(it.t)}</span>
+                </div>
+              )) : (
+                <p className="text-[10px] text-slate-300 text-center italic py-2">Sin productos detectados...</p>
+              )}
             </div>
 
-            {/* Distribution Charts */}
-            <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm space-y-6">
-              <h3 className="font-black text-slate-800 text-sm flex items-center gap-2">
-                <BarChart3 className="w-4 h-4 text-indigo-500" />
-                Distribución de Costes
-              </h3>
-              
-              <div className="space-y-5">
-                <div>
-                  <div className="flex justify-between text-xs font-bold mb-2">
-                    <span className="text-slate-600">Personal (Staff Cost)</span>
-                    <span className={profitData.ratios.staffCost > 35 ? 'text-rose-500' : 'text-slate-800'}>
-                      {profitData.ratios.staffCost.toFixed(1)}%
-                    </span>
-                  </div>
-                  <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                    <motion.div 
-                      initial={{ width: 0 }}
-                      animate={{ width: `${Math.min(100, profitData.ratios.staffCost)}%` }}
-                      className="bg-blue-500 h-full rounded-full"
-                    />
-                  </div>
-                  <p className="text-[9px] text-slate-400 mt-1.5 text-right">Ideal: 30-35%</p>
+            <div className="mt-4 p-4 bg-slate-900 rounded-2xl shadow-lg space-y-2">
+              {(Object.entries(liveTotals.taxes) as [string, { b: number; i: number }][]).map(([r, t]) => t.b > 0 && (
+                <div key={r} className="flex justify-between text-[10px] text-slate-400">
+                  <span className="font-bold w-12 uppercase">IVA {r}%</span>
+                  <span className="flex-1 text-right pr-4">Base: {Num.fmt(t.b)}</span>
+                  <span className="text-emerald-400 font-black">+{Num.fmt(t.i)}</span>
                 </div>
-
-                <div>
-                  <div className="flex justify-between text-xs font-bold mb-2">
-                    <span className="text-slate-600">Comida (Food Cost)</span>
-                    <span className={profitData.ratios.foodCost > 30 ? 'text-rose-500' : 'text-slate-800'}>
-                      {profitData.ratios.foodCost.toFixed(1)}%
-                    </span>
-                  </div>
-                  <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                    <motion.div 
-                      initial={{ width: 0 }}
-                      animate={{ width: `${Math.min(100, profitData.ratios.foodCost)}%` }}
-                      className="bg-orange-500 h-full rounded-full"
-                    />
-                  </div>
-                  <p className="text-[9px] text-slate-400 mt-1.5 text-right">Ideal: 25-30%</p>
-                </div>
-
-                <div>
-                  <div className="flex justify-between text-xs font-bold mb-2">
-                    <span className="text-slate-600">Bebida (Pour Cost)</span>
-                    <span className={profitData.ratios.drinkCost > 25 ? 'text-rose-500' : 'text-slate-800'}>
-                      {profitData.ratios.drinkCost.toFixed(1)}%
-                    </span>
-                  </div>
-                  <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                    <motion.div 
-                      initial={{ width: 0 }}
-                      animate={{ width: `${Math.min(100, profitData.ratios.drinkCost)}%` }}
-                      className="bg-purple-500 h-full rounded-full"
-                    />
-                  </div>
-                  <p className="text-[9px] text-slate-400 mt-1.5 text-right">Ideal: 18-22%</p>
-                </div>
+              ))}
+              <div className="flex justify-between items-center pt-2 border-t border-slate-700 mt-2">
+                <span className="text-xs font-black text-white uppercase">TOTAL</span>
+                <span className="text-2xl font-black text-white">{Num.fmt(liveTotals.grandTotal)}</span>
               </div>
             </div>
 
-            {/* AI Analyst Button */}
-            <div className="space-y-4">
-              <button 
-                onClick={analizarConIA} 
-                disabled={isAnalyzing}
-                className="w-full py-5 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 text-white font-black text-xs rounded-[2rem] hover:shadow-xl hover:scale-[1.02] transition-all flex flex-col items-center justify-center gap-2 shadow-lg disabled:opacity-70 disabled:scale-100"
-              >
-                {isAnalyzing ? (
-                  <>
-                    <Bot className="w-8 h-8 animate-bounce" />
-                    <span className="tracking-widest uppercase">Analizando datos del mes...</span>
-                  </>
-                ) : (
-                  <>
-                    <Bot className="w-8 h-8" />
-                    <span className="tracking-widest uppercase">IA: Analizar Rendimiento {mesNombre}</span>
-                  </>
-                )}
-              </button>
-
-              {iaAnalysis && (
-                <motion.div 
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="bg-indigo-50 border border-indigo-100 p-6 rounded-[2rem] text-xs text-indigo-900 leading-relaxed font-medium shadow-sm relative"
-                >
-                  <div className="absolute -top-2 -left-2 w-8 h-8 bg-indigo-500 text-white rounded-full flex items-center justify-center shadow-md">
-                    <Bot className="w-4 h-4" />
-                  </div>
-                  <p className="font-black text-indigo-600 uppercase mb-3 tracking-widest text-[10px]">Consejo del Director Financiero IA:</p>
-                  {iaAnalysis}
-                </motion.div>
-              )}
+            <div className="flex items-center justify-between mt-4 px-2">
+              <div className="flex items-center gap-2">
+                <input 
+                  type="checkbox" 
+                  id="inPaid" 
+                  checked={form.paid}
+                  onChange={(e) => setForm({ ...form, paid: e.target.checked })}
+                  className="w-4 h-4 accent-indigo-600 cursor-pointer" 
+                />
+                <label htmlFor="inPaid" className="text-xs font-bold text-slate-600 cursor-pointer">Pagado Contado</label>
+              </div>
             </div>
-          </motion.div>
+
+            <button 
+              disabled={isAnalyzing}
+              onClick={handleSaveAlbaran}
+              className="w-full mt-4 bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-xl hover:bg-indigo-700 transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              GUARDAR COMPRA
+            </button>
+          </div>
+        </div>
+
+        {/* List Column */}
+        <div className="lg:col-span-2 space-y-6">
+          <div className="bg-white p-2 rounded-full shadow-sm border border-slate-100 flex items-center px-4">
+            <Search className="w-4 h-4 text-slate-400 shrink-0" />
+            <input 
+              value={searchQ}
+              onChange={(e) => setSearchQ(e.target.value)}
+              type="text" 
+              placeholder="Buscar por proveedor o referencia..." 
+              className="bg-transparent text-sm font-bold outline-none w-full text-slate-600 pl-3" 
+            />
+          </div>
+
+          <div className="space-y-3 pb-20">
+            {filteredAlbaranes.length > 0 ? filteredAlbaranes.map(a => {
+              const unitConfig = BUSINESS_UNITS.find(u => u.id === (a.unitId || 'REST'));
+              
+              return (
+                <div 
+                  key={a.id}
+                  onClick={() => setEditingAlbaran(a)}
+                  className={cn(
+                    "bg-white p-5 rounded-3xl border border-slate-100 flex justify-between items-center shadow-sm hover:shadow-md transition cursor-pointer",
+                    a.reconciled && "ring-2 ring-emerald-400/50"
+                  )}
+                >
+                  <div>
+                    <h4 className="font-black text-slate-800 flex items-center gap-2 flex-wrap">
+                      {a.prov}
+                      {unitConfig && (
+                        <span className={cn(
+                          "text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1",
+                          unitConfig.color, unitConfig.bg
+                        )}>
+                          <unitConfig.icon className="w-3 h-3" />
+                          {unitConfig.name}
+                        </span>
+                      )}
+                    </h4>
+                    <div className="flex items-center gap-2 mt-1">
+                      <p className="text-[10px] text-slate-400 font-bold">{a.date}</p>
+                      {a.notes && <span className="text-[9px] text-indigo-400 bg-indigo-50 px-1.5 rounded font-bold">📝 Nota</span>}
+                      {a.reconciled && <span className="text-[9px] text-emerald-600 bg-emerald-50 px-1.5 rounded font-black">🔗 Conciliado</span>}
+                      {a.invoiced && <span className="text-[9px] text-blue-600 bg-blue-50 px-1.5 rounded font-black">📄 Facturado</span>}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="font-black text-slate-900 text-lg">{Num.fmt(a.total)}</p>
+                    <span className={cn(
+                      "text-[8px] font-black uppercase",
+                      a.paid ? 'text-emerald-500' : 'text-rose-500'
+                    )}>
+                      {a.paid ? 'Pagado' : 'Pendiente'}
+                    </span>
+                  </div>
+                </div>
+              );
+            }) : (
+              <div className="py-20 text-center opacity-50 bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200">
+                <Truck className="w-12 h-12 mx-auto mb-3 text-slate-300" />
+                <p className="text-slate-500 font-bold text-sm">Sin registros en este bloque.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Edit Modal */}
+      <AnimatePresence>
+        {editingAlbaran && (
+          <div className="fixed inset-0 z-[200] flex justify-center items-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setEditingAlbaran(null)}
+              className="absolute inset-0 bg-slate-900/90 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl relative z-10 flex flex-col max-h-[90vh]"
+            >
+              <button onClick={() => setEditingAlbaran(null)} className="absolute top-6 right-6 text-slate-300 hover:text-slate-500 text-2xl transition">✕</button>
+              
+              <div className="border-b border-slate-100 pb-4 mb-6">
+                <h3 className="text-2xl font-black text-slate-800 tracking-tighter">Detalle del Gasto</h3>
+                <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest mt-1">Ref: {editingAlbaran.num}</p>
+                {editingAlbaran.link_foto && (
+                  <a href={editingAlbaran.link_foto} target="_blank" rel="noreferrer" className="text-[10px] text-blue-500 hover:underline inline-block mt-2">
+                    📸 Ver Ticket en Drive
+                  </a>
+                )}
+              </div>
+              
+              <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Proveedor</p>
+                    <p className="text-sm font-black text-slate-800">{editingAlbaran.prov}</p>
+                  </div>
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Fecha</p>
+                    <p className="text-sm font-black text-slate-800">{editingAlbaran.date}</p>
+                  </div>
+                </div>
+
+                <div className={cn("p-4 rounded-2xl border flex items-center gap-3", 
+                  BUSINESS_UNITS.find(u => u.id === (editingAlbaran.unitId || 'REST'))?.bg,
+                  BUSINESS_UNITS.find(u => u.id === (editingAlbaran.unitId || 'REST'))?.color
+                )}>
+                   <Layers className="w-5 h-5 opacity-50" />
+                   <div>
+                     <p className="text-[9px] font-black uppercase tracking-widest opacity-70">Unidad de Negocio</p>
+                     <p className="text-sm font-black">{BUSINESS_UNITS.find(u => u.id === (editingAlbaran.unitId || 'REST'))?.name}</p>
+                   </div>
+                </div>
+
+                {editingAlbaran.notes && (
+                  <div className="bg-amber-50 p-4 rounded-2xl border border-amber-100">
+                    <p className="text-[9px] font-black text-amber-600 uppercase mb-1">Notas</p>
+                    <p className="text-xs font-bold text-amber-900">{editingAlbaran.notes}</p>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <p className="text-[9px] font-black text-slate-400 uppercase ml-2">Desglose de productos</p>
+                  <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 space-y-2">
+                    {editingAlbaran.items?.map((it, i) => (
+                      <div key={i} className="flex justify-between items-center text-xs border-b border-slate-200 last:border-0 pb-2 last:pb-0 pt-2 first:pt-0">
+                        <span className="font-bold text-slate-700"><b>{it.q}x</b> {it.n}</span>
+                        <span className="font-black text-slate-900">{Num.fmt(it.t)}</span>
+                      </div>
+                    ))}
+                    
+                    <div className="mt-4 pt-2 border-t border-slate-300 border-dashed flex justify-between text-[10px] text-slate-500 font-bold">
+                      <span>Base: {Num.fmt(editingAlbaran.base || 0)}</span>
+                      <span>IVA: {Num.fmt(editingAlbaran.taxes || 0)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center bg-slate-900 p-6 rounded-[2rem] text-white shadow-xl">
+                  <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase">Total Importe</p>
+                    <p className="text-3xl font-black text-emerald-400">{Num.fmt(editingAlbaran.total)}</p>
+                  </div>
+                  <div className="text-right">
+                    <div className={cn(
+                      "px-3 py-1 rounded-full text-[10px] font-black uppercase inline-block",
+                      editingAlbaran.paid ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400"
+                    )}>
+                      {editingAlbaran.paid ? 'Pagado' : 'Pendiente'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-8 pt-6 border-t border-slate-100 flex gap-3">
+                <button onClick={() => handleDelete(editingAlbaran.id)} className="flex-1 bg-rose-50 text-rose-500 py-4 rounded-2xl font-black text-xs hover:bg-rose-100 flex justify-center items-center gap-2">
+                  <Trash2 className="w-4 h-4" /> ELIMINAR
+                </button>
+                <button onClick={() => setEditingAlbaran(null)} className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl font-black text-xs hover:bg-slate-200">
+                  CERRAR
+                </button>
+              </div>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>
