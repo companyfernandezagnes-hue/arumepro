@@ -1,19 +1,13 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
+import { motion } from 'motion/react';
 import { 
-  Truck, Search, Plus, Zap, Download, Trash2, Camera, AlertTriangle,
-  CheckCircle2, Clock, FileSpreadsheet, Calculator, Building2, ShoppingBag, Users, Hotel, Layers, Image as ImageIcon
+  TrendingUp, TrendingDown, ChevronLeft, ChevronRight, 
+  Building2, Hotel, ShoppingBag, Users, Layers, 
+  Utensils, Coffee, Briefcase, Calculator, PieChart
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { AppData, Albaran } from '../types';
-import { Num, ArumeEngine } from '../services/engine';
+import { AppData } from '../types';
+import { ArumeEngine, Num } from '../services/engine';
 import { cn } from '../lib/utils';
-import { NotificationService } from '../services/notifications'; 
-import { GoogleGenAI } from "@google/genai";
-
-interface AlbaranesViewProps {
-  data: AppData;
-  onSave: (newData: AppData) => Promise<void>;
-}
 
 export type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
 
@@ -21,413 +15,71 @@ const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string
   { id: 'REST', name: 'Restaurante', icon: Building2, color: 'text-indigo-600', bg: 'bg-indigo-50' },
   { id: 'DLV', name: 'Catering Hoteles', icon: Hotel, color: 'text-amber-600', bg: 'bg-amber-50' },
   { id: 'SHOP', name: 'Tienda Sake', icon: ShoppingBag, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-  { id: 'CORP', name: 'Socios / Corp', icon: Users, color: 'text-slate-600', bg: 'bg-slate-100' },
+  { id: 'CORP', name: 'Socios / Corp', icon: Users, color: 'text-slate-600', bg: 'bg-slate-100' }
 ];
 
-/* =======================================================
- * 🛡️ FUNCIONES PRO: IA INDESTRUCTIBLE
- * ======================================================= */
+export const ReportsView = ({ data }: { data: AppData }) => {
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [selectedUnit, setSelectedUnit] = useState<BusinessUnit | 'ALL'>('ALL');
 
-// Extractor JSON Seguro (Respaldo)
-const extractJSON = (rawText: string) => {
-  try {
-    if (!rawText) throw new Error("Respuesta vacía");
-    const clean = rawText.replace(/(?:json)?/gi, '').replace(/\uFEFF/g, '').trim();
-    const start = clean.indexOf('{');
-    const end = clean.lastIndexOf('}');
-    if (start === -1 || end === -1 || end <= start) throw new Error("No se detectó JSON");
-    return JSON.parse(clean.substring(start, end + 1));
-  } catch (err) {
-    console.error("Fallo al parsear IA:", rawText);
-    throw new Error("La IA no devolvió JSON válido.");
-  }
-};
-
-// Compresor Eficiente para imágenes pesadas
-const compressImage = async (file: File | Blob): Promise<string> => {
-  const MAX_BYTES = 4 * 1024 * 1024; // Límite seguro
-  const MAX_W = 1600, MAX_H = 1600; // Un poco más de resolución para leer textos pequeños
-
-  const bitmap = await createImageBitmap(file);
-  let { width, height } = bitmap;
-  const ratio = Math.min(MAX_W / width, MAX_H / height, 1);
-  const w = Math.max(1, Math.round(width * ratio));
-  const h = Math.max(1, Math.round(height * ratio));
-
-  const canvas = document.createElement('canvas');
-  canvas.width = w; canvas.height = h;
-  const ctx = canvas.getContext('2d', { alpha: false });
-  ctx?.drawImage(bitmap, 0, 0, w, h);
-
-  const blob: Blob = await new Promise((resolve) =>
-    canvas.toBlob((b) => resolve(b as Blob), 'image/jpeg', 0.8)
-  );
-
-  const finalBlob = blob.size > MAX_BYTES
-    ? await new Promise<Blob>(res => canvas.toBlob((b) => res(b as Blob), 'image/jpeg', 0.6))
-    : blob;
-
-  const b64 = await new Promise<string>((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve((fr.result as string).split(',')[1]);
-    fr.onerror = reject;
-    fr.readAsDataURL(finalBlob);
-  });
-
-  return `data:image/jpeg;base64,${b64}`;
-};
-
-export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
-  const [searchQ, setSearchQ] = useState('');
-  const [selectedUnit, setSelectedUnit] = useState<BusinessUnit | 'ALL'>('ALL'); 
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [priceAlerts, setPriceAlerts] = useState<{n: string, old: number, new: number}[]>([]);
-  const [scannedImage, setScannedImage] = useState<string | null>(null);
-  
-  const [form, setForm] = useState({
-    prov: '',
-    date: new Date().toISOString().split('T')[0],
-    num: '',
-    socio: 'Arume',
-    notes: '',
-    text: '',
-    paid: false,
-    forceDup: false,
-    unitId: 'REST' as BusinessUnit 
-  });
-
-  const [quickCalc, setQuickCalc] = useState({ name: '', total: '', iva: 10 });
-  const [editingAlbaran, setEditingAlbaran] = useState<Albaran | null>(null);
-
-  const norm = (s: string) => (s || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-
-  const uniqueProviders = useMemo(() => {
-    const provs = (data.albaranes || []).map(a => a.prov).filter(Boolean);
-    return Array.from(new Set(provs)).sort();
-  }, [data.albaranes]);
-
-  const parseSmartLine = (line: string) => {
-    let clean = line.replace(/[€$]/g, '').replace(/,/g, '.').trim();
-    if (!clean || clean.length < 5) return null;
-
-    let rate = 10; 
-    if (clean.match(/\b21\s?%/)) rate = 21;
-    else if (clean.match(/\b4\s?%/)) rate = 4;
-    
-    const upper = clean.toUpperCase();
-    if (upper.includes("ALCOHOL") || upper.includes("GINEBRA") || upper.includes("SERV") || upper.includes("VINO") || upper.includes("SAKE")) rate = 21;
-    if (upper.includes("PAN ") || upper.includes("HUEVO") || upper.includes("LECHE") || upper.includes("FRUTA")) rate = 4;
-
-    const numbers = [...clean.matchAll(/(\d+\.\d{2})/g)].map(m => parseFloat(m[1]));
-    if (numbers.length === 0) return null;
-
-    const totalLine = numbers[numbers.length - 1]; 
-    
-    let qty = 1;
-    const qtyMatch = clean.match(/^(\d+(\.\d{1,3})?)\s*(kg|uds|x|\*|l|gr)/i);
-    if (qtyMatch) qty = parseFloat(qtyMatch[1]);
-
-    let name = clean.replace(totalLine.toString(), '').replace(/\d+(\.\d{1,3})?\s*(kg|uds|x|\*|l|gr)/i, '').replace(/\b(4|10|21)\s?%/, '').replace(/\.{2,}/g, '').trim();
-    if (name.length < 2) name = "Varios Indefinido";
-
-    const unitPrice = qty > 0 ? totalLine / qty : totalLine;
-    const baseLine = totalLine / (1 + rate / 100);
-    const taxLine = totalLine - baseLine;
-
-    return { q: qty, n: name, t: totalLine, rate, base: baseLine, tax: taxLine, unit: unitPrice };
+  const handleMonthChange = (offset: number) => {
+    const newDate = new Date(currentDate);
+    newDate.setMonth(currentDate.getMonth() + offset);
+    setCurrentDate(newDate);
   };
 
-  const analyzedItems = useMemo(() => {
-    return form.text.split('\n').map(parseSmartLine).filter(Boolean);
-  }, [form.text]);
+  const monthName = currentDate.toLocaleString('es-ES', { month: 'long', year: 'numeric' }).toUpperCase();
+  const month = currentDate.getMonth();
+  const year = currentDate.getFullYear();
 
-  const liveTotals = useMemo(() => {
-    const taxes: Record<number, { b: number; i: number }> = { 4: { b: 0, i: 0 }, 10: { b: 0, i: 0 }, 21: { b: 0, i: 0 } };
-    let grandTotal = 0;
+  // 🚀 MAGIA: El motor ArumeEngine calcula todo de golpe
+  const stats = useMemo(() => ArumeEngine.getProfit(data, month + 1, year), [data, month, year]);
 
-    analyzedItems.forEach(it => {
-      if (it) {
-        if (!taxes[it.rate]) taxes[it.rate] = { b: 0, i: 0 };
-        taxes[it.rate].b += it.base;
-        taxes[it.rate].i += it.tax;
-        grandTotal += it.t;
-      }
-    });
-
-    return { grandTotal, taxes };
-  }, [analyzedItems]);
-
-  // 🚀 NÚCLEO DE IA BLINDADO PARA ALBARANES
-  const processImageWithAI = async (file: File | Blob) => {
-    const apiKey = localStorage.getItem('gemini_api_key');
-    if (!apiKey) return alert("⚠️ Conecta tu IA primero en Configuración.");
-
-    setIsAnalyzing(true);
-    setPriceAlerts([]);
-    
-    try {
-      // 1. Mostrar preview original rápidamente
-      const reader = new FileReader();
-      reader.onload = (e) => setScannedImage(e.target?.result as string);
-      reader.readAsDataURL(file);
-
-      // 2. Comprimir para el envío a Gemini
-      const base64Image = await compressImage(file);
-      const base64Data = base64Image.split(',')[1];
-        
-      const ai = new GoogleGenAI({ apiKey });
-      
-      const prompt = `Analiza esta factura o albarán de compra. Responde SOLO con un objeto JSON:
-      {
-        "proveedor": "Nombre del proveedor",
-        "fecha": "YYYY-MM-DD",
-        "lineas": "1x Producto A 10.50\\n2kg Producto B 20.00",
-        "unidad": "REST"
-      }
-      REGLAS:
-      - 'lineas' debe ser un string con saltos de línea (\\n). Formato estricto: Cantidad Nombre PrecioTotal (Ej: 5 kg Salmón 150.00). Usa punto para decimales.
-      - Para 'unidad', mira la dirección de entrega:
-        * "Calle Catalunya": bebidas/sakes="SHOP", comida/envases="DLV".
-        * "Avenida Argentina": "REST".
-        * Si no hay dirección, adivina por el proveedor (Licor="SHOP", Comida="REST").`;
-
-      // ⚠️ Configuración forzada a JSON
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts: [
-            { text: prompt }, 
-            { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
-        ]}],
-        config: { responseMimeType: "application/json", temperature: 0.1 }
-      });
-
-      const raw = response.text || "";
-      const res = extractJSON(raw); // Extractor seguro
-        
-      const newLines = (res.lineas || '').split('\n').map(parseSmartLine).filter(Boolean);
-      const alerts: any[] = [];
-      
-      newLines.forEach((nl: any) => {
-        const history = data.albaranes?.flatMap(a => a.items || [])
-          .filter(i => norm(i.n) === norm(nl.n));
-        
-        const lastPrice = history && history.length > 0 ? history[history.length - 1].unit : null;
-        if (lastPrice && nl.unit > lastPrice * 1.05) { 
-          alerts.push({ n: nl.n, old: lastPrice, new: nl.unit });
-        }
-      });
-
-      setPriceAlerts(alerts);
-      
-      setForm(prev => ({
-        ...prev,
-        prov: res.proveedor || prev.prov,
-        date: res.fecha || prev.date,
-        text: res.lineas || prev.text,
-        unitId: (res.unidad as BusinessUnit) || 'REST' 
-      }));
-
-    } catch (err: any) {
-      console.error("Error Scanner Albaranes:", err);
-      alert(`⚠️ Problema leyendo el albarán: ${err?.message ?? 'Prueba con más luz o acercando la foto.'}`);
-      setScannedImage(null);
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
-  const handleDirectScan = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) processImageWithAI(file);
-    e.target.value = '';
-  };
-
-  useEffect(() => {
-    const handlePaste = (e: ClipboardEvent) => {
-      if (isAnalyzing) return;
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf("image") !== -1) {
-          const blob = items[i].getAsFile();
-          if (blob) {
-            processImageWithAI(blob);
-            break;
-          }
-        }
-      }
-    };
-
-    window.addEventListener('paste', handlePaste);
-    return () => window.removeEventListener('paste', handlePaste);
-  }, [data, isAnalyzing]);
-
-  const handleSaveAlbaran = async () => {
-    if (!form.prov) return alert("Por favor, introduce el nombre del proveedor.");
-
-    const newData = { ...data };
-    if (!newData.albaranes) newData.albaranes = [];
-
-    const existingIdx = newData.albaranes.findIndex(a => 
-      !a.invoiced && 
-      norm(a.prov) === norm(form.prov) && 
-      a.date === form.date && 
-      a.socio === form.socio &&
-      a.unitId === form.unitId
-    );
-
-    if (existingIdx !== -1 && !form.forceDup) {
-      const existing = newData.albaranes[existingIdx];
-      
-      const newItems = analyzedItems.filter(newItem => 
-        !(existing.items || []).some((oldItem: any) => 
-          norm(oldItem.n) === norm(newItem?.n || '') && 
-          Math.abs((oldItem.t || 0) - (newItem?.t || 0)) < 0.01
-        )
-      );
-
-      if (newItems.length > 0) {
-        existing.items = [...(existing.items || []), ...newItems.map(item => item!)];
-        existing.total = Num.round2((Num.parse(existing.total) || 0) + newItems.reduce((acc, it) => acc + (it?.t || 0), 0));
-        existing.base = Num.round2((Num.parse(existing.base) || 0) + newItems.reduce((acc, it) => acc + (it?.base || 0), 0));
-        existing.taxes = Num.round2((Num.parse(existing.taxes) || 0) + newItems.reduce((acc, it) => acc + (it?.tax || 0), 0));
-        existing.notes = existing.notes ? `${existing.notes} | ${form.notes}` : form.notes;
-        existing.paid = existing.paid || form.paid;
-      }
-    } else {
-      const taxesArray = Object.values(liveTotals.taxes) as { b: number; i: number }[];
-      const newAlbaran: Albaran = {
-        id: `man-${Date.now()}-${Math.random().toString(36).substring(2)}`,
-        prov: form.prov,
-        date: form.date,
-        num: form.num || "S/N",
-        socio: form.socio,
-        notes: form.notes,
-        items: analyzedItems.map(item => item!), 
-        total: Num.round2(liveTotals.grandTotal),
-        base: Num.round2(taxesArray.reduce((acc, t) => acc + t.b, 0)),
-        taxes: Num.round2(taxesArray.reduce((acc, t) => acc + t.i, 0)),
-        invoiced: false,
-        paid: form.paid,
-        status: 'ok',
-        reconciled: false,
-        unitId: form.unitId 
+  // Filtramos la vista superior dependiendo de la pestaña elegida
+  const displayStats = useMemo(() => {
+    if (selectedUnit === 'ALL') {
+      return {
+        income: stats.ingresos.total,
+        expenses: stats.gastos.total,
+        profit: stats.neto,
+        margin: stats.ingresos.total > 0 ? (stats.neto / stats.ingresos.total) * 100 : 0
       };
-      newData.albaranes.push(newAlbaran);
+    } else {
+      const unit = stats.unitBreakdown[selectedUnit];
+      return {
+        income: unit.income,
+        expenses: unit.expenses,
+        profit: unit.profit,
+        margin: unit.income > 0 ? (unit.profit / unit.income) * 100 : 0
+      };
     }
-
-    await onSave(newData);
-    
-    if (NotificationService && NotificationService.checkCriticalStock) {
-       NotificationService.checkCriticalStock(newData).catch(e => console.error("Error stock:", e));
-    }
-
-    setForm({ prov: '', date: new Date().toISOString().split('T')[0], num: '', socio: 'Arume', notes: '', text: '', paid: false, forceDup: false, unitId: 'REST' });
-    setPriceAlerts([]);
-    setScannedImage(null); 
-    alert("¡Albarán guardado correctamente en su bloque!");
-  };
-
-  const handleDelete = async (id: string) => {
-    if (!confirm("¿Eliminar gasto permanentemente?")) return;
-    const newData = { ...data };
-    newData.albaranes = newData.albaranes.filter(a => a.id !== id);
-    await onSave(newData);
-    setEditingAlbaran(null);
-  };
-
-  const kpis = useMemo(() => {
-    const hoy = new Date();
-    const mesActual = hoy.getMonth();
-    const añoActual = hoy.getFullYear();
-    const trimActual = Math.floor(mesActual / 3) + 1;
-
-    let totalGlobal = 0, totalMes = 0, totalTrim = 0;
-
-    (data.albaranes || []).forEach(a => {
-      if (selectedUnit !== 'ALL' && (a.unitId || 'REST') !== selectedUnit) return;
-
-      const val = Num.parse(a.total);
-      totalGlobal += val;
-      const d = new Date(a.date);
-      if (d.getFullYear() === añoActual) {
-        if (d.getMonth() === mesActual) totalMes += val;
-        if ((Math.floor(d.getMonth() / 3) + 1) === trimActual) totalTrim += val;
-      }
-    });
-
-    return { totalGlobal, totalMes, totalTrim };
-  }, [data.albaranes, selectedUnit]);
-
-  const filteredAlbaranes = useMemo(() => {
-    return (data.albaranes || []).filter(a => {
-      const itemUnit = a.unitId || 'REST';
-      if (selectedUnit !== 'ALL' && itemUnit !== selectedUnit) return false;
-
-      const term = searchQ.toLowerCase();
-      return (a.prov || '').toLowerCase().includes(term) || (a.num || '').toLowerCase().includes(term);
-    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [data.albaranes, searchQ, selectedUnit]);
-
+  }, [stats, selectedUnit]);
 
   return (
     <div className="animate-fade-in space-y-6 pb-24">
-      <datalist id="providers-list">
-        {uniqueProviders.map(p => <option key={p} value={p} />)}
-      </datalist>
-
-      {/* Header */}
+      {/* Header y Navegación de Meses */}
       <header className="flex flex-col md:flex-row justify-between items-center bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 gap-4">
         <div>
-          <h2 className="text-xl font-black text-slate-800 tracking-tighter">Compras & Gastos</h2>
-          <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest">Multi-Local IA Activa PRO</p>
+          <h2 className="text-xl font-black text-slate-800 tracking-tighter">Dashboard P&L</h2>
+          <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest mt-1">
+            Resultados Multi-Local
+          </p>
         </div>
-        <div className="flex gap-2 items-center flex-wrap justify-center">
-          
-          <button 
-            onClick={async () => {
-              if (!confirm("¿Agrupar albaranes fragmentados? Esto unirá gastos del mismo día, proveedor y bloque.")) return;
-              const newData = { ...data };
-              const grouped: Record<string, Albaran> = {};
-              
-              (newData.albaranes || []).forEach(a => {
-                const targetKey = Object.keys(grouped).find(k => 
-                  !grouped[k].invoiced && 
-                  norm(grouped[k].prov) === norm(a.prov) && 
-                  grouped[k].date === a.date && 
-                  (grouped[k].unitId || 'REST') === (a.unitId || 'REST') 
-                );
-                
-                if (targetKey && !a.invoiced) {
-                  grouped[targetKey].items = [...(grouped[targetKey].items || []), ...(a.items || [])];
-                  grouped[targetKey].total = Num.round2(Num.parse(grouped[targetKey].total) + Num.parse(a.total));
-                  grouped[targetKey].base = Num.round2(Num.parse(grouped[targetKey].base) + Num.parse(a.base));
-                  grouped[targetKey].taxes = Num.round2(Num.parse(grouped[targetKey].taxes) + Num.parse(a.taxes));
-                } else {
-                  grouped[a.id] = { ...a };
-                }
-              });
-              
-              newData.albaranes = Object.values(grouped);
-              await onSave(newData);
-              alert("¡Albaranes agrupados con éxito!");
-            }}
-            className="bg-slate-100 text-slate-500 px-4 py-3 rounded-2xl text-[10px] font-black hover:bg-slate-200 transition shadow-sm flex items-center gap-1"
-          >
-            <Layers className="w-4 h-4" /> AGRUPAR
+        
+        <div className="flex items-center gap-3 bg-slate-50 p-1.5 rounded-2xl border border-slate-100">
+          <button onClick={() => handleMonthChange(-1)} className="w-10 h-10 flex items-center justify-center bg-white rounded-xl text-slate-600 shadow-sm hover:bg-indigo-50 transition">
+            <ChevronLeft className="w-5 h-5" />
           </button>
-
-          {/* 🚀 BOTÓN IA (Deshabilitado si está analizando) */}
-          <label className={cn("bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-5 py-3 rounded-2xl text-[10px] font-black transition shadow-md flex items-center gap-2", isAnalyzing ? "opacity-50 cursor-wait" : "hover:shadow-lg hover:scale-105 cursor-pointer")}>
-            <Camera className="w-4 h-4" />
-            <span>{isAnalyzing ? 'PROCESANDO...' : 'SUBIR IMAGEN O (Ctrl+V)'}</span>
-            <input type="file" disabled={isAnalyzing} onChange={handleDirectScan} className="hidden" accept="image/*, application/pdf" />
-          </label>
+          <div className="w-32 text-center">
+            <span className="text-xs font-black text-slate-700 uppercase tracking-widest">{monthName}</span>
+          </div>
+          <button onClick={() => handleMonthChange(1)} className="w-10 h-10 flex items-center justify-center bg-white rounded-xl text-slate-600 shadow-sm hover:bg-indigo-50 transition">
+            <ChevronRight className="w-5 h-5" />
+          </button>
         </div>
       </header>
 
-      {/* Selector Multi-Bloque Global */}
+      {/* Selector Multi-Bloque */}
       <div className="flex flex-wrap gap-2 px-1">
         <button
           onClick={() => setSelectedUnit('ALL')}
@@ -436,7 +88,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
             selectedUnit === 'ALL' ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50"
           )}
         >
-          <Layers className="w-3 h-3" /> Ver Todos
+          <Layers className="w-3 h-3" /> Global Arume
         </button>
         {BUSINESS_UNITS.map(unit => (
           <button
@@ -455,358 +107,151 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         ))}
       </div>
 
-      {/* KPIs Dinámicos */}
+      {/* KPIs Principales */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white px-6 py-5 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center items-start">
-          <span className="text-[10px] font-black text-slate-400 uppercase mb-1">Gasto Histórico</span>
-          <span className="text-2xl font-black text-slate-800">{Num.fmt(kpis.totalGlobal)}</span>
-        </div>
-        <div className="bg-indigo-50 px-6 py-5 rounded-[2rem] border border-indigo-100 shadow-sm flex flex-col justify-center items-start relative overflow-hidden">
-          <Clock className="absolute -right-4 -top-4 w-24 h-24 opacity-10 text-indigo-500" />
-          <span className="text-[10px] font-black text-indigo-500 uppercase mb-1">Este Trimestre</span>
-          <span className="text-3xl font-black text-indigo-900">{Num.fmt(kpis.totalTrim)}</span>
-        </div>
-        <div className="bg-emerald-50 px-6 py-5 rounded-[2rem] border border-emerald-100 shadow-sm flex flex-col justify-center items-start relative overflow-hidden">
-          <CheckCircle2 className="absolute -right-4 -top-4 w-24 h-24 opacity-10 text-emerald-500" />
-          <span className="text-[10px] font-black text-emerald-600 uppercase mb-1">Este Mes</span>
-          <span className="text-3xl font-black text-emerald-900">{Num.fmt(kpis.totalMes)}</span>
-        </div>
+        <motion.div initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ingresos Totales</p>
+          <p className="text-4xl font-black text-slate-800 mt-2">{Num.fmt(displayStats.income)}</p>
+        </motion.div>
+        
+        <motion.div initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.1 }} className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Gastos Totales</p>
+          <p className="text-4xl font-black text-rose-500 mt-2">{Num.fmt(displayStats.expenses)}</p>
+        </motion.div>
+        
+        <motion.div initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ delay: 0.2 }} 
+          className={cn(
+            "p-6 rounded-[2.5rem] shadow-xl relative overflow-hidden flex flex-col justify-center", 
+            displayStats.profit >= 0 ? "bg-slate-900 text-white" : "bg-rose-600 text-white"
+          )}>
+          <div className="absolute -right-4 -bottom-4 opacity-10">
+            {displayStats.profit >= 0 ? <TrendingUp className="w-32 h-32" /> : <TrendingDown className="w-32 h-32" />}
+          </div>
+          <p className="text-[10px] font-black opacity-70 uppercase tracking-widest relative z-10">Beneficio Neto</p>
+          <p className="text-4xl font-black mt-2 relative z-10">{Num.fmt(displayStats.profit)}</p>
+          <div className="flex items-center gap-2 mt-2 relative z-10">
+            <span className="text-[10px] font-bold px-2 py-1 bg-white/20 rounded-lg backdrop-blur-sm">
+              Margen: {Num.round2(displayStats.margin)}%
+            </span>
+          </div>
+        </motion.div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Form Column */}
-        <div className="lg:col-span-1 space-y-4">
-          <div className="bg-white p-6 rounded-[2.5rem] shadow-xl border-2 border-indigo-50 relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 via-indigo-500 to-rose-500"></div>
-            
-            {isAnalyzing && (
-              <div className="absolute inset-0 bg-white/95 z-20 flex flex-col items-center justify-center text-center p-4 backdrop-blur-sm">
-                <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-3"></div>
-                <p className="text-xs font-black text-indigo-600 animate-pulse uppercase tracking-widest">IA analizando origen y datos...</p>
-              </div>
-            )}
-
-            <h3 className="text-sm font-black text-slate-800 mb-4 flex items-center justify-between">
-              <span className="flex items-center gap-2"><Plus className="w-4 h-4 text-indigo-500" /> Nueva Factura</span>
-              <span className="text-[9px] text-slate-400 font-bold bg-slate-100 px-2 py-1 rounded">Soporta Ctrl+V 📋</span>
-            </h3>
-
-            {/* 🚀 PANEL DE CONTROL VISUAL (IMAGEN DEL TICKET) */}
-            <AnimatePresence>
-              {scannedImage && (
-                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="mb-4">
-                  <div className="relative w-full h-32 bg-slate-100 rounded-2xl overflow-hidden border border-slate-200">
-                    <img src={scannedImage} alt="Ticket Scaneado" className="w-full h-full object-cover opacity-80" />
-                    <button 
-                      onClick={() => setScannedImage(null)} 
-                      className="absolute top-2 right-2 bg-slate-900/50 text-white p-1.5 rounded-lg hover:bg-rose-500 transition"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                    <div className="absolute bottom-2 left-2 bg-indigo-600 text-white text-[8px] font-black px-2 py-1 rounded shadow-lg uppercase">
-                      Ticket Base
+      {/* 🚀 DESGLOSE MULTI-LOCAL (Solo visible en la vista Global) */}
+      {selectedUnit === 'ALL' && (
+        <div className="mt-8 bg-slate-50 p-6 rounded-[3rem] border border-slate-200/60">
+          <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6 px-2 flex items-center gap-2">
+            <PieChart className="w-4 h-4" /> Desglose por Unidad de Negocio
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {BUSINESS_UNITS.map((unit, idx) => {
+              const uStats = stats.unitBreakdown[unit.id];
+              return (
+                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: idx * 0.1 }} key={unit.id} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden hover:shadow-md transition">
+                  <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-50">
+                    <span className={cn("p-2 rounded-xl", unit.bg, unit.color)}><unit.icon className="w-4 h-4"/></span>
+                    <span className="font-black text-slate-700 text-[10px] uppercase tracking-wide">{unit.name}</span>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex justify-between text-[10px] font-bold text-slate-500">
+                      <span>Ingresos</span><span className="text-slate-800">{Num.fmt(uStats.income)}</span>
+                    </div>
+                    <div className="flex justify-between text-[10px] font-bold text-slate-500">
+                      <span>Gastos</span><span className="text-rose-500">{Num.fmt(uStats.expenses)}</span>
+                    </div>
+                    <div className="pt-3 flex justify-between font-black text-sm">
+                      <span className="text-[10px] text-slate-400 uppercase tracking-widest">Neto</span>
+                      <span className={uStats.profit >= 0 ? "text-emerald-500" : "text-rose-500"}>
+                        {uStats.profit > 0 ? '+' : ''}{Num.fmt(uStats.profit)}
+                      </span>
                     </div>
                   </div>
                 </motion.div>
-              )}
-            </AnimatePresence>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
-            {/* SELECTOR VISUAL DE UNIDAD DE NEGOCIO AL CREAR ALBARÁN */}
-            <div className={cn(
-              "mb-4 p-3 rounded-2xl border transition-colors",
-              form.unitId === 'REST' ? "bg-indigo-50/50 border-indigo-100" :
-              form.unitId === 'DLV' ? "bg-amber-50/50 border-amber-100" : "bg-emerald-50/50 border-emerald-100"
-            )}>
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 text-center flex justify-center items-center gap-1">
-                {scannedImage && <Sparkles className="w-3 h-3 text-indigo-500" />} Asignar a Bloque:
-              </p>
-              <div className="grid grid-cols-2 gap-2">
-                {BUSINESS_UNITS.map(unit => (
-                  <button
-                    key={unit.id}
-                    onClick={() => setForm({ ...form, unitId: unit.id })}
-                    className={cn(
-                      "p-3 rounded-xl border-2 transition-all flex flex-col items-center gap-1.5",
-                      form.unitId === unit.id 
-                        ? `${unit.color.replace('text-', 'border-')} ${unit.bg} ${unit.color} shadow-sm` 
-                        : "border-slate-100 bg-white text-slate-400 grayscale hover:grayscale-0"
-                    )}
-                  >
-                    <unit.icon className="w-4 h-4" />
-                    <span className="text-[8px] font-black uppercase text-center leading-tight">{unit.name}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {priceAlerts.length > 0 && (
-              <div className="mb-4 p-3 bg-rose-50 border border-rose-100 rounded-2xl space-y-2 animate-bounce-subtle">
-                <p className="text-[10px] font-black text-rose-600 uppercase flex items-center gap-1">
-                  <AlertTriangle className="w-3 h-3" /> ¡Alerta de Precios!
-                </p>
-                {priceAlerts.map((alt, i) => (
-                  <p key={i} className="text-[9px] text-rose-500 font-bold">
-                    {alt.n}: Costaba {Num.fmt(alt.old)} → <span className="font-black underline">{Num.fmt(alt.new)}</span>
-                  </p>
-                ))}
-              </div>
-            )}
-
-            <div className="space-y-3 mb-4">
-              <input 
-                value={form.prov}
-                onChange={(e) => setForm({ ...form, prov: e.target.value })}
-                list="providers-list"
-                type="text" 
-                placeholder="Proveedor (ej: Makro)" 
-                className="w-full p-3 bg-slate-50 rounded-xl text-sm font-bold border-0 outline-none focus:ring-2 focus:ring-indigo-500 transition"
-              />
-              <div className="flex gap-2">
-                <input 
-                  value={form.date}
-                  onChange={(e) => setForm({ ...form, date: e.target.value })}
-                  type="date" 
-                  className="flex-1 p-3 bg-slate-50 rounded-xl text-sm font-bold border-0 outline-none"
-                />
-                <input 
-                  value={form.num}
-                  onChange={(e) => setForm({ ...form, num: e.target.value })}
-                  type="text" 
-                  placeholder="Ref." 
-                  className="w-1/3 p-3 bg-slate-50 rounded-xl text-sm font-bold border-0 outline-none"
-                />
-              </div>
-              <input 
-                value={form.notes}
-                onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                type="text" 
-                placeholder="Notas (opcional)..." 
-                className="w-full p-3 bg-slate-50 rounded-xl text-xs border-0 outline-none"
-              />
-            </div>
-
-            <textarea 
-              value={form.text}
-              onChange={(e) => setForm({ ...form, text: e.target.value })}
-              placeholder="Escribe líneas o pega la imagen...&#10;Ej: 5 kg Salmón 150.00" 
-              className="w-full h-32 bg-slate-50 rounded-2xl p-4 text-xs font-mono border-0 outline-none resize-none mb-3 shadow-inner focus:bg-white transition"
-            />
-            
-            <div className="mt-3 space-y-1 max-h-52 overflow-y-auto custom-scrollbar px-1 bg-slate-50/50 rounded-xl p-2 min-h-[50px]">
-              {analyzedItems.length > 0 ? analyzedItems.map((it, idx) => it && (
-                <div key={idx} className="flex justify-between items-center text-[10px] border-b border-slate-200 py-2 last:border-0">
-                  <span className="truncate pr-2 font-bold text-slate-700"><b>{it.q}x</b> {it.n} <span className="text-[8px] text-slate-400">({it.rate}%)</span></span>
-                  <span className="font-black text-slate-900 whitespace-nowrap">{Num.fmt(it.t)}</span>
-                </div>
-              )) : (
-                <p className="text-[10px] text-slate-300 text-center italic py-2">Sin productos detectados...</p>
-              )}
-            </div>
-
-            <div className="mt-4 p-4 bg-slate-900 rounded-2xl shadow-lg space-y-2">
-              {(Object.entries(liveTotals.taxes) as [string, { b: number; i: number }][]).map(([r, t]) => t.b > 0 && (
-                <div key={r} className="flex justify-between text-[10px] text-slate-400">
-                  <span className="font-bold w-12 uppercase">IVA {r}%</span>
-                  <span className="flex-1 text-right pr-4">Base: {Num.fmt(t.b)}</span>
-                  <span className="text-emerald-400 font-black">+{Num.fmt(t.i)}</span>
-                </div>
-              ))}
-              <div className="flex justify-between items-center pt-2 border-t border-slate-700 mt-2">
-                <span className="text-xs font-black text-white uppercase">TOTAL</span>
-                <span className="text-2xl font-black text-white">{Num.fmt(liveTotals.grandTotal)}</span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between mt-4 px-2">
-              <div className="flex items-center gap-2">
-                <input 
-                  type="checkbox" 
-                  id="inPaid" 
-                  checked={form.paid}
-                  onChange={(e) => setForm({ ...form, paid: e.target.checked })}
-                  className="w-4 h-4 accent-indigo-600 cursor-pointer" 
-                />
-                <label htmlFor="inPaid" className="text-xs font-bold text-slate-600 cursor-pointer">Pagado Contado</label>
-              </div>
-            </div>
-
-            <button 
-              disabled={isAnalyzing}
-              onClick={handleSaveAlbaran}
-              className="w-full mt-4 bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-xl hover:bg-indigo-700 transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              GUARDAR COMPRA
-            </button>
+      {/* Estructura de Gastos y Ratios */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+        
+        {/* Gastos Globales por Categoría */}
+        <div className="bg-white p-6 sm:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+          <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
+            <Calculator className="w-4 h-4 text-indigo-500" /> Estructura de Gastos Global
+          </h3>
+          <div className="space-y-1">
+            <CostRow icon={Utensils} label="Materia Prima (Comida)" val={stats.gastos.comida} total={stats.gastos.total} color="bg-emerald-400 text-emerald-600" />
+            <CostRow icon={Coffee} label="Materia Prima (Bebida)" val={stats.gastos.bebida} total={stats.gastos.total} color="bg-indigo-400 text-indigo-600" />
+            <CostRow icon={Users} label="Personal" val={stats.gastos.personal} total={stats.gastos.total} color="bg-amber-400 text-amber-600" />
+            <CostRow icon={Building2} label="Estructura (Fijos)" val={stats.gastos.estructura} total={stats.gastos.total} color="bg-rose-400 text-rose-600" />
+            <CostRow icon={Briefcase} label="Otros / Amortizaciones" val={stats.gastos.otros + stats.gastos.amortizacion} total={stats.gastos.total} color="bg-slate-400 text-slate-600" />
           </div>
         </div>
 
-        {/* List Column */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white p-2 rounded-full shadow-sm border border-slate-100 flex items-center px-4">
-            <Search className="w-4 h-4 text-slate-400 shrink-0" />
-            <input 
-              value={searchQ}
-              onChange={(e) => setSearchQ(e.target.value)}
-              type="text" 
-              placeholder="Buscar por proveedor o referencia..." 
-              className="bg-transparent text-sm font-bold outline-none w-full text-slate-600 pl-3" 
-            />
+        {/* Ratios Financieros */}
+        <div className="bg-slate-900 p-6 sm:p-8 rounded-[2.5rem] shadow-xl text-white">
+          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
+            <TrendingUp className="w-4 h-4" /> Ratios Clave (Sobre Ventas)
+          </h3>
+          <div className="space-y-3">
+            <RatioRow label="Food Cost (Sólidos)" val={stats.ratios.foodCost} target={30} />
+            <RatioRow label="Drink Cost (Líquidos)" val={stats.ratios.drinkCost} target={25} />
+            <RatioRow label="Coste Laboral" val={stats.ratios.staffCost} target={35} />
+            <div className="border-t border-slate-800 my-4"></div>
+            <RatioRow label="PRIME COST" val={stats.ratios.primeCost} target={65} isWarning={stats.ratios.primeCost > 65} isMega />
           </div>
-
-          <div className="space-y-3 pb-20">
-            {filteredAlbaranes.length > 0 ? filteredAlbaranes.map(a => {
-              const unitConfig = BUSINESS_UNITS.find(u => u.id === (a.unitId || 'REST'));
-              
-              return (
-                <div 
-                  key={a.id}
-                  onClick={() => setEditingAlbaran(a)}
-                  className={cn(
-                    "bg-white p-5 rounded-3xl border border-slate-100 flex justify-between items-center shadow-sm hover:shadow-md transition cursor-pointer",
-                    a.reconciled && "ring-2 ring-emerald-400/50"
-                  )}
-                >
-                  <div>
-                    <h4 className="font-black text-slate-800 flex items-center gap-2 flex-wrap">
-                      {a.prov}
-                      {unitConfig && (
-                        <span className={cn(
-                          "text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1",
-                          unitConfig.color, unitConfig.bg
-                        )}>
-                          <unitConfig.icon className="w-3 h-3" />
-                          {unitConfig.name}
-                        </span>
-                      )}
-                    </h4>
-                    <div className="flex items-center gap-2 mt-1">
-                      <p className="text-[10px] text-slate-400 font-bold">{a.date}</p>
-                      {a.notes && <span className="text-[9px] text-indigo-400 bg-indigo-50 px-1.5 rounded font-bold">📝 Nota</span>}
-                      {a.reconciled && <span className="text-[9px] text-emerald-600 bg-emerald-50 px-1.5 rounded font-black">🔗 Conciliado</span>}
-                      {a.invoiced && <span className="text-[9px] text-blue-600 bg-blue-50 px-1.5 rounded font-black">📄 Facturado</span>}
-                    </div>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="font-black text-slate-900 text-lg">{Num.fmt(a.total)}</p>
-                    <span className={cn(
-                      "text-[8px] font-black uppercase",
-                      a.paid ? 'text-emerald-500' : 'text-rose-500'
-                    )}>
-                      {a.paid ? 'Pagado' : 'Pendiente'}
-                    </span>
-                  </div>
-                </div>
-              );
-            }) : (
-              <div className="py-20 text-center opacity-50 bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200">
-                <Truck className="w-12 h-12 mx-auto mb-3 text-slate-300" />
-                <p className="text-slate-500 font-bold text-sm">Sin registros en este bloque.</p>
-              </div>
-            )}
-          </div>
+          <p className="text-[9px] text-slate-500 font-bold mt-6 text-center">
+            * El Prime Cost no debería superar el 65% para garantizar rentabilidad.
+          </p>
         </div>
+
       </div>
-
-      {/* Edit Modal */}
-      <AnimatePresence>
-        {editingAlbaran && (
-          <div className="fixed inset-0 z-[200] flex justify-center items-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setEditingAlbaran(null)}
-              className="absolute inset-0 bg-slate-900/90 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              className="bg-white w-full max-w-lg rounded-[2.5rem] p-8 shadow-2xl relative z-10 flex flex-col max-h-[90vh]"
-            >
-              <button onClick={() => setEditingAlbaran(null)} className="absolute top-6 right-6 text-slate-300 hover:text-slate-500 text-2xl transition">✕</button>
-              
-              <div className="border-b border-slate-100 pb-4 mb-6">
-                <h3 className="text-2xl font-black text-slate-800 tracking-tighter">Detalle del Gasto</h3>
-                <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest mt-1">Ref: {editingAlbaran.num}</p>
-                {editingAlbaran.link_foto && (
-                  <a href={editingAlbaran.link_foto} target="_blank" rel="noreferrer" className="text-[10px] text-blue-500 hover:underline inline-block mt-2">
-                    📸 Ver Ticket en Drive
-                  </a>
-                )}
-              </div>
-              
-              <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-6">
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Proveedor</p>
-                    <p className="text-sm font-black text-slate-800">{editingAlbaran.prov}</p>
-                  </div>
-                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Fecha</p>
-                    <p className="text-sm font-black text-slate-800">{editingAlbaran.date}</p>
-                  </div>
-                </div>
-
-                <div className={cn("p-4 rounded-2xl border flex items-center gap-3", 
-                  BUSINESS_UNITS.find(u => u.id === (editingAlbaran.unitId || 'REST'))?.bg,
-                  BUSINESS_UNITS.find(u => u.id === (editingAlbaran.unitId || 'REST'))?.color
-                )}>
-                   <Layers className="w-5 h-5 opacity-50" />
-                   <div>
-                     <p className="text-[9px] font-black uppercase tracking-widest opacity-70">Unidad de Negocio</p>
-                     <p className="text-sm font-black">{BUSINESS_UNITS.find(u => u.id === (editingAlbaran.unitId || 'REST'))?.name}</p>
-                   </div>
-                </div>
-
-                {editingAlbaran.notes && (
-                  <div className="bg-amber-50 p-4 rounded-2xl border border-amber-100">
-                    <p className="text-[9px] font-black text-amber-600 uppercase mb-1">Notas</p>
-                    <p className="text-xs font-bold text-amber-900">{editingAlbaran.notes}</p>
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <p className="text-[9px] font-black text-slate-400 uppercase ml-2">Desglose de productos</p>
-                  <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 space-y-2">
-                    {editingAlbaran.items?.map((it, i) => (
-                      <div key={i} className="flex justify-between items-center text-xs border-b border-slate-200 last:border-0 pb-2 last:pb-0 pt-2 first:pt-0">
-                        <span className="font-bold text-slate-700"><b>{it.q}x</b> {it.n}</span>
-                        <span className="font-black text-slate-900">{Num.fmt(it.t)}</span>
-                      </div>
-                    ))}
-                    
-                    <div className="mt-4 pt-2 border-t border-slate-300 border-dashed flex justify-between text-[10px] text-slate-500 font-bold">
-                      <span>Base: {Num.fmt(editingAlbaran.base || 0)}</span>
-                      <span>IVA: {Num.fmt(editingAlbaran.taxes || 0)}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex justify-between items-center bg-slate-900 p-6 rounded-[2rem] text-white shadow-xl">
-                  <div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase">Total Importe</p>
-                    <p className="text-3xl font-black text-emerald-400">{Num.fmt(editingAlbaran.total)}</p>
-                  </div>
-                  <div className="text-right">
-                    <div className={cn(
-                      "px-3 py-1 rounded-full text-[10px] font-black uppercase inline-block",
-                      editingAlbaran.paid ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400"
-                    )}>
-                      {editingAlbaran.paid ? 'Pagado' : 'Pendiente'}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-8 pt-6 border-t border-slate-100 flex gap-3">
-                <button onClick={() => handleDelete(editingAlbaran.id)} className="flex-1 bg-rose-50 text-rose-500 py-4 rounded-2xl font-black text-xs hover:bg-rose-100 flex justify-center items-center gap-2">
-                  <Trash2 className="w-4 h-4" /> ELIMINAR
-                </button>
-                <button onClick={() => setEditingAlbaran(null)} className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl font-black text-xs hover:bg-slate-200">
-                  CERRAR
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
     </div>
   );
 };
+
+/* ====================================
+ * SUBCOMPONENTES DE UI
+ * ==================================== */
+
+const CostRow = ({ icon: Icon, label, val, total, color }: any) => {
+  const pct = total > 0 ? (val / total) * 100 : 0;
+  const bgColorClass = color.split(' ')[0]; // Extrae bg-emerald-400
+  const textColorClass = color.split(' ')[1]; // Extrae text-emerald-600
+
+  return (
+    <div className="mb-5 last:mb-0">
+      <div className="flex justify-between text-[10px] font-bold text-slate-600 mb-2 items-center">
+        <span className="flex items-center gap-1.5"><Icon className={cn("w-3 h-3", textColorClass)} /> {label}</span>
+        <span className="text-slate-800">{Num.fmt(val)} <span className="text-slate-400">({Num.round2(pct)}%)</span></span>
+      </div>
+      <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+        <div className={cn("h-full transition-all duration-1000", bgColorClass)} style={{ width: `${pct}%` }}></div>
+      </div>
+    </div>
+  );
+}
+
+const RatioRow = ({ label, val, target, isWarning = false, isMega = false }: any) => {
+  const over = val > target;
+  return (
+    <div className={cn(
+      "flex items-center justify-between p-4 rounded-2xl border transition-colors",
+      isMega ? "border-indigo-500/30 bg-indigo-500/10" : "border-slate-800 bg-slate-800/50"
+    )}>
+       <div>
+         <p className={cn("font-black uppercase tracking-wider", isMega ? "text-sm text-indigo-300" : "text-[10px] text-slate-300")}>{label}</p>
+         <p className="text-[9px] font-bold text-slate-500 mt-0.5">Objetivo óptimo: &lt;{target}%</p>
+       </div>
+       <div className={cn(
+          "px-4 py-1.5 rounded-xl font-black tracking-tight",
+          isMega ? "text-xl" : "text-sm",
+          over ? "bg-rose-500/20 text-rose-400" : "bg-emerald-500/20 text-emerald-400"
+       )}>
+         {Num.round2(val)}%
+       </div>
+    </div>
+  );
+}
