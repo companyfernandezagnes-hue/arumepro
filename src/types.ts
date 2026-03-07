@@ -1,3 +1,6 @@
+// 🚀 TIPO BASE: UNIDADES DE NEGOCIO B2B
+export type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
+
 export interface AppConfig {
   objetivoMensual: number;
   empresa?: string;
@@ -6,6 +9,9 @@ export interface AppConfig {
   telegramToken?: string;
   telegramChatId?: string;
   saldoInicial?: number;
+  // 🚀 REGLAS DE REPARTO DE BENEFICIOS (Ej: Delivery)
+  repartoDeliveryCocinero?: number;
+  repartoDeliveryAdmin?: number;
   [key: string]: any;
 }
 
@@ -15,11 +21,22 @@ export interface BankMovement {
   desc: string;
   amount: number;
   status: 'matched' | 'pending';
-  linkType?: 'FACTURA' | 'ALBARAN';
+  linkType?: 'FACTURA' | 'ALBARAN' | 'CIERRE';
   linkId?: string;
   hash?: string;
   source?: string;
   category?: string;
+  reviewed?: boolean;
+  unitId?: BusinessUnit;
+  flags?: {
+    duplicate?: boolean;
+    suspicious?: boolean;
+    unmatched?: boolean;
+  };
+  link?: {
+    type: 'ALBARAN' | 'FACTURA';
+    id: string;
+  };
 }
 
 export interface User {
@@ -41,6 +58,7 @@ export interface KardexEntry {
   ingId: string;
   price: number;
   reason: string;
+  unidad_negocio?: BusinessUnit; // Trazabilidad de inventario
 }
 
 export interface Cierre {
@@ -54,6 +72,7 @@ export interface Cierre {
   totalVenta: number;
   tickets?: number;
   conciliado_banco?: boolean;
+  unitId?: BusinessUnit; // Cajas separadas
 }
 
 export interface Receta {
@@ -74,9 +93,9 @@ export interface Factura {
   paid: boolean;
   prov: string;
   cliente?: string;
-  total: number;
-  base?: number;
-  tax?: number;
+  total: string | number;
+  base?: string | number;
+  tax?: string | number;
   taxes?: number;
   dueDate?: string;
   reconciled?: boolean;
@@ -84,17 +103,18 @@ export interface Factura {
   albaranIdsArr?: string[];
   status?: 'draft' | 'approved' | 'rejected';
   source?: 'email-ia' | 'manual-group' | 'direct' | 'manual';
+  unidad_negocio?: BusinessUnit; // 🚀 Facturación B2B (Hoteles)
 }
 
 export interface Albaran {
   id: string;
-  company_id?: string; // Preparado para SaaS
+  company_id?: string;
   uid?: string;
   num?: string;
   date: string;
   prov: string;
   socio?: string;
-  total: number;
+  total: string | number;
   items: any[];
   invoiced?: boolean;
   paid?: boolean;
@@ -102,22 +122,24 @@ export interface Albaran {
   notes?: string;
   link_foto?: string;
   reconciled?: boolean;
-  base?: number;
-  taxes?: number;
+  base?: string | number;
+  taxes?: string | number;
   dueDate?: string;
   creditDays?: number;
   category?: string;
+  unitId?: BusinessUnit; // Gastos asignados a unidad
 }
 
 export interface GastoFijo {
   id: string;
   name: string;
-  amount: number;
+  amount: string | number;
   freq: 'mensual' | 'trimestral' | 'semestral' | 'anual' | 'bimensual' | 'semanal';
   cat: string;
   active: boolean;
   dia_pago: number;
   notes?: string;
+  unitId?: BusinessUnit; // Costes fijos separados
 }
 
 export interface Plato {
@@ -155,6 +177,7 @@ export interface Ingrediente {
   lastCost?: number;
   lastProv?: string;
   aller?: string[];
+  unidad_negocio?: BusinessUnit; // Ingredientes de tienda vs cocina
 }
 
 export interface CierreMensual {
@@ -169,6 +192,26 @@ export interface CierreMensual {
     amortizaciones: number;
     resultado: number;
   };
+}
+
+// 🚀 NUEVA INTERFAZ: Liquidación de Socios (El 20% y 10%)
+export interface PartnerSettlement {
+  id: string;
+  date: string;       // Fecha en la que se hizo el cálculo
+  month: number;      // Mes liquidado
+  year: number;       // Año liquidado
+  unitId: BusinessUnit; // Qué bloque se está liquidando (Ej: DLV)
+  totalIncome: number;
+  totalExpenses: number;
+  totalProfit: number;
+  partners: {
+    name: string;
+    role: string; // Ej: 'Cocinero', 'Administrador'
+    percentage: number;
+    amountToPay: number;
+  }[];
+  companyProfit: number; // Lo que queda para la sociedad
+  notes?: string;
 }
 
 export interface AppData {
@@ -188,6 +231,7 @@ export interface AppData {
   platos: Plato[];
   ventas_menu: VentaMenu[];
   cierres_mensuales: CierreMensual[];
+  liquidaciones: PartnerSettlement[]; // 🚀 Añadido al Root State
   diario: any[];
   priceHistory: Record<string, number[]>;
   sales_history: any[];
