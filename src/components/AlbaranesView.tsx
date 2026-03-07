@@ -50,6 +50,8 @@ const normalizeDate = (s?: string) => {
   return m ? `${m[3]}-${m[2]}-${m[1]}` : new Date().toLocaleDateString('sv-SE');
 };
 
+const norm = (s: string) => (s || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
 function reconcileAlbaran(ai: AlbaranIA) {
   const lines = ai.lineas.map(l => {
     const rate = (l.tax_rate ?? 10) as 4|10|21;
@@ -98,27 +100,38 @@ const cleanMime = (t: string) => {
   return ok.includes(base) ? base : 'audio/webm';
 };
 
-const compressImage = async (file: File | Blob): Promise<string> => {
-  const MAX_BYTES = 4 * 1024 * 1024; 
-  const MAX_W = 1600, MAX_H = 1600;
-  const bitmap = await createImageBitmap(file);
-  let { width, height } = bitmap;
-  const ratio = Math.min(MAX_W / width, MAX_H / height, 1);
-  const w = Math.max(1, Math.round(width * ratio));
-  const h = Math.max(1, Math.round(height * ratio));
-  const canvas = document.createElement('canvas');
-  canvas.width = w; canvas.height = h;
-  const ctx = canvas.getContext('2d', { alpha: false });
-  ctx?.drawImage(bitmap, 0, 0, w, h);
-  const blob: Blob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b as Blob), 'image/jpeg', 0.8));
-  const finalBlob = blob.size > MAX_BYTES ? await new Promise<Blob>(res => canvas.toBlob((b) => res(b as Blob), 'image/jpeg', 0.6)) : blob;
-  const b64 = await new Promise<string>((resolve) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve((fr.result as string).split(',')[1]);
-    fr.readAsDataURL(finalBlob);
+// 🚀 COMPRESIÓN ULTRA RÁPIDA (Devuelve solo Base64, menos uso de memoria RAM)
+const compressImageToBase64 = async (file: File | Blob): Promise<string> => {
+  const MAX_W = 1200, MAX_H = 1200; 
+  const Q1 = 0.72, Q2 = 0.6;
+  const MAX_BYTES = 2.5 * 1024 * 1024; 
+
+  const bmp = await createImageBitmap(file);
+  let { width: w, height: h } = bmp;
+  const r = Math.min(MAX_W / w, MAX_H / h, 1);
+  w = Math.round(w * r); h = Math.round(h * r);
+
+  const cvs = document.createElement('canvas');
+  cvs.width = w; cvs.height = h;
+  cvs.getContext('2d', { alpha: false })!.drawImage(bmp, 0, 0, w, h);
+
+  const toB64 = (q: number) => new Promise<string>(res => {
+    cvs.toBlob(b => {
+      const fr = new FileReader();
+      fr.onload = () => res((fr.result as string).split(',')[1]);
+      fr.readAsDataURL(b as Blob);
+    }, 'image/jpeg', q);
   });
-  return `data:image/jpeg;base64,${b64}`;
+
+  let b64 = await toB64(Q1);
+  const bytes = Math.floor(b64.length * 3 / 4);
+  if (bytes > MAX_BYTES) b64 = await toB64(Q2);
+  
+  return b64; 
 };
+
+// Vista Ligera (Libera memoria)
+const objectUrlFromFile = (f: File | Blob) => URL.createObjectURL(f);
 
 const callGemini = async (apiKey: string, mimeType: string, base64Data: string, prompt: string) => {
   const genAI = new GoogleGenAI({ apiKey });
@@ -163,85 +176,70 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const mediaRecRef = useRef<MediaRecorder|null>(null);
   const chunksRef = useRef<Blob[]>([]);
 
-  // Formularios Originales (Incluye QuickCalc intacto)
+  // Formularios Originales
   const [form, setForm] = useState({
     prov: '', date: new Date().toLocaleDateString('sv-SE'), num: '', socio: 'Arume', notes: '', text: '',
     paid: false, forceDup: false, unitId: 'REST' as BusinessUnit 
   });
   
-  const [quickCalc, setQuickCalc] = useState({ name: '', total: '', iva: 10 });
   const [editingAlbaran, setEditingAlbaran] = useState<Albaran | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editForm, setEditForm] = useState<Albaran | null>(null);
-
-  const norm = (s: string) => (s || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
 
   const uniqueProviders = useMemo(() => {
     return Array.from(new Set((data.albaranes || []).map(a => a.prov).filter(Boolean))).sort();
   }, [data.albaranes]);
 
+  // 🚀 ALERTAS DE PRECIO O(1) (Ultra Rápido)
+  const priceIndex = useMemo(() => {
+    const m = new Map<string, number>();
+    (data.albaranes || []).forEach(a => {
+      (a.items || []).forEach(it => {
+        const k = norm(it.n);
+        m.set(k, it.unitPrice ?? (it.q ? Num.round2(it.t / it.q) : it.t));
+      });
+    });
+    return m;
+  }, [data.albaranes]);
+
   const parseSmartLine = (line: string) => {
     let clean = line.replace(/[€$]/g, '').replace(/,/g, '.').trim();
-    if (!clean || clean.length < 5) return null;
-
+    if (clean.length < 5) return null;
     let rate = 10; 
-    if (clean.match(/\b21\s?%/)) rate = 21;
-    else if (clean.match(/\b4\s?%/)) rate = 4;
-    
+    if (clean.match(/\b21\s?%/)) rate = 21; else if (clean.match(/\b4\s?%/)) rate = 4;
     const upper = clean.toUpperCase();
     if (upper.includes("ALCOHOL") || upper.includes("GINEBRA") || upper.includes("SERV") || upper.includes("VINO") || upper.includes("SAKE")) rate = 21;
     if (upper.includes("PAN ") || upper.includes("HUEVO") || upper.includes("LECHE") || upper.includes("FRUTA")) rate = 4;
-
     const numbers = [...clean.matchAll(/(\d+\.\d{2})/g)].map(m => parseFloat(m[1]));
     if (numbers.length === 0) return null;
-
     const totalLine = numbers[numbers.length - 1]; 
-    
     let qty = 1;
     const qtyMatch = clean.match(/^(\d+(\.\d{1,3})?)\s*(kg|uds|x|\*|l|gr)/i);
     if (qtyMatch) qty = parseFloat(qtyMatch[1]);
-
     let name = clean.replace(totalLine.toString(), '').replace(/\d+(\.\d{1,3})?\s*(kg|uds|x|\*|l|gr)/i, '').replace(/\b(4|10|21)\s?%/, '').replace(/\.{2,}/g, '').trim();
     if (name.length < 2) name = "Varios Indefinido";
-
     const unitPrice = qty > 0 ? totalLine / qty : totalLine;
     const baseLine = totalLine / (1 + rate / 100);
     const taxLine = totalLine - baseLine;
-
     return { q: qty, n: name, t: totalLine, rate, base: baseLine, tax: taxLine, unit: unitPrice };
   };
 
-  const analyzedItems = useMemo(() => {
-    return form.text.split('\n').map(parseSmartLine).filter(Boolean);
-  }, [form.text]);
-
+  const analyzedItems = useMemo(() => form.text.split('\n').map(parseSmartLine).filter(Boolean), [form.text]);
   const liveTotals = useMemo(() => {
-    const taxes: Record<number, { b: number; i: number }> = { 4: { b: 0, i: 0 }, 10: { b: 0, i: 0 }, 21: { b: 0, i: 0 } };
+    const taxes = { 4: { b: 0, i: 0 }, 10: { b: 0, i: 0 }, 21: { b: 0, i: 0 } };
     let grandTotal = 0;
-
     analyzedItems.forEach(it => {
       if (it) {
-        if (!taxes[it.rate]) taxes[it.rate] = { b: 0, i: 0 };
-        taxes[it.rate].b += it.base;
-        taxes[it.rate].i += it.tax;
+        taxes[it.rate as 4|10|21].b += it.base;
+        taxes[it.rate as 4|10|21].i += it.tax;
         grandTotal += it.t;
       }
     });
-
     return { grandTotal, taxes };
   }, [analyzedItems]);
 
-  const handleQuickAdd = () => {
-    const t = Num.parse(quickCalc.total);
-    if (t > 0 && quickCalc.name) {
-      const calc = ArumeEngine.calcularImpuestos(t, quickCalc.iva as any);
-      const newLine = `1x ${quickCalc.name} ${quickCalc.iva}% ${calc.total.toFixed(2)}`;
-      setForm(prev => ({ ...prev, text: prev.text ? `${prev.text}\n${newLine}` : newLine }));
-      setQuickCalc({ name: '', total: '', iva: 10 });
-    }
-  };
 
-  // 🚀 LECTOR IMAGEN IA 
+  // 🚀 1. LECTOR IMAGEN IA (Versión Rápida)
   const processImageWithAI = async (file: File | Blob) => {
     const apiKey = sessionStorage.getItem('gemini_api_key') || localStorage.getItem('gemini_api_key');
     if (!apiKey) return alert("⚠️ Conecta tu IA primero en Configuración.");
@@ -250,13 +248,10 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     setPriceAlerts([]);
     
     try {
-      const reader = new FileReader();
-      reader.onload = (e) => setScannedImage(e.target?.result as string);
-      reader.readAsDataURL(file);
+      const objUrl = objectUrlFromFile(file);
+      setScannedImage(objUrl);
 
-      const base64Image = await compressImage(file);
-      const base64Data = base64Image.split(',')[1];
-        
+      const base64Data = await compressImageToBase64(file);
       const datosIA = await callGemini(apiKey, "image/jpeg", base64Data, PROMPT_ALBARAN);
 
       const al: AlbaranIA = {
@@ -269,10 +264,10 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       
       const alerts: any[] = [];
       rec.lineas.forEach(nl => {
-        const history = data.albaranes?.flatMap(a => a.items || []).filter(i => norm(i.n) === norm(nl.name));
-        const lastPrice = history && history.length > 0 ? history[history.length - 1].unit : null;
-        if (lastPrice && (nl.unit_price || nl.total) > lastPrice * 1.05) { 
-          alerts.push({ n: nl.name, old: lastPrice, new: (nl.unit_price || nl.total) });
+        const lastPrice = priceIndex.get(norm(nl.name));
+        const currentUnit = nl.unit_price ?? (nl.qty ? round2(nl.total / nl.qty) : nl.total);
+        if (lastPrice && currentUnit > lastPrice * 1.05) { 
+          alerts.push({ n: nl.name, old: lastPrice, new: currentUnit });
         }
       });
       setPriceAlerts(alerts);
@@ -314,7 +309,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   }, [data, isAnalyzing, recordingMode]);
 
 
-  // 🎙️ MAGIA DE VOZ (NUEVO O EDICIÓN)
+  // 🎙️ MAGIA DE VOZ LIGERA (NUEVO O EDICIÓN)
   const startVoiceRecording = async (mode: 'new' | 'edit') => {
     if (recordingMode) {
       mediaRecRef.current?.stop();
@@ -322,7 +317,11 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream);
+      const mr = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus', // Opus muy ligero
+        audioBitsPerSecond: 24_000, 
+      });
+      
       mediaRecRef.current = mr;
       chunksRef.current = [];
 
@@ -401,7 +400,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   };
 
 
-  // 🚀 TU FUNCIÓN ORIGINAL DE GUARDADO (¡Intacta y Recuperada!)
+  // 🚀 TU FUNCIÓN ORIGINAL DE GUARDADO INTACTA
   const handleSaveAlbaran = async () => {
     if (!form.prov) return alert("Por favor, introduce el nombre del proveedor.");
 
@@ -506,7 +505,11 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     newItems.splice(index, 1);
     setEditForm({ ...editForm, items: newItems });
   };
-
+  
+  const vaciarItems = () => {
+    if (!editForm) return;
+    setEditForm({ ...editForm, items: [] });
+  };
 
   // KPIs y Filtros
   const kpis = useMemo(() => {
@@ -536,16 +539,24 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
 
   return (
-    <div className="animate-fade-in space-y-6 pb-24">
+    <div className={cn("animate-fade-in space-y-6 pb-24", isAnalyzing && "transition-none")}>
       <datalist id="providers-list">
         {uniqueProviders.map(p => <option key={p} value={p} />)}
       </datalist>
+
+      {/* OVERLAY SUTIL DE VOZ (No bloquea la pantalla) */}
+      {recordingMode && (
+        <div className="fixed top-2 left-1/2 -translate-x-1/2 z-[300] px-4 py-2 rounded-full bg-rose-600 text-white text-[10px] font-black shadow-lg animate-pulse flex items-center gap-2 cursor-pointer" onClick={() => startVoiceRecording(recordingMode)}>
+          <Mic className="w-3 h-3" />
+          🎙️ Grabando... Pulsa aquí para detener
+        </div>
+      )}
 
       {/* HEADER */}
       <header className="flex flex-col md:flex-row justify-between items-center bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 gap-4">
         <div>
           <h2 className="text-xl font-black text-slate-800 tracking-tighter">Compras & Gastos</h2>
-          <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest">Multi-Local IA Activa PRO</p>
+          <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest">IA Pro Reconciliación</p>
         </div>
         <div className="flex gap-2 items-center flex-wrap justify-center">
           
@@ -586,15 +597,15 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
           <button 
             onClick={() => startVoiceRecording('new')}
             disabled={isAnalyzing}
-            className={cn("px-4 py-3 rounded-2xl text-[10px] font-black uppercase transition-all shadow-md flex items-center justify-center gap-2", recordingMode === 'new' ? "bg-rose-500 text-white animate-pulse" : "bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50")}
+            className={cn("px-4 py-3 rounded-2xl text-[10px] font-black uppercase transition-all shadow-md flex items-center justify-center gap-2", recordingMode === 'new' ? "bg-rose-500 text-white" : "bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-50")}
           >
-            {recordingMode === 'new' ? <Square className="w-4 h-4 fill-current" /> : <Mic className="w-4 h-4" />}
-            {recordingMode === 'new' ? 'ESCUCHANDO...' : 'DICTAR'}
+            <Mic className="w-4 h-4" />
+            DICTAR ALBARÁN
           </button>
 
           <label className={cn("bg-gradient-to-r from-indigo-500 to-purple-600 text-white px-5 py-3 rounded-2xl text-[10px] font-black transition shadow-md flex items-center gap-2", isAnalyzing ? "opacity-50 cursor-wait" : "hover:shadow-lg hover:scale-105 cursor-pointer")}>
             <Camera className="w-4 h-4" />
-            <span>{isAnalyzing ? 'PROCESANDO...' : 'SUBIR IMAGEN (Ctrl+V)'}</span>
+            <span>SUBIR IMAGEN (Ctrl+V)</span>
             <input type="file" disabled={isAnalyzing} onChange={handleDirectScan} className="hidden" accept="image/*, application/pdf" />
           </label>
         </div>
@@ -639,7 +650,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
             {isAnalyzing && !recordingMode && (
               <div className="absolute inset-0 bg-white/95 z-20 flex flex-col items-center justify-center text-center p-4 backdrop-blur-sm">
                 <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-3"></div>
-                <p className="text-xs font-black text-indigo-600 animate-pulse uppercase tracking-widest">IA analizando...</p>
+                <p className="text-xs font-black text-indigo-600 animate-pulse uppercase tracking-widest">Analizando...</p>
               </div>
             )}
 
@@ -647,13 +658,13 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
               <span className="flex items-center gap-2"><Plus className="w-4 h-4 text-indigo-500" /> Nueva Factura</span>
             </h3>
 
-            {/* PREVIEW IMAGEN */}
+            {/* PREVIEW IMAGEN (Ligera, sin colgar RAM) */}
             <AnimatePresence>
               {scannedImage && (
                 <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="mb-4">
                   <div className="relative w-full h-32 bg-slate-100 rounded-2xl overflow-hidden border border-slate-200">
                     <img src={scannedImage} alt="Ticket Scaneado" className="w-full h-full object-cover opacity-80" />
-                    <button onClick={() => setScannedImage(null)} className="absolute top-2 right-2 bg-slate-900/50 text-white p-1.5 rounded-lg hover:bg-rose-500 transition"><Trash2 className="w-3 h-3" /></button>
+                    <button onClick={() => { URL.revokeObjectURL(scannedImage); setScannedImage(null); }} className="absolute top-2 right-2 bg-slate-900/50 text-white p-1.5 rounded-lg hover:bg-rose-500 transition"><Trash2 className="w-3 h-3" /></button>
                   </div>
                 </motion.div>
               )}
@@ -822,14 +833,22 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                   <div className="flex justify-between items-center ml-2">
                     <p className="text-[9px] font-black text-slate-400 uppercase">Desglose de productos</p>
                     
-                    {/* BOTÓN MÁGICO DE EDICIÓN POR VOZ */}
+                    {/* BOTONES DE EDICIÓN MÚLTIPLE */}
                     {isEditMode && (
-                      <button 
-                        onClick={() => startVoiceRecording('edit')}
-                        className="bg-rose-100 text-rose-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase flex items-center gap-1 hover:bg-rose-200 transition shadow-sm"
-                      >
-                        <Mic className="w-3 h-3" /> Modificar por voz
-                      </button>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={vaciarItems}
+                          className="bg-rose-50 text-rose-600 px-2 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-rose-100 transition shadow-sm"
+                        >
+                          Vaciar Todo
+                        </button>
+                        <button 
+                          onClick={() => startVoiceRecording('edit')}
+                          className="bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase flex items-center gap-1 hover:bg-indigo-200 transition shadow-sm"
+                        >
+                          <Mic className="w-3 h-3" /> Dictar Cambios
+                        </button>
+                      </div>
                     )}
                   </div>
 
