@@ -1,29 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
-  FileText, 
-  Search, 
-  ChevronLeft, 
-  ChevronRight, 
-  Zap, 
-  Users, 
-  Building2, 
-  Package, 
-  Wallet, 
-  CheckCircle2, 
-  Clock, 
-  Trash2, 
-  AlertCircle,
-  Link as LinkIcon,
-  Mail,
-  ArrowRight,
-  X,
-  RefreshCw,
-  Download,
-  Bell,
-  CheckSquare,
-  Hotel,
-  ShoppingBag,
-  Layers
+  FileText, Search, ChevronLeft, ChevronRight, Zap, Users, Building2, Package, Wallet, CheckCircle2, Clock, Trash2, AlertCircle, Link as LinkIcon, Mail, ArrowRight, X, RefreshCw, Download, Bell, CheckSquare, Hotel, ShoppingBag, Layers
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
@@ -56,7 +33,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [year, setYear] = useState(new Date().getFullYear());
   const [searchQ, setSearchQ] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'paid' | 'reconciled'>('all');
-  const [selectedUnit, setSelectedUnit] = useState<BusinessUnit | 'ALL'>('ALL'); // 🚀 NUEVO: Filtro B2B
+  const [selectedUnit, setSelectedUnit] = useState<BusinessUnit | 'ALL'>('ALL');
   const [isSyncing, setIsSyncing] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportQuarter, setExportQuarter] = useState(Math.floor(new Date().getMonth() / 3) + 1);
@@ -68,7 +45,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     num: '', 
     date: new Date().toISOString().split('T')[0], 
     selectedAlbs: [] as string[],
-    unitId: 'REST' as BusinessUnit // Por defecto
+    unitId: 'REST' as BusinessUnit
   });
 
   const norm = (s: string) => s ? s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim() : '';
@@ -118,7 +95,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     
     if (draftIdx === -1 || !audit) return;
 
-    let unitToAssign: BusinessUnit = 'REST'; // Unidad por defecto
+    let unitToAssign: BusinessUnit = 'REST'; 
 
     if (audit.candidatos.length > 0) {
       const idsVincular = audit.candidatos.map(a => a.id);
@@ -128,7 +105,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       newData.facturas[draftIdx].albaranIdsArr = idsVincular;
       newData.facturas[draftIdx].albaranIds = idsVincular.join(',');
       
-      // La factura hereda la unidad de negocio del primer albarán
       unitToAssign = (audit.candidatos[0] as any).unitId || 'REST';
     }
 
@@ -215,7 +191,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         return;
       }
 
-      // Separamos los grupos también por Unidad de Negocio para no mezclar albaranes de Restaurante y Catering del mismo proveedor
       const unitId = (a as any).unitId || 'REST';
       const groupKey = `${ownerKey}_${unitId}`;
 
@@ -375,6 +350,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       <AnimatePresence>
         {draftsIA.length > 0 && (
           <motion.div 
+            key="ia-audit"
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
@@ -720,14 +696,18 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       {/* Export Modal */}
       <AnimatePresence>
         {isExportModalOpen && (
-          <div className="fixed inset-0 z-[100] flex justify-center items-center p-4">
+          <motion.div 
+            key="export-modal"
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex justify-center items-center p-4"
+          >
+            <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" onClick={() => setIsExportModalOpen(false)} />
             <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setIsExportModalOpen(false)}
-              className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              initial={{ scale: 0.95, y: 20 }} 
+              animate={{ scale: 1, y: 0 }} 
+              exit={{ scale: 0.95, y: 20 }}
               className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl relative z-10"
             >
               <h3 className="text-xl font-black text-slate-800 mb-2">Exportar Trimestre</h3>
@@ -768,19 +748,25 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                 </div>
               </div>
             </motion.div>
-          </div>
+          </motion.div>
         )}
+      </AnimatePresence>
 
-        {/* Group Manual Modal */}
+      {/* Group Manual Modal */}
+      <AnimatePresence>
         {selectedGroup && (
-          <div className="fixed inset-0 z-[100] flex justify-center items-center p-4">
+          <motion.div 
+            key="group-modal"
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex justify-center items-center p-4"
+          >
+            <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" onClick={() => setSelectedGroup(null)} />
             <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setSelectedGroup(null)}
-              className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              initial={{ scale: 0.95, y: 20 }} 
+              animate={{ scale: 1, y: 0 }} 
+              exit={{ scale: 0.95, y: 20 }}
               className="bg-white w-full max-w-2xl rounded-[2.5rem] p-8 shadow-2xl relative z-10 flex flex-col max-h-[90vh]"
             >
               <button onClick={() => setSelectedGroup(null)} className="absolute top-6 right-6 text-slate-300 hover:text-slate-500 text-2xl transition">✕</button>
@@ -892,21 +878,25 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                 </button>
               </div>
             </motion.div>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
       {/* Detail Modal */}
       <AnimatePresence>
         {selectedInvoice && (
-          <div className="fixed inset-0 z-[100] flex justify-center items-center p-4">
+          <motion.div 
+            key="detail-modal"
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex justify-center items-center p-4"
+          >
+            <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" onClick={() => setSelectedInvoice(null)} />
             <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setSelectedInvoice(null)}
-              className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              initial={{ scale: 0.95, y: 20 }} 
+              animate={{ scale: 1, y: 0 }} 
+              exit={{ scale: 0.95, y: 20 }}
               className="bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl relative z-10"
             >
               <button onClick={() => setSelectedInvoice(null)} className="absolute top-6 right-6 text-slate-300 hover:text-slate-500 text-2xl transition">✕</button>
@@ -973,7 +963,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                 <span className="text-3xl font-black">{Num.fmt(Math.abs(Num.parse(selectedInvoice.total)))}</span>
               </div>
             </motion.div>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
