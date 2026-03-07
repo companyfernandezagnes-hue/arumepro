@@ -24,7 +24,11 @@ export const INITIAL_DATA: AppData = {
     "sufijo": "000",
     "empresa": "Arume Sake Bar",
     "n8nUrlBanco": "",
-    "saldoInicial": 0
+    "saldoInicial": 0,
+    "n8nUrlIA": "https://n8n.permatunnelopen.org/webhook/alertas-erp", // 🚀 AQUÍ ESTÁ TU WEBHOOK DE ALERTAS
+    "appUrl": "https://tu-erp-inteligente.app", // Cambia esto por la URL real de tu app cuando la subas
+    "telegramToken": "",
+    "telegramChatId": ""
   },
   "kardex": [
     { "n": "DEWASAKURA DEWASANSAN -JG 1800ML", "id": "b8nomd05t", "ts": 1766941460235, "qty": 2, "date": "28/12/2025, 18:04:20", "type": "IN", "unit": "ud", "user": "Gerencia", "ingId": "fbp98qges", "price": 50.94, "reason": "Alb: Solo de vinos" },
