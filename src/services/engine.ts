@@ -1,7 +1,7 @@
 import { AppData, GastoFijo, Activo } from "../types";
 
 /* ===========================
- * NUMÉRICAS ROBUSTAS (Motor Copilot + Arume)
+ * NUMÉRICAS ROBUSTAS (A prueba de bombas)
  * =========================== */
 export const Num = {
   parse: (val: unknown): number => {
@@ -121,10 +121,10 @@ export function calcularAmortizacionMensual(activos: Activo[]): number {
 }
 
 /* ===========================
- * MOTOR PRINCIPAL (ARUME ENGINE)
+ * MOTOR PRINCIPAL (ARUME MULTI-LOCAL ENGINE)
  * =========================== */
 export const ArumeEngine = {
-  // 🚀 CALCULADORA DE IMPUESTOS (Para tu Excel de Albaranes)
+  // Calculadora de impuestos usada en Albaranes
   calcularImpuestos: (totalConIva: number, tipoIva: 4 | 10 | 21 = 10) => {
     const total = Num.parse(totalConIva);
     const base = total / (1 + (tipoIva / 100));
@@ -141,23 +141,54 @@ export const ArumeEngine = {
     const sMs = start.getTime();
     const eMs = end.getTime();
 
-    // A. INGRESOS
+    // 🚀 ESTRUCTURA BASE MULTI-UNIDAD
+    const unitBreakdown: Record<string, { income: number; expenses: number; profit: number }> = {
+      REST: { income: 0, expenses: 0, profit: 0 },
+      DLV: { income: 0, expenses: 0, profit: 0 },
+      SHOP: { income: 0, expenses: 0, profit: 0 },
+      CORP: { income: 0, expenses: 0, profit: 0 },
+    };
+
+    // A. INGRESOS (Cajas Z + Facturas de Catering)
     let cajaZ = 0, facturasB2B = 0;
+    
+    // 1. Cajas Z (Restaurante y Tienda)
     for (const c of (data.cierres || [])) {
       const d = DateUtil.parse(c.date).getTime();
-      if (d >= sMs && d <= eMs) cajaZ += Num.parse(c.totalVenta);
+      if (d >= sMs && d <= eMs) {
+        const val = Num.parse(c.totalVenta);
+        cajaZ += val;
+        
+        const u = c.unitId || 'REST';
+        if (unitBreakdown[u] && u !== 'DLV') { // DLV no usa TPV
+          unitBreakdown[u].income += val;
+        }
+      }
     }
 
+    // 2. Facturas de Catering B2B (Solo suman los ingresos de la unidad DLV y clientes reales)
     for (const f of (data.facturas || [])) {
       const d = DateUtil.parse(f.date).getTime();
       if (d < sMs || d > eMs) continue;
-      if (String(f.num ?? "").toUpperCase().startsWith("Z")) continue;
-      facturasB2B += Num.parse(f.total);
+      
+      const val = Num.parse(f.total);
+      const isZ = String(f.num ?? "").toUpperCase().startsWith("Z");
+      const isIngreso = val > 0; // Evitamos facturas rectificativas si no aplican
+      const u = (f as any).unidad_negocio || 'REST';
+
+      if (!isZ && isIngreso && f.cliente !== 'Z DIARIO') {
+        if (u === 'DLV') {
+          facturasB2B += val;
+        }
+        if (unitBreakdown[u]) {
+          unitBreakdown[u].income += val;
+        }
+      }
     }
 
     const totalIngresos = Num.round2(cajaZ + facturasB2B);
 
-    // B. GASTOS VARIABLES
+    // B. GASTOS VARIABLES (Albaranes)
     let gComida = 0, gBebida = 0, gOtros = 0;
     for (const a of (data.albaranes || [])) {
       const d = DateUtil.parse(a.date).getTime();
@@ -166,17 +197,23 @@ export const ArumeEngine = {
       const total = Num.parse(a.total);
       const prov = String(a.prov || "").toLowerCase();
       const cat = String((a as any).category || "").toLowerCase();
+      const u = a.unitId || 'REST'; // Si no tiene, por defecto a Restaurante
 
       if (cat === 'comida' || prov.match(/fruta|carne|pesca|makro|mercadona|pan|huevo|verdu|aliment|chef|congelad|lidl|dia|eroski|assortiment|gourmet/)) {
         gComida += total;
-      } else if (cat === 'bebida' || prov.match(/estrella|mahou|coca|vino|bebida|licor|bodega|drinks|cervez|agua|cafe|schweppes|pepsi/)) {
+      } else if (cat === 'bebida' || prov.match(/estrella|mahou|coca|vino|bebida|licor|bodega|drinks|cervez|agua|cafe|schweppes|pepsi|sake/)) {
         gBebida += total;
       } else {
         gOtros += total;
       }
+
+      // Sumamos al bloque correspondiente
+      if (unitBreakdown[u]) {
+        unitBreakdown[u].expenses += total;
+      }
     }
 
-    // C. GASTOS FIJOS
+    // C. GASTOS FIJOS (Se asumen devengados siempre para calcular rentabilidad real)
     let gPersonal = 0, gEstructura = 0;
     for (const g of (data.gastos_fijos || [])) {
       if (g.active === false) continue;
@@ -192,11 +229,25 @@ export const ArumeEngine = {
 
       if (g.cat === 'personal') gPersonal += val;
       else gEstructura += val;
+
+      const u = g.unitId || 'REST';
+      if (unitBreakdown[u]) {
+        unitBreakdown[u].expenses += val;
+      }
     }
 
-    // D. AMORTIZACIONES
+    // D. AMORTIZACIONES (Se las solemos cargar al corporativo o divididas)
     const gAmort = calcularAmortizacionMensual(data.activos);
+    unitBreakdown['CORP'].expenses += gAmort; // Por defecto al bloque Socios/Corporativo
+
     const totalGastos = Num.round2(gComida + gBebida + gOtros + gPersonal + gEstructura + gAmort);
+
+    // E. CALCULAR BENEFICIOS NETOS POR BLOQUE
+    Object.keys(unitBreakdown).forEach(k => {
+      unitBreakdown[k].income = Num.round2(unitBreakdown[k].income);
+      unitBreakdown[k].expenses = Num.round2(unitBreakdown[k].expenses);
+      unitBreakdown[k].profit = Num.round2(unitBreakdown[k].income - unitBreakdown[k].expenses);
+    });
 
     // Ratios
     const safeDiv = (num: number, den: number) => (den ? num / den : 0);
@@ -209,6 +260,7 @@ export const ArumeEngine = {
         estructura: Num.round2(gEstructura), amortizacion: Num.round2(gAmort) 
       },
       neto: Num.round2(totalIngresos - totalGastos),
+      unitBreakdown, // 🚀 AHORA EL DASHBOARD RECIBE ESTO PERFECTAMENTE CALCULADO
       ratios: {
         foodCost: Num.round2(safeDiv(gComida, totalIngresos) * 100),
         drinkCost: Num.round2(safeDiv(gBebida, totalIngresos) * 100),
