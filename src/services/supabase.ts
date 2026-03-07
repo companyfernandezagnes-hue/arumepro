@@ -1,13 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
-import { AppData } from '../types';
 
-// ================= Credenciales =================
 const SUPABASE_URL = "https://awbgboucnbsuzojocbuy.supabase.co";
-const SUPABASE_KEY = "sb_publishable_drOQ5PsFA8eox_aRTXNATQ_5kibM6ST";
+const SUPABASE_KEY = "sb_secret_NkfohnwdWUybssY1sBFZEg_h-CVLF7c";
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true },
-});
+export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// SOLO para desarrollo
+if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+  // @ts-ignore
+  window.supabase = supabase;
+}
 
 // ================ Utilidades Robustas ==================
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
