@@ -8,19 +8,31 @@ import {
   Clock, 
   AlertTriangle,
   Calendar,
-  DollarSign,
   Briefcase,
   Zap,
   Scale,
   Laptop,
   UtensilsCrossed,
-  ChevronRight,
   Edit3,
-  X
+  X,
+  Hotel, // 🚀 MEJORA: Coherencia B2B
+  ShoppingBag,
+  Users,
+  Layers
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppData, GastoFijo } from '../types';
 import { cn } from '../lib/utils';
+
+// 🚀 DEFINICIÓN DE UNIDADES DE NEGOCIO B2B
+export type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
+
+const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string; bg: string }[] = [
+  { id: 'REST', name: 'Restaurante', icon: Building2, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+  { id: 'DLV', name: 'Catering Hoteles', icon: Hotel, color: 'text-amber-600', bg: 'bg-amber-50' },
+  { id: 'SHOP', name: 'Tienda Sake', icon: ShoppingBag, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+  { id: 'CORP', name: 'Socios / Corp', icon: Users, color: 'text-slate-600', bg: 'bg-slate-100' },
+];
 
 interface FixedExpensesViewProps {
   data: AppData;
@@ -29,13 +41,13 @@ interface FixedExpensesViewProps {
 
 export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedUnit, setSelectedUnit] = useState<BusinessUnit | 'ALL'>('ALL'); // 🚀 Filtro Activo
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingGasto, setEditingGasto] = useState<GastoFijo | null>(null);
+  const [editingGasto, setEditingGasto] = useState<any | null>(null);
 
   const today = new Date();
   const currentMonthKey = `pagos_${today.getFullYear()}_${today.getMonth() + 1}`;
 
-  // Ensure structures exist
   const gastosFijos = data.gastos_fijos || [];
   const controlPagos = data.control_pagos || {};
   const currentPagos = controlPagos[currentMonthKey] || [];
@@ -51,22 +63,32 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
     return amount;
   };
 
+  // 🚀 MEJORA VIP: Estadísticas Dinámicas por Bloque
   const stats = useMemo(() => {
-    const activeGastos = gastosFijos.filter(g => g.active !== false);
+    const activeGastos = gastosFijos.filter((g: any) => {
+      if (g.active === false) return false;
+      const gUnit = g.unitId || 'REST'; // Por compatibilidad si hay gastos viejos
+      if (selectedUnit !== 'ALL' && gUnit !== selectedUnit) return false;
+      return true;
+    });
+
     const totalMochila = activeGastos.reduce((acc, g) => acc + getMensual(g), 0);
-    const pagadosIds = currentPagos;
-    const pagados = activeGastos.filter(g => pagadosIds.includes(g.id));
+    const pagados = activeGastos.filter(g => currentPagos.includes(g.id));
     const totalPagado = pagados.reduce((acc, g) => acc + getMensual(g), 0);
+    
     const totalPendiente = totalMochila - totalPagado;
     const porcentaje = totalMochila > 0 ? (totalPagado / totalMochila) * 100 : 0;
 
     return { totalMochila, totalPagado, totalPendiente, porcentaje };
-  }, [gastosFijos, currentPagos]);
+  }, [gastosFijos, currentPagos, selectedUnit]);
 
+  // Filtramos la lista visible
   const filteredGastos = useMemo(() => {
     return gastosFijos
-      .filter(g => {
+      .filter((g: any) => {
         if (g.active === false) return false;
+        const gUnit = g.unitId || 'REST';
+        if (selectedUnit !== 'ALL' && gUnit !== selectedUnit) return false;
         return (g.name || '').toLowerCase().includes(searchTerm.toLowerCase());
       })
       .sort((a, b) => {
@@ -75,7 +97,7 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
         if (isPaidA !== isPaidB) return isPaidA ? 1 : -1;
         return (a.dia_pago || 1) - (b.dia_pago || 1);
       });
-  }, [gastosFijos, searchTerm, currentPagos]);
+  }, [gastosFijos, searchTerm, currentPagos, selectedUnit]);
 
   const handleTogglePago = async (g: GastoFijo) => {
     const newData = { ...data };
@@ -108,7 +130,7 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     
-    const nuevo: GastoFijo = {
+    const nuevo: any = {
       id: editingGasto?.id || Date.now().toString(),
       name: formData.get('name') as string,
       amount: parseFloat(formData.get('amount') as string) || 0,
@@ -116,7 +138,8 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
       cat: formData.get('cat') as string,
       dia_pago: parseInt(formData.get('dia_pago') as string) || 1,
       active: true,
-      notes: formData.get('notes') as string
+      notes: formData.get('notes') as string,
+      unitId: formData.get('unitId') as string // 🚀 Guardamos el bloque al que pertenece
     };
 
     const newData = { ...data };
@@ -160,14 +183,14 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
       <header className="flex flex-col md:flex-row justify-between items-center bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 gap-4">
         <div>
           <h2 className="text-xl font-black text-slate-800 tracking-tight">Estructura de Costes</h2>
-          <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest flex items-center gap-2">
+          <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest flex items-center gap-2 mt-1">
             <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
-            {today.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }).toUpperCase()}
+            {selectedUnit === 'ALL' ? 'Grupo Arume' : BUSINESS_UNITS.find(u => u.id === selectedUnit)?.name} • {today.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }).toUpperCase()}
           </p>
         </div>
         <div className="flex gap-8 items-center">
           <div className="text-right">
-            <p className="text-[9px] font-black text-rose-500 uppercase tracking-widest">Pendiente</p>
+            <p className="text-[9px] font-black text-rose-500 uppercase tracking-widest">Pendiente de Pago</p>
             <p className="text-2xl font-black text-rose-600">{stats.totalPendiente.toLocaleString('es-ES', { maximumFractionDigits: 0 })}€</p>
           </div>
           <div className="w-14 h-14 rounded-full border-4 border-slate-100 flex items-center justify-center relative overflow-hidden shadow-inner">
@@ -182,34 +205,66 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
         </div>
       </header>
 
-      {/* Search & Add */}
-      <div className="flex items-center gap-2 bg-white p-2 rounded-2xl border border-slate-100 shadow-sm sticky top-2 z-10">
-        <div className="flex items-center gap-2 flex-1 px-3">
-          <Search className="w-4 h-4 text-slate-400" />
-          <input 
-            type="text" 
-            placeholder="Buscar nómina, alquiler..." 
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="bg-transparent outline-none text-xs font-bold text-slate-600 w-full h-8"
-          />
+      {/* Buscador y Filtro Multi-Bloque */}
+      <div className="flex flex-col gap-3 bg-white p-3 rounded-[2rem] border border-slate-100 shadow-sm sticky top-2 z-10">
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-1 px-3 bg-slate-50 rounded-xl py-2">
+            <Search className="w-4 h-4 text-slate-400" />
+            <input 
+              type="text" 
+              placeholder="Buscar nómina, alquiler..." 
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="bg-transparent outline-none text-xs font-bold text-slate-600 w-full"
+            />
+          </div>
+          <button 
+            onClick={() => { setEditingGasto(null); setIsModalOpen(true); }}
+            className="bg-slate-900 text-white px-6 py-3 rounded-xl text-[10px] font-black hover:bg-indigo-600 transition flex-shrink-0 shadow-lg"
+          >
+            + NUEVO GASTO
+          </button>
         </div>
-        <button 
-          onClick={() => { setEditingGasto(null); setIsModalOpen(true); }}
-          className="bg-slate-900 text-white px-6 py-2.5 rounded-xl text-[10px] font-black hover:bg-indigo-600 transition flex-shrink-0 shadow-lg"
-        >
-          + NUEVO GASTO
-        </button>
+        
+        {/* 🚀 Filtros de Unidad de Negocio */}
+        <div className="flex flex-wrap gap-2 px-1">
+          <button
+            onClick={() => setSelectedUnit('ALL')}
+            className={cn(
+              "px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all border flex items-center gap-1.5",
+              selectedUnit === 'ALL' ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50"
+            )}
+          >
+            <Layers className="w-3 h-3" /> Todas
+          </button>
+          {BUSINESS_UNITS.map(unit => (
+            <button
+              key={unit.id}
+              onClick={() => setSelectedUnit(unit.id)}
+              className={cn(
+                "px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all border flex items-center gap-1.5",
+                selectedUnit === unit.id 
+                  ? `${unit.color.replace('text-', 'bg-')} text-white border-transparent shadow-md` 
+                  : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50"
+              )}
+            >
+              <unit.icon className="w-3 h-3" />
+              {unit.name.split(' ')[0]}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* List */}
+      {/* Lista de Gastos */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredGastos.map(g => {
+        {filteredGastos.map((g: any) => {
           const isPaid = currentPagos.includes(g.id);
           const mensual = getMensual(g);
           const theme = getCategoryTheme(g.cat);
           const diaHoy = today.getDate();
           const esUrgente = !isPaid && (g.dia_pago - diaHoy <= 3) && (g.dia_pago - diaHoy >= -5);
+          
+          const unitConfig = BUSINESS_UNITS.find(u => u.id === (g.unitId || 'REST'));
 
           return (
             <motion.div 
@@ -217,7 +272,7 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
               key={g.id}
               className={cn(
                 "bg-white p-5 rounded-[2.5rem] border transition-all relative group hover:shadow-xl",
-                isPaid ? 'border-emerald-200 bg-emerald-50/10' : esUrgente ? 'border-rose-300 shadow-rose-100 shadow-lg' : 'border-slate-100 shadow-sm'
+                isPaid ? 'border-emerald-200 bg-emerald-50/20' : esUrgente ? 'border-rose-300 shadow-rose-100 shadow-lg' : 'border-slate-100 shadow-sm'
               )}
             >
               <div className="flex justify-between items-start mb-4">
@@ -227,11 +282,13 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
                   </div>
                   <div className="overflow-hidden">
                     <h4 className="font-black text-slate-800 text-sm truncate leading-tight">{g.name}</h4>
-                    <div className="flex gap-2 text-[9px] font-bold uppercase tracking-wide text-slate-400 mt-1">
-                      <span className="bg-slate-100 px-1.5 py-0.5 rounded">{g.freq}</span>
-                      <span className="flex items-center gap-1">
-                        <Calendar className="w-2.5 h-2.5" /> Día {g.dia_pago}
-                      </span>
+                    <div className="flex gap-2 text-[9px] font-bold uppercase tracking-wide mt-1 items-center flex-wrap">
+                      <span className="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{g.freq}</span>
+                      {unitConfig && (
+                        <span className={cn("px-1.5 py-0.5 rounded border border-current opacity-80", unitConfig.color, unitConfig.bg)}>
+                          {unitConfig.name.split(' ')[0]}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -263,18 +320,20 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
 
               <div className="flex justify-between items-end mt-2 pt-4 border-t border-slate-50">
                 <div>
-                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Cuota Real</p>
-                  <p className="text-sm font-black text-slate-800">{parseFloat(g.amount as any).toLocaleString()}€</p>
+                  <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest flex items-center gap-1">
+                    <Calendar className="w-3 h-3" /> Día {g.dia_pago}
+                  </p>
+                  <p className="text-sm font-black text-slate-800 mt-1">{parseFloat(g.amount as any).toLocaleString()}€ / total</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-[9px] font-bold uppercase tracking-widest text-indigo-400">Mensualizado</p>
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-indigo-400">Impacto Mensual</p>
                   <p className="text-lg font-black text-indigo-600">{mensual.toLocaleString(undefined, { maximumFractionDigits: 0 })}€</p>
                 </div>
               </div>
 
               {esUrgente && (
                 <div className="absolute -top-2 -right-2 bg-rose-500 text-white text-[8px] font-black px-2 py-1 rounded-lg shadow-lg animate-bounce">
-                  URGENTE
+                  PAGO CERCANO
                 </div>
               )}
             </motion.div>
@@ -282,13 +341,13 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
         })}
         {filteredGastos.length === 0 && (
           <div className="col-span-full text-center py-20 bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200">
-            <AlertTriangle className="w-12 h-12 text-slate-200 mx-auto mb-3" />
-            <p className="text-xs font-black text-slate-400 uppercase">No hay gastos activos</p>
+            <AlertTriangle className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+            <p className="text-xs font-black text-slate-400 uppercase">No hay gastos en este bloque</p>
           </div>
         )}
       </div>
 
-      {/* Modal */}
+      {/* Modal Agregar/Editar */}
       <AnimatePresence>
         {isModalOpen && (
           <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[9999] flex justify-center items-center p-4">
@@ -305,12 +364,35 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
                 <X className="w-6 h-6" />
               </button>
               
-              <h3 className="text-2xl font-black text-slate-800 mb-8">
+              <h3 className="text-2xl font-black text-slate-800 mb-6">
                 {editingGasto ? 'Editar Gasto' : 'Nuevo Gasto Fijo'}
               </h3>
               
               <form onSubmit={handleSaveGasto} className="space-y-6">
                 <div className="space-y-4">
+                  
+                  {/* 🚀 Selector VIP de Unidad de Negocio */}
+                  <div className="p-4 bg-slate-900 rounded-[2rem] border border-slate-800 shadow-inner">
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-2 mb-3 block tracking-widest">A qué bloque pertenece</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {BUSINESS_UNITS.map(unit => (
+                        <label key={unit.id} className="relative cursor-pointer">
+                          <input 
+                            type="radio" 
+                            name="unitId" 
+                            value={unit.id}
+                            defaultChecked={editingGasto?.unitId === unit.id || (!editingGasto && unit.id === 'REST')}
+                            className="peer sr-only"
+                          />
+                          <div className="p-3 rounded-xl border-2 border-slate-700 bg-slate-800 text-slate-400 transition-all peer-checked:border-indigo-500 peer-checked:bg-indigo-500/20 peer-checked:text-white flex flex-col items-center gap-1.5 hover:bg-slate-700">
+                            <unit.icon className="w-4 h-4" />
+                            <span className="text-[9px] font-black uppercase text-center">{unit.name}</span>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
                   <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-2 tracking-widest">Nombre / Concepto</label>
                     <input 
@@ -337,7 +419,7 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] font-black text-slate-400 uppercase ml-2 tracking-widest">Día Pago</label>
+                      <label className="text-[10px] font-black text-slate-400 uppercase ml-2 tracking-widest">Día de Cargo</label>
                       <input 
                         name="dia_pago"
                         type="number" 
@@ -355,7 +437,7 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
                     <select 
                       name="freq"
                       defaultValue={editingGasto?.freq || 'mensual'}
-                      className="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border border-slate-100 outline-none focus:ring-2 ring-indigo-500/20 appearance-none"
+                      className="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border border-slate-100 outline-none focus:ring-2 ring-indigo-500/20 appearance-none cursor-pointer"
                     >
                       <option value="mensual">Mensual (12 pagos/año)</option>
                       <option value="trimestral">Trimestral (4 pagos/año)</option>
@@ -371,7 +453,7 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
                     <select 
                       name="cat"
                       defaultValue={editingGasto?.cat || 'varios'}
-                      className="w-full p-4 bg-white rounded-2xl font-bold text-sm border border-indigo-100 outline-none shadow-sm appearance-none"
+                      className="w-full p-4 bg-white rounded-2xl font-bold text-sm border border-indigo-100 outline-none shadow-sm appearance-none cursor-pointer"
                     >
                       <option value="varios">📦 Varios / Otros</option>
                       <option value="personal">👨‍🍳 Personal (Nóminas)</option>
@@ -380,9 +462,6 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
                       <option value="impuestos">⚖️ Impuestos / Tasas</option>
                       <option value="software">💻 Software / Suscripciones</option>
                     </select>
-                    <p className="text-[9px] text-indigo-400 mt-3 ml-2 font-bold italic">
-                      ℹ️ Selecciona 'Personal' para que cuente como coste de equipo.
-                    </p>
                   </div>
 
                   <div>
@@ -391,12 +470,12 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
                       name="notes"
                       defaultValue={editingGasto?.notes || ''}
                       placeholder="Detalles adicionales..."
-                      className="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border border-slate-100 outline-none h-24 resize-none"
+                      className="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border border-slate-100 outline-none h-20 resize-none"
                     />
                   </div>
                 </div>
 
-                <div className="pt-4 space-y-3">
+                <div className="pt-2 space-y-3">
                   <button 
                     type="submit"
                     className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black shadow-xl hover:bg-indigo-600 transition active:scale-95"
