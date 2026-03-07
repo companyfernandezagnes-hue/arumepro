@@ -6,7 +6,7 @@ import {
   AlertCircle, 
   TrendingUp,
   Building2, 
-  Truck, 
+  Hotel, // Cambiado el icono de Moto por Hotel
   ShoppingBag, 
   Users,
   SplitSquareHorizontal
@@ -24,12 +24,12 @@ import { ArumeEngine, Num } from '../services/engine';
 import { cn } from '../lib/utils';
 import { AppData } from '../types';
 
-// 🚀 DEFINICIÓN DE UNIDADES DE NEGOCIO (Directo en el archivo para evitar errores de importación)
 type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
 
+// 🚀 NOMBRES ACTUALIZADOS: De "Delivery" a "Catering Hoteles"
 const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string; bg: string; hex: string }[] = [
   { id: 'REST', name: 'Restaurante', icon: Building2, color: 'text-indigo-600', bg: 'bg-indigo-50', hex: '#4f46e5' },
-  { id: 'DLV', name: 'Delivery / Take Away', icon: Truck, color: 'text-amber-600', bg: 'bg-amber-50', hex: '#f59e0b' },
+  { id: 'DLV', name: 'Catering Hoteles', icon: Hotel, color: 'text-amber-600', bg: 'bg-amber-50', hex: '#f59e0b' },
   { id: 'SHOP', name: 'Tienda & Sakes', icon: ShoppingBag, color: 'text-emerald-600', bg: 'bg-emerald-50', hex: '#10b981' },
   { id: 'CORP', name: 'Bloque Socios', icon: Users, color: 'text-slate-600', bg: 'bg-slate-100', hex: '#475569' },
 ];
@@ -47,11 +47,8 @@ export const DashboardView = ({ data }: { data: AppData }) => {
     }));
   }, [data.cierres]);
 
-  // 🚀 CÁLCULO SEGURO DEL RENDIMIENTO POR UNIDAD
+  // 🚀 LÓGICA CRÍTICA REESCRITA PARA EL MODELO B2B (HOTELES)
   const unitBreakdown = useMemo(() => {
-    // Si tu engine.ts ya devuelve esto, lo usamos. Si no, lo calculamos aquí para que no rompa la app.
-    if ((stats as any).unitBreakdown) return (stats as any).unitBreakdown;
-
     const breakdown: Record<string, { income: number; expenses: number; profit: number }> = {
       REST: { income: 0, expenses: 0, profit: 0 },
       DLV: { income: 0, expenses: 0, profit: 0 },
@@ -59,16 +56,29 @@ export const DashboardView = ({ data }: { data: AppData }) => {
       CORP: { income: 0, expenses: 0, profit: 0 },
     };
 
-    // Sumar Ingresos
+    // 1. INGRESOS RESTAURANTE Y TIENDA (Vienen de los Cierres Z)
     (data.cierres || []).forEach((c: any) => {
       const d = new Date(c.date);
       if (d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
-        const unit = c.unidad_negocio || 'REST'; // Por defecto todo va al restaurante si no tiene etiqueta
-        if (breakdown[unit]) breakdown[unit].income += Num.parse(c.totalVenta);
+        const unit = c.unidad_negocio || 'REST'; 
+        if (breakdown[unit] && unit !== 'DLV') { // Ignoramos DLV aquí por seguridad
+          breakdown[unit].income += Num.parse(c.totalVenta);
+        }
       }
     });
 
-    // Sumar Gastos
+    // 2. INGRESOS HOTELES (Vienen de Facturas Emitidas a Clientes)
+    (data.facturas || []).forEach((f: any) => {
+      const d = new Date(f.date);
+      if (d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
+        // Solo sumamos como ingreso si la factura es del bloque de Hoteles y es a un Cliente (no a un proveedor)
+        if (f.unidad_negocio === 'DLV' && Num.parse(f.total) > 0 && f.cliente && f.cliente !== 'Z DIARIO') {
+          breakdown['DLV'].income += Num.parse(f.total);
+        }
+      }
+    });
+
+    // 3. GASTOS VARIABLES (Albaranes de compras a proveedores)
     (data.albaranes || []).forEach((a: any) => {
       const d = new Date(a.date);
       if (d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
@@ -77,13 +87,29 @@ export const DashboardView = ({ data }: { data: AppData }) => {
       }
     });
 
-    // Calcular Beneficio (Profit)
+    // 4. GASTOS FIJOS (Nóminas, alquileres, software divididos por bloque)
+    const currentMonthKey = `pagos_${currentYear}_${currentMonth + 1}`;
+    const pagadosIds = (data.control_pagos || {})[currentMonthKey] || [];
+    
+    (data.gastos_fijos || []).forEach((g: any) => {
+      if (g.active !== false && pagadosIds.includes(g.id)) {
+        const unit = g.unitId || 'REST';
+        const amount = parseFloat(g.amount as any) || 0;
+        let mensual = amount;
+        if (g.freq === 'anual') mensual = amount / 12;
+        if (g.freq === 'trimestral') mensual = amount / 3;
+        
+        if (breakdown[unit]) breakdown[unit].expenses += mensual;
+      }
+    });
+
+    // 5. CALCULAR BENEFICIO NETO
     Object.keys(breakdown).forEach(k => {
       breakdown[k].profit = breakdown[k].income - breakdown[k].expenses;
     });
 
     return breakdown;
-  }, [data.cierres, data.albaranes, currentMonth, currentYear, stats]);
+  }, [data.cierres, data.albaranes, data.facturas, data.gastos_fijos, data.control_pagos, currentMonth, currentYear]);
 
   return (
     <div className="space-y-6 animate-fade-in pb-24">
@@ -127,7 +153,7 @@ export const DashboardView = ({ data }: { data: AppData }) => {
 
       <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
         <div className="flex justify-between items-center mb-6">
-          <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Ventas Últimos 7 Días</h3>
+          <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Ventas Últimos 7 Días (Restaurante y Tienda)</h3>
         </div>
         <div className="h-[250px] w-full">
           <ResponsiveContainer width="100%" height="100%">
@@ -152,7 +178,7 @@ export const DashboardView = ({ data }: { data: AppData }) => {
         
         {/* Desglose de Gastos Clásico */}
         <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
-          <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-4">Desglose de Gastos</h3>
+          <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-4">Desglose Global Gastos</h3>
           <div className="space-y-4">
             {[
               { label: 'Comida', val: stats.gastos.comida, color: 'bg-amber-500' },
@@ -183,7 +209,6 @@ export const DashboardView = ({ data }: { data: AppData }) => {
           <div className="space-y-5">
             {BUSINESS_UNITS.map(unit => {
               const uStat = unitBreakdown[unit.id] || { income: 0, expenses: 0, profit: 0 };
-              // Buscamos el mayor ingreso para escalar las barras proporcionalmente
               const maxIncome = Math.max(...Object.values(unitBreakdown).map(u => u.income), 1);
               
               return (
@@ -210,8 +235,9 @@ export const DashboardView = ({ data }: { data: AppData }) => {
                       }} 
                     />
                   </div>
-                  <p className="text-[8px] font-bold text-slate-400 mt-1 text-right">
-                    INGRESOS: {Num.fmt(uStat.income)}
+                  <p className="text-[8px] font-bold text-slate-400 mt-1 flex justify-between">
+                    <span>Ingresos: {Num.fmt(uStat.income)}</span>
+                    <span className="text-rose-400">Gastos: {Num.fmt(uStat.expenses)}</span>
                   </p>
                 </div>
               );
