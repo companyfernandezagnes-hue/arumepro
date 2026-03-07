@@ -8,7 +8,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { AppData, Cierre, Factura } from '../types';
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
-import { NotificationService } from '../services/notifications';
 import { GoogleGenAI } from "@google/genai";
 
 export type CashBusinessUnit = 'REST' | 'SHOP';
@@ -86,7 +85,6 @@ const compressImageToBase64 = async (file: File | Blob): Promise<string> => {
   return b64;
 };
 
-// Upsert seguro para evitar duplicados al guardar
 function upsertFactura(list: any[], item: any, key: string = 'num') {
   const idx = list.findIndex(x => x[key] === item[key]);
   if (idx >= 0) list[idx] = { ...list[idx], ...item };
@@ -107,6 +105,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const [isSaving, setIsSaving] = useState(false); // ESTADO PARA EVITAR DOBLE CLIC
 
   // 📝 FORMULARIO DE CAJA
   const [form, setForm] = useState({
@@ -144,7 +143,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   const totalTienda = useMemo(() => Num.parse(form.tienda), [form.tienda]);
   const totalRestaurante = useMemo(() => totalCalculado - totalTienda, [totalCalculado, totalTienda]);
 
-  // 🚀 DESCUDRE REPARADO: Usando fondoCaja real
+  // 🚀 DESCUDRE REPARADO
   const descuadreVivo = useMemo(() => {
     const cajaF = Num.parse(form.cajaFisica);
     const efec = Num.parse(form.efectivo);
@@ -160,7 +159,6 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     setCurrentFilterDate(`${y}-${String(m).padStart(2, '0')}`);
   };
 
-  // 🚀 1. LÓGICA DE ESCANEO DE IMAGEN IA
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, slot: 'img1' | 'img2') => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -204,7 +202,6 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         glovo: String(asNum(rawJson.glovo) || prev.glovo),
         uber: String(asNum(rawJson.uber) || prev.uber),
         tienda: String(asNum(rawJson.venta_tienda) || prev.tienda),
-        // Si detecta efectivo físico, asumimos que incluye el fondo actual
         cajaFisica: asNum(rawJson.sobre_cash) > 0 ? (asNum(rawJson.sobre_cash) + fondoCaja).toFixed(2) : prev.cajaFisica,
         notas: asNum(rawJson.gastos) > 0 ? `Gastos detectados: ${rawJson.gastos}€. ${rawJson.notas || ''}` : (rawJson.notas || prev.notas),
       }));
@@ -218,7 +215,6 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     }
   };
 
-  // 🚀 2. MAGIA DE AUDIO
   const toggleRecording = async () => {
     if (isRecording) {
       mediaRecorderRef.current?.stop();
@@ -296,118 +292,133 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     }
   };
 
-  // 🚀 3. GUARDADO REPARADO (Idempotencia y Números Seguros)
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      if (scanStatus === 'loading') return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf("image") !== -1) {
+          const blob = items[i].getAsFile();
+          if (blob) {
+            processImageWithAI(blob, !images.img1 ? 'img1' : 'img2');
+            break;
+          }
+        }
+      }
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [images, scanStatus]);
+
+  // 🚀 3. GUARDADO REPARADO (LIMPIO, SIN NOTIFICACIONES QUE BLOQUEEN)
   const handleSaveCierre = async () => {
+    if (isSaving) return;
     if (totalCalculado <= 0) return alert("Introduce algún importe para guardar la caja.");
     if (totalRestaurante < 0) return alert("La venta de la tienda no puede ser mayor que el total de la caja.");
 
-    const newData = { ...data };
-    const fechaSeleccionada = form.date;
-    const descuadreFinal = descuadreVivo || 0;
-
-    // Inicializar colecciones
-    if (!newData.cierres) newData.cierres = [];
-    if (!newData.facturas) newData.facturas = [];
-    if (!newData.banco) newData.banco = [];
-
-    // 1) GASTOS DE CAJA -> FACTURAS pagadas separadas
-    if (gastosCaja.length > 0) {
-      gastosCaja.forEach((g, idx) => {
-        const imp = Num.parse(g.importe);
-        const base = Num.round2(imp / (1 + g.iva / 100));
-        const tax  = Num.round2(imp - base);
-        const num  = `GC-${fechaSeleccionada.replace(/-/g,'')}-${idx+1}`;
-
-        newData.facturas!.unshift({
-          id: `gc-${Date.now()}-${idx}`,
-          num, date: fechaSeleccionada, prov: g.concepto.toUpperCase(),
-          cliente: "GASTO CAJA", total: imp, base, tax, 
-          paid: true, reconciled: true, unidad_negocio: g.unidad
-        } as any);
-      });
-    }
-
-    // 2) INGRESO A BANCO desde sobre
-    const dep = Num.parse(depositoBanco);
-    if (dep > 0) {
-      newData.banco!.unshift({
-        id: `bank-dep-${Date.now()}`,
-        date: fechaSeleccionada, desc: "Ingreso sobre a banco",
-        amount: dep, status: "pending"
-      } as any);
-    }
-
-    // 3) CIERRES Y FACTURAS Z (Tipados asegurados como números para evitar el error de guardado)
-    const cierreRestId = `ZR-${fechaSeleccionada.replace(/-/g, '')}`;
-    const cierreRest: Cierre = {
-      id: cierreRestId, date: fechaSeleccionada, totalVenta: Num.round2(totalRestaurante),
-      efectivo: Num.parse(form.efectivo), tarjeta: Num.parse(form.tarjeta),
-      apps: (Num.parse(form.glovo) + Num.parse(form.uber) + Num.parse(form.madisa) + Num.parse(form.deliveroo)),
-      descuadre: descuadreFinal, notas: form.notas, conciliado_banco: false, unitId: 'REST'
-    };
-    upsertFactura(newData.cierres, cierreRest, 'id');
-
-    const fIdxRest = newData.facturas.findIndex(f => f.num === cierreRestId);
-    const baseR = Num.round2(totalRestaurante / 1.10);
-    const taxR  = Num.round2(totalRestaurante - baseR);
-    upsertFactura(newData.facturas, {
-      id: fIdxRest >= 0 ? newData.facturas[fIdxRest].id : `f-zr-${Date.now()}`,
-      num: cierreRestId, date: fechaSeleccionada, prov: "Z DIARIO", cliente: "Z DIARIO",
-      total: Num.round2(totalRestaurante), base: baseR, tax: taxR,
-      paid: fIdxRest >= 0 ? newData.facturas[fIdxRest].paid : false,
-      reconciled: fIdxRest >= 0 ? newData.facturas[fIdxRest].reconciled : false,
-      unidad_negocio: 'REST'
-    } as any);
-
-    if (totalTienda > 0) {
-      const cierreShopId = `ZS-${fechaSeleccionada.replace(/-/g, '')}`;
-      const cierreShop: Cierre = {
-        id: cierreShopId, date: fechaSeleccionada, totalVenta: Num.round2(totalTienda),
-        efectivo: 0, tarjeta: 0, apps: 0, descuadre: 0, notas: 'Venta separada de la caja general',
-        conciliado_banco: false, unitId: 'SHOP'
-      };
-      upsertFactura(newData.cierres, cierreShop, 'id');
-
-      const fIdxShop = newData.facturas.findIndex(f => f.num === cierreShopId);
-      const baseS = Num.round2(totalTienda / 1.21);
-      const taxS  = Num.round2(totalTienda - baseS);
-      upsertFactura(newData.facturas, {
-        id: fIdxShop >= 0 ? newData.facturas[fIdxShop].id : `f-zs-${Date.now()}`,
-        num: cierreShopId, date: fechaSeleccionada, prov: "Z DIARIO", cliente: "Z DIARIO",
-        total: Num.round2(totalTienda), base: baseS, tax: taxS,
-        paid: fIdxShop >= 0 ? newData.facturas[fIdxShop].paid : false,
-        reconciled: fIdxShop >= 0 ? newData.facturas[fIdxShop].reconciled : false,
-        unidad_negocio: 'SHOP'
-      } as any);
-    }
+    setIsSaving(true);
 
     try {
+      const newData = JSON.parse(JSON.stringify(data)); // Clon seguro
+      const fechaSeleccionada = form.date;
+      const descuadreFinal = descuadreVivo || 0;
+
+      // Inicializar colecciones
+      if (!newData.cierres) newData.cierres = [];
+      if (!newData.facturas) newData.facturas = [];
+      if (!newData.banco) newData.banco = [];
+
+      // 1) GASTOS DE CAJA -> FACTURAS pagadas separadas
+      if (gastosCaja.length > 0) {
+        gastosCaja.forEach((g, idx) => {
+          const imp = Num.parse(g.importe);
+          const base = Num.round2(imp / (1 + g.iva / 100));
+          const tax  = Num.round2(imp - base);
+          const num  = `GC-${fechaSeleccionada.replace(/-/g,'')}-${idx+1}`;
+
+          newData.facturas.unshift({
+            id: `gc-${Date.now()}-${idx}`,
+            num, date: fechaSeleccionada, prov: g.concepto.toUpperCase(),
+            cliente: "GASTO CAJA", total: imp, base, tax, 
+            paid: true, reconciled: true, unidad_negocio: g.unidad
+          });
+        });
+      }
+
+      // 2) INGRESO A BANCO desde sobre
+      const dep = Num.parse(depositoBanco);
+      if (dep > 0) {
+        newData.banco.unshift({
+          id: `bank-dep-${Date.now()}`,
+          date: fechaSeleccionada, desc: "Ingreso sobre a banco",
+          amount: dep, status: "pending"
+        });
+      }
+
+      // 3) CIERRES Y FACTURAS Z 
+      const cierreRestId = `ZR-${fechaSeleccionada.replace(/-/g, '')}`;
+      const cierreRest: Cierre = {
+        id: cierreRestId, date: fechaSeleccionada, totalVenta: Num.round2(totalRestaurante),
+        efectivo: Num.parse(form.efectivo), tarjeta: Num.parse(form.tarjeta),
+        apps: (Num.parse(form.glovo) + Num.parse(form.uber) + Num.parse(form.madisa) + Num.parse(form.deliveroo)),
+        descuadre: descuadreFinal, notas: form.notas, conciliado_banco: false, unitId: 'REST'
+      };
+      upsertFactura(newData.cierres, cierreRest, 'id');
+
+      const fIdxRest = newData.facturas.findIndex((f: any) => f.num === cierreRestId);
+      const baseR = Num.round2(totalRestaurante / 1.10);
+      const taxR  = Num.round2(totalRestaurante - baseR);
+      upsertFactura(newData.facturas, {
+        id: fIdxRest >= 0 ? newData.facturas[fIdxRest].id : `f-zr-${Date.now()}`,
+        num: cierreRestId, date: fechaSeleccionada, prov: "Z DIARIO", cliente: "Z DIARIO",
+        total: Num.round2(totalRestaurante), base: baseR, tax: taxR,
+        paid: fIdxRest >= 0 ? newData.facturas[fIdxRest].paid : false,
+        reconciled: fIdxRest >= 0 ? newData.facturas[fIdxRest].reconciled : false,
+        unidad_negocio: 'REST'
+      }, 'num');
+
+      if (totalTienda > 0) {
+        const cierreShopId = `ZS-${fechaSeleccionada.replace(/-/g, '')}`;
+        const cierreShop: Cierre = {
+          id: cierreShopId, date: fechaSeleccionada, totalVenta: Num.round2(totalTienda),
+          efectivo: 0, tarjeta: 0, apps: 0, descuadre: 0, notas: 'Venta separada de la caja general',
+          conciliado_banco: false, unitId: 'SHOP'
+        };
+        upsertFactura(newData.cierres, cierreShop, 'id');
+
+        const fIdxShop = newData.facturas.findIndex((f: any) => f.num === cierreShopId);
+        const baseS = Num.round2(totalTienda / 1.21);
+        const taxS  = Num.round2(totalTienda - baseS);
+        upsertFactura(newData.facturas, {
+          id: fIdxShop >= 0 ? newData.facturas[fIdxShop].id : `f-zs-${Date.now()}`,
+          num: cierreShopId, date: fechaSeleccionada, prov: "Z DIARIO", cliente: "Z DIARIO",
+          total: Num.round2(totalTienda), base: baseS, tax: taxS,
+          paid: fIdxShop >= 0 ? newData.facturas[fIdxShop].paid : false,
+          reconciled: fIdxShop >= 0 ? newData.facturas[fIdxShop].reconciled : false,
+          unidad_negocio: 'SHOP'
+        }, 'num');
+      }
+
+      // 🚀 GUARDADO SEGURO
       await onSave(newData);
+
+      // RESET GLOBAL TRAS GUARDAR CON ÉXITO
+      setForm({ date: new Date().toLocaleDateString('sv-SE'), efectivo: '', tarjeta: '', glovo: '', uber: '', madisa: '', deliveroo: '', cajaFisica: '', tienda: '', notas: '' });
+      setImages({ img1: null, img2: null });
+      setGastosCaja([]);
+      setDepositoBanco('');
+      if (images.img1) URL.revokeObjectURL(images.img1);
+      if (images.img2) URL.revokeObjectURL(images.img2);
+      
+      alert("✅ ¡Cierre de caja guardado correctamente!");
+
     } catch (e: any) {
       console.error('Guardar cierre falló:', e);
-      return alert('No se pudo guardar. Revisa la consola.');
+      alert('❌ Hubo un error al guardar los datos.');
+    } finally {
+      setIsSaving(false);
     }
-
-    if (Math.abs(descuadreFinal) > 5) {
-      await NotificationService.notifyCajaDescuadre(newData, fechaSeleccionada, descuadreFinal);
-    }
-
-    const msg = `💰 *CIERRE CAJA: ${fechaSeleccionada}*\n\n` +
-      `📈 *TOTAL:* ${totalCalculado.toFixed(2)}€\n` +
-      `   ├ 🏢 Rest: ${totalRestaurante.toFixed(2)}€\n` +
-      `   └ 🍶 Tienda: ${totalTienda.toFixed(2)}€\n\n` +
-      `💵 Efec: ${Num.parse(form.efectivo).toFixed(2)}€ | 💳 Tarj: ${Num.parse(form.tarjeta).toFixed(2)}€\n` +
-      `⚖️ *Descuadre:* ${descuadreFinal > 0 ? '+' : ''}${descuadreFinal.toFixed(2)}€`;
-
-    await NotificationService.sendAlert(newData, msg, 'INFO');
-
-    // RESET GLOBAL
-    setForm({ date: new Date().toLocaleDateString('sv-SE'), efectivo: '', tarjeta: '', glovo: '', uber: '', madisa: '', deliveroo: '', cajaFisica: '', tienda: '', notas: '' });
-    setImages({ img1: null, img2: null });
-    setGastosCaja([]);
-    setDepositoBanco('');
-    if (images.img1) URL.revokeObjectURL(images.img1);
-    if (images.img2) URL.revokeObjectURL(images.img2);
   };
 
   const handleDeleteCierre = async (id: string) => {
@@ -491,16 +502,16 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
             <h3 className="text-xl font-black text-slate-800">Nuevo Cierre Z</h3>
           </div>
           <div className="flex gap-2">
-            <button onClick={toggleRecording} disabled={scanStatus === 'loading'} className={cn("px-6 py-2 rounded-xl text-[10px] font-black transition shadow-lg flex items-center gap-2", isRecording ? "bg-rose-500 text-white" : "bg-slate-900 text-white hover:bg-slate-800")}>
+            <button onClick={toggleRecording} disabled={scanStatus === 'loading' || isSaving} className={cn("px-6 py-2 rounded-xl text-[10px] font-black transition shadow-lg flex items-center gap-2", isRecording ? "bg-rose-500 text-white" : "bg-slate-900 text-white hover:bg-slate-800", (scanStatus === 'loading' || isSaving) && "opacity-50 cursor-not-allowed")}>
               <Mic className="w-3 h-3" /> <span>DICTAR VOZ</span>
             </button>
           </div>
         </div>
 
-        {/* Cajas de Imágenes (Con URL.createObjectURL para no colgar RAM) */}
+        {/* Cajas de Imágenes */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
           <div className="relative group">
-            <label className={cn("flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-[2rem] cursor-pointer transition-all overflow-hidden", images.img1 ? "border-emerald-200 bg-emerald-50/30" : "border-slate-200 bg-slate-50 hover:bg-slate-100")}>
+            <label className={cn("flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-[2rem] cursor-pointer transition-all overflow-hidden", images.img1 ? "border-emerald-200 bg-emerald-50/30" : "border-slate-200 bg-slate-50 hover:bg-slate-100", (scanStatus === 'loading' || isSaving) && "pointer-events-none")}>
               {images.img1 ? (
                 <div className="relative w-full h-full p-2">
                   <img src={images.img1} className="w-full h-full object-cover rounded-2xl" alt="Ticket Principal" />
@@ -546,7 +557,6 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
             <div>
               <input type="number" placeholder="Dinero Físico en Cajón" value={form.cajaFisica} onChange={(e) => setForm({...form, cajaFisica: e.target.value})} className={cn("w-full p-4 rounded-2xl text-2xl font-black outline-none transition-colors", descuadreVivo !== null && Math.abs(descuadreVivo) > 2 ? "bg-rose-900 text-white shadow-[0_0_15px_rgba(225,29,72,0.3)] ring-2 ring-rose-500" : "bg-slate-900 text-emerald-400")} />
               
-              {/* 🚀 NUEVO: CONTROL DEL FONDO Y BANCO SEPARADO */}
               <div className="grid grid-cols-2 gap-2 mt-3">
                 <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
                   <label className="text-[8px] font-black text-slate-500 uppercase block mb-1">Fondo Fijo Sobre</label>
@@ -573,7 +583,6 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
           </div>
         </div>
 
-        {/* 🚀 NUEVO: GASTOS DE CAJA MÚLTIPLES */}
         <div className="mt-8 p-6 border border-amber-100 bg-amber-50/50 rounded-[2rem]">
           <div className="flex items-center gap-2 mb-4">
             <Banknote className="w-4 h-4 text-amber-500" />
@@ -583,7 +592,9 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         </div>
 
         <div className="mt-6 border-t border-slate-100 pt-6">
-          <button onClick={handleSaveCierre} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-sm shadow-2xl hover:bg-indigo-600 transition-all active:scale-95 flex justify-center items-center gap-2">GUARDAR CIERRE DIARIO</button>
+          <button onClick={handleSaveCierre} disabled={isSaving || scanStatus === 'loading'} className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-sm shadow-2xl hover:bg-indigo-600 transition-all flex justify-center items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+            {isSaving ? "GUARDANDO..." : "GUARDAR CIERRE DIARIO"}
+          </button>
         </div>
       </div>
 
