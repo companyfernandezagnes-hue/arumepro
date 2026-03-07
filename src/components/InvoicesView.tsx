@@ -20,7 +20,10 @@ import {
   RefreshCw,
   Download,
   Bell,
-  CheckSquare
+  CheckSquare,
+  Hotel,
+  ShoppingBag,
+  Layers
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
@@ -29,6 +32,16 @@ import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
 import { proxyFetch } from '../services/api';
 import { NotificationService } from '../services/notifications';
+
+// 🚀 TIPOS B2B
+export type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
+
+const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string; bg: string }[] = [
+  { id: 'REST', name: 'Restaurante', icon: Building2, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+  { id: 'DLV', name: 'Catering Hoteles', icon: Hotel, color: 'text-amber-600', bg: 'bg-amber-50' },
+  { id: 'SHOP', name: 'Tienda Sake', icon: ShoppingBag, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+  { id: 'CORP', name: 'Socios / Corp', icon: Users, color: 'text-slate-600', bg: 'bg-slate-100' },
+];
 
 interface InvoicesViewProps {
   data: AppData;
@@ -43,14 +56,20 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [year, setYear] = useState(new Date().getFullYear());
   const [searchQ, setSearchQ] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'paid' | 'reconciled'>('all');
+  const [selectedUnit, setSelectedUnit] = useState<BusinessUnit | 'ALL'>('ALL'); // 🚀 NUEVO: Filtro B2B
   const [isSyncing, setIsSyncing] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportQuarter, setExportQuarter] = useState(Math.floor(new Date().getMonth() / 3) + 1);
   
   // Modal State
-  const [selectedGroup, setSelectedGroup] = useState<{ label: string; ids: string[] } | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<{ label: string; ids: string[], unitId: BusinessUnit } | null>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<Factura | null>(null);
-  const [modalForm, setModalForm] = useState({ num: '', date: new Date().toISOString().split('T')[0], selectedAlbs: [] as string[] });
+  const [modalForm, setModalForm] = useState({ 
+    num: '', 
+    date: new Date().toISOString().split('T')[0], 
+    selectedAlbs: [] as string[],
+    unitId: 'REST' as BusinessUnit // Por defecto
+  });
 
   const norm = (s: string) => s ? s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim() : '';
 
@@ -99,6 +118,8 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     
     if (draftIdx === -1 || !audit) return;
 
+    let unitToAssign: BusinessUnit = 'REST'; // Unidad por defecto
+
     if (audit.candidatos.length > 0) {
       const idsVincular = audit.candidatos.map(a => a.id);
       newData.albaranes = newData.albaranes.map(a => 
@@ -106,10 +127,14 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       );
       newData.facturas[draftIdx].albaranIdsArr = idsVincular;
       newData.facturas[draftIdx].albaranIds = idsVincular.join(',');
+      
+      // La factura hereda la unidad de negocio del primer albarán
+      unitToAssign = (audit.candidatos[0] as any).unitId || 'REST';
     }
 
     newData.facturas[draftIdx].status = 'approved';
     newData.facturas[draftIdx].source = 'email-ia';
+    newData.facturas[draftIdx].unidad_negocio = unitToAssign; 
     await onSave(newData);
   };
 
@@ -128,15 +153,16 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     
     const filtered = (data.facturas || []).filter(f => {
       if (f.status === 'draft') return false;
+      if (selectedUnit !== 'ALL' && f.unidad_negocio !== selectedUnit) return false;
       const [fYear, fMonth] = f.date.split('-').map(Number);
       return fYear === y && fMonth >= startMonth && fMonth <= endMonth;
     });
 
-    if (filtered.length === 0) return alert("No hay facturas en este periodo.");
+    if (filtered.length === 0) return alert("No hay facturas en este periodo para la unidad seleccionada.");
 
     const rows = filtered.map(f => {
       const total = Math.abs(Num.parse(f.total));
-      const taxRate = 0.10; // Asumimos 10% por defecto si no hay tax
+      const taxRate = 0.10; 
       const base = Num.parse(f.base) || (total / (1 + taxRate));
       const tax = Num.parse(f.tax) || (total - base);
       
@@ -144,6 +170,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         'FECHA': f.date,
         'Nº FACTURA': f.num,
         'PROVEEDOR/CLIENTE': f.prov || f.cliente || '—',
+        'UNIDAD NEGOCIO': BUSINESS_UNITS.find(u => u.id === f.unidad_negocio)?.name || 'Restaurante',
         'BASE IMPONIBLE': Num.fmt(base),
         'IVA': Num.fmt(tax),
         'TOTAL': Num.fmt(total),
@@ -155,7 +182,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Facturas");
-    XLSX.writeFile(wb, `Gestoria_Arume_${y}_Q${q}.xlsx`);
+    XLSX.writeFile(wb, `Gestoria_Arume_${y}_Q${q}_${selectedUnit}.xlsx`);
     setIsExportModalOpen(false);
   };
 
@@ -163,6 +190,9 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const pendingGroups = useMemo(() => {
     const albs = (data.albaranes || []).filter(a => {
       if (a.invoiced || !a.date.startsWith(year.toString())) return false;
+      const itemUnit = (a as any).unitId || 'REST';
+      if (selectedUnit !== 'ALL' && itemUnit !== selectedUnit) return false;
+      
       const owner = norm(mode === 'proveedor' ? a.prov : a.socio || 'Arume');
       if (searchQ && !owner.includes(norm(searchQ)) && !norm(a.num || '').includes(norm(searchQ))) return false;
       return true;
@@ -185,28 +215,32 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         return;
       }
 
-      if (!byMonth[mk].groups[ownerKey]) {
-        byMonth[mk].groups[ownerKey] = { label: rawOwner, t: 0, ids: [], count: 0 };
+      // Separamos los grupos también por Unidad de Negocio para no mezclar albaranes de Restaurante y Catering del mismo proveedor
+      const unitId = (a as any).unitId || 'REST';
+      const groupKey = `${ownerKey}_${unitId}`;
+
+      if (!byMonth[mk].groups[groupKey]) {
+        byMonth[mk].groups[groupKey] = { label: rawOwner, unitId: unitId, t: 0, ids: [], count: 0 };
       }
       
-      byMonth[mk].groups[ownerKey].t += (Num.parse(a.total) || 0);
-      byMonth[mk].groups[ownerKey].count += 1;
-      byMonth[mk].groups[ownerKey].ids.push(a.id);
+      byMonth[mk].groups[groupKey].t += (Num.parse(a.total) || 0);
+      byMonth[mk].groups[groupKey].count += 1;
+      byMonth[mk].groups[groupKey].ids.push(a.id);
     });
 
     return Object.entries(byMonth).sort((a, b) => b[0].localeCompare(a[0]));
-  }, [data.albaranes, year, mode, searchQ]);
+  }, [data.albaranes, year, mode, searchQ, selectedUnit]);
 
-  const handleOpenGroup = (label: string, ids: string[]) => {
-    setSelectedGroup({ label, ids });
+  const handleOpenGroup = (label: string, ids: string[], unitId: BusinessUnit) => {
+    setSelectedGroup({ label, ids, unitId });
     setModalForm({
       num: '',
       date: new Date().toISOString().split('T')[0],
-      selectedAlbs: [...ids]
+      selectedAlbs: [...ids],
+      unitId: unitId
     });
   };
 
-  // 🚀 MEJORA 1: Función para seleccionar/deseleccionar todos los albaranes de golpe
   const handleToggleAllAlbs = () => {
     if (!selectedGroup) return;
     if (modalForm.selectedAlbs.length === selectedGroup.ids.length) {
@@ -254,7 +288,8 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       paid: false,
       reconciled: false,
       source: 'manual-group',
-      status: 'approved' 
+      status: 'approved',
+      unidad_negocio: modalForm.unitId 
     });
 
     await onSave(newData);
@@ -266,6 +301,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     return (data.facturas || []).filter(f => {
       if (f.status === 'draft') return false;
       if (!f.date.startsWith(year.toString())) return false;
+      if (selectedUnit !== 'ALL' && f.unidad_negocio !== selectedUnit) return false;
       
       const clienteNorm = norm(f.cliente || '');
       const provNorm = norm(f.prov || '');
@@ -288,7 +324,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       }
       return true;
     }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [data.facturas, year, filterStatus, searchQ]);
+  }, [data.facturas, year, filterStatus, searchQ, selectedUnit, mode]);
 
   const handleTogglePago = async (id: string) => {
     const newData = { ...data };
@@ -355,7 +391,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
               {draftsIA.map(d => (
                 <div key={d.id} className={cn(
                   "bg-slate-800/50 p-5 rounded-3xl border transition-colors",
-                  d.cuadraPerfecto ? 'border-emerald-500/50' : 'border-slate-700/50'
+                  d.cuadraPerfecto ? 'border-emerald-500/50' : 'border-amber-500/50'
                 )}>
                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div className="flex-1">
@@ -365,7 +401,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                       <p className="text-3xl font-black text-white mt-2">{Num.fmt(Math.abs(Num.parse(d.total)))}</p>
                     </div>
 
-                    <div className="flex-1 bg-slate-900 p-4 rounded-2xl w-full border border-slate-700">
+                    <div className="flex-1 bg-slate-900 p-4 rounded-2xl w-full">
                       <div className="flex justify-between items-center mb-2">
                         <span className="text-[10px] text-slate-400 font-bold uppercase">Tus Albaranes ({d.candidatos.length})</span>
                         <span className="text-sm font-black text-white">{Num.fmt(d.sumaAlbaranes)}</span>
@@ -385,36 +421,27 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                     </div>
                   </div>
 
-                  <div className="mt-4 pt-4 border-t border-slate-700 flex flex-wrap gap-4 items-center justify-between">
+                  <div className="mt-4 pt-4 border-t border-slate-700 flex flex-wrap gap-2 items-center justify-between">
                     <div>
                       {d.cuadraPerfecto ? (
-                        <span className="bg-emerald-500/20 text-emerald-400 text-xs font-black px-3 py-1.5 rounded-xl border border-emerald-500/30 flex items-center gap-1">
-                          <CheckCircle2 className="w-4 h-4" /> CUADRA PERFECTO
-                        </span>
+                        <span className="bg-emerald-500/20 text-emerald-400 text-xs font-black px-3 py-1 rounded-lg">✅ CUADRA PERFECTO</span>
                       ) : (
-                        <span className={cn(
-                          "text-xs font-black px-3 py-1.5 rounded-xl border flex items-center gap-1",
-                          d.diferencia > 5 ? "bg-rose-500/20 text-rose-400 border-rose-500/30" : "bg-amber-500/20 text-amber-400 border-amber-500/30"
-                        )}>
-                          <AlertCircle className="w-4 h-4" /> 
-                          DESCUADRE: {Num.fmt(d.diferencia)}
-                        </span>
+                        <span className="bg-amber-500/20 text-amber-400 text-xs font-black px-3 py-1 rounded-lg">⚠️ DESCUADRE: {Num.fmt(d.diferencia)}</span>
                       )}
                     </div>
-                    <div className="flex gap-2 w-full md:w-auto">
+                    <div className="flex gap-2">
                       <button 
                         onClick={() => handleConfirmAuditoriaIA(d.id)}
                         className={cn(
-                          "text-white text-xs px-6 py-3 rounded-xl font-black shadow-lg transition active:scale-95 flex-1 md:flex-none",
+                          "text-white text-xs px-5 py-2.5 rounded-xl font-black shadow-lg transition active:scale-95",
                           d.cuadraPerfecto ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-amber-500 hover:bg-amber-600'
                         )}
                       >
-                        {d.cuadraPerfecto ? 'VINCULAR Y CERRAR' : 'CERRAR IGNORANDO DESCUADRE'}
+                        {d.cuadraPerfecto ? 'VINCULAR Y CERRAR MES' : 'CERRAR IGNORANDO DIFERENCIA'}
                       </button>
                       <button 
                         onClick={() => handleDiscardDraftIA(d.id)}
-                        className="bg-slate-700 hover:bg-rose-500 text-white text-xs p-3 rounded-xl font-black transition"
-                        title="Descartar factura IA"
+                        className="bg-slate-700 hover:bg-rose-500 text-white text-xs p-2.5 rounded-xl font-black transition"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -430,11 +457,35 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       {/* Main Section */}
       <section className="p-6 bg-white rounded-[2.5rem] shadow-sm border border-slate-100">
         <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-6">
-          <div>
-            <h2 className="text-xl font-black text-slate-800 mb-1">Cierre de Facturas</h2>
-            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Control total y conciliación bancaria</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setSelectedUnit('ALL')}
+              className={cn(
+                "px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all border",
+                selectedUnit === 'ALL' ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50"
+              )}
+            >
+              <Layers className="w-3 h-3 inline-block mr-1" />
+              Ver Todos
+            </button>
+            {BUSINESS_UNITS.map(unit => (
+              <button
+                key={unit.id}
+                onClick={() => setSelectedUnit(unit.id)}
+                className={cn(
+                  "px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all border flex items-center gap-2",
+                  selectedUnit === unit.id 
+                    ? "bg-indigo-600 text-white border-indigo-600" 
+                    : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50"
+                )}
+              >
+                <unit.icon className="w-3 h-3" />
+                {unit.name}
+              </button>
+            ))}
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          
+          <div className="flex items-center gap-3">
             <button 
               onClick={() => setIsExportModalOpen(true)}
               className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-black hover:bg-emerald-700 transition flex items-center gap-2 shadow-sm"
@@ -447,7 +498,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
               disabled={isSyncing}
               className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-black hover:shadow-lg hover:scale-105 transition flex items-center gap-2 disabled:opacity-50"
             >
-              {isSyncing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+              {isSyncing ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Zap className="w-4 h-4" />}
               <span className="hidden md:inline">LEER EMAILS</span>
             </button>
             <button 
@@ -535,9 +586,9 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                 key={chip.id}
                 onClick={() => setFilterStatus(chip.id as any)}
                 className={cn(
-                  "px-4 py-1.5 rounded-full text-[10px] font-black border transition-all uppercase tracking-wider",
+                  "px-3 py-1 rounded-full text-[10px] font-bold border transition-all",
                   filterStatus === chip.id 
-                    ? "bg-slate-900 text-white border-slate-900" 
+                    ? "bg-indigo-600 text-white border-indigo-600" 
                     : cn("bg-white border-slate-200 hover:bg-slate-50", chip.color)
                 )}
               >
@@ -554,89 +605,112 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                 <div key={mk} className="mb-8 animate-fade-in">
                   <h3 className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-3 px-2 border-b border-indigo-100 pb-2">{data.name}</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {Object.values(data.groups).map((g: any) => (
-                      <div 
-                        key={g.label}
-                        onClick={() => handleOpenGroup(g.label, g.ids)}
-                        className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-200 hover:border-indigo-400 hover:shadow-md transition cursor-pointer group"
-                      >
-                        <div>
-                          <p className="font-black text-slate-800 group-hover:text-indigo-600 transition">{g.label}</p>
-                          <span className="inline-block mt-1 px-2 py-0.5 bg-slate-200 text-slate-600 rounded text-[9px] font-bold uppercase">{g.count} Albaranes</span>
+                    {Object.values(data.groups).map((g: any) => {
+                      const unitConfig = BUSINESS_UNITS.find(u => u.id === g.unitId);
+                      return (
+                        <div 
+                          key={g.label + g.unitId}
+                          onClick={() => handleOpenGroup(g.label, g.ids, g.unitId)}
+                          className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-200 hover:border-indigo-400 hover:shadow-md transition cursor-pointer group"
+                        >
+                          <div>
+                            <p className="font-black text-slate-800 group-hover:text-indigo-600 transition flex items-center gap-2">
+                              {g.label}
+                              {unitConfig && (
+                                <span className={cn("text-[8px] px-2 py-0.5 rounded-full uppercase tracking-wider", unitConfig.bg, unitConfig.color)}>
+                                  {unitConfig.name.split(' ')[0]}
+                                </span>
+                              )}
+                            </p>
+                            <span className="inline-block mt-1 px-2 py-0.5 bg-slate-200 text-slate-600 rounded text-[9px] font-bold uppercase">{g.count} Albaranes</span>
+                          </div>
+                          <div className="text-right">
+                            <p className="font-black text-slate-900 text-lg">{Num.fmt(g.t)}</p>
+                            <p className="text-[9px] font-bold text-indigo-400 group-hover:underline mt-1 flex items-center gap-1 justify-end">
+                              CERRAR MANUAL <ArrowRight className="w-2 h-2" />
+                            </p>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <p className="font-black text-slate-900 text-lg">{Num.fmt(g.t)}</p>
-                          <p className="text-[9px] font-bold text-indigo-400 group-hover:underline mt-1 flex items-center gap-1">
-                            CERRAR MANUAL <ArrowRight className="w-2 h-2" />
-                          </p>
-                        </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               ))
             ) : (
               <div className="py-20 flex flex-col items-center justify-center opacity-50">
                 <Package className="w-12 h-12 mb-3 text-slate-300" />
-                <p className="text-slate-500 font-bold text-sm">No hay albaranes sueltos en este año.</p>
+                <p className="text-slate-500 font-bold text-sm">No hay albaranes sueltos.</p>
               </div>
             )
           ) : (
             historyList.length > 0 ? (
               <div className="space-y-3">
-                {historyList.map(f => (
-                  <div key={f.id} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 hover:shadow-md transition">
-                    <div className="flex-1 cursor-pointer" onClick={() => setSelectedInvoice(f)}>
-                      <div className="flex flex-wrap items-center gap-2 mb-1">
-                        <span className="text-[10px] font-black text-slate-500 bg-slate-100 px-2 py-0.5 rounded uppercase">{f.date}</span>
-                        {f.source === 'email-ia' ? (
-                          <span className="text-[9px] font-black text-purple-600 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">🤖 AUDITADA IA</span>
-                        ) : (
-                          <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">📦 CERRADA MANUAL</span>
-                        )}
-                        {f.reconciled ? (
-                          <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
-                            <LinkIcon className="w-2 h-2" /> BANCO OK
-                          </span>
-                        ) : (
-                          <span className="text-[9px] font-black text-rose-500 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">ESPERANDO BANCO</span>
-                        )}
-                      </div>
-                      <p className="font-black text-slate-800 text-base">
-                        {mode === 'socio' ? (f.cliente || f.prov || '—') : (f.prov || f.cliente || '—')}
-                      </p>
-                      <p className="text-xs text-slate-400 font-bold font-mono mt-0.5">Ref: {f.num}</p>
-                    </div>
-                    
-                    <div className="flex items-center justify-between md:justify-end gap-6 md:w-auto w-full border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
-                      <div className="text-left md:text-right">
-                        <p className="font-black text-slate-900 text-xl">{Num.fmt(Math.abs(Num.parse(f.total)))}</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <button 
-                          onClick={() => handleTogglePago(f.id)}
-                          className={cn(
-                            "px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all shadow-sm flex items-center gap-1",
-                            f.paid ? 'bg-emerald-500 text-white hover:bg-emerald-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                {historyList.map(f => {
+                  const unitConfig = BUSINESS_UNITS.find(u => u.id === f.unidad_negocio);
+                  return (
+                    <div key={f.id} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 hover:shadow-md transition">
+                      <div className="flex-1 cursor-pointer" onClick={() => setSelectedInvoice(f)}>
+                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                          <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded uppercase">{f.date}</span>
+                          
+                          {unitConfig && (
+                            <span className={cn(
+                              "text-[9px] font-black px-2 py-0.5 rounded border uppercase",
+                              unitConfig.color, unitConfig.bg, "border-current opacity-70"
+                            )}>
+                              {unitConfig.name.split(' ')[0]}
+                            </span>
                           )}
-                        >
-                          {f.paid ? <><CheckCircle2 className="w-3 h-3"/> CASH OK</> : <><Clock className="w-3 h-3"/> PENDIENTE</>}
-                        </button>
-                        <button 
-                          onClick={() => handleDeleteFactura(f.id)}
-                          className="w-9 h-9 flex items-center justify-center bg-white border border-slate-200 text-slate-400 rounded-xl hover:bg-rose-500 hover:border-rose-500 hover:text-white transition shadow-sm"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+
+                          {f.source === 'email-ia' ? (
+                            <span className="text-[9px] font-black text-purple-600 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">🤖 AUDITADA IA</span>
+                          ) : (
+                            <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">📦 CERRADA MANUAL</span>
+                          )}
+                          {f.reconciled ? (
+                            <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
+                              <LinkIcon className="w-2 h-2" /> BANCO OK
+                            </span>
+                          ) : (
+                            <span className="text-[9px] font-black text-rose-500 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">ESPERANDO BANCO</span>
+                          )}
+                        </div>
+                        <p className="font-black text-slate-800 text-base">
+                          {mode === 'socio' ? (f.cliente || f.prov || '—') : (f.prov || f.cliente || '—')}
+                        </p>
+                        <p className="text-xs text-slate-400 font-bold font-mono mt-0.5">Ref: {f.num}</p>
+                      </div>
+                      
+                      <div className="flex items-center justify-between md:justify-end gap-6 md:w-auto w-full border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
+                        <div className="text-left md:text-right">
+                          <p className="font-black text-slate-900 text-xl">{Num.fmt(Math.abs(Num.parse(f.total)))}</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => handleTogglePago(f.id)}
+                            className={cn(
+                              "px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all shadow-sm flex items-center gap-1",
+                              f.paid ? 'bg-emerald-500 text-white hover:bg-emerald-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                            )}
+                          >
+                            {f.paid ? <><CheckCircle2 className="w-3 h-3"/> CASH OK</> : <><Clock className="w-3 h-3"/> PENDIENTE</>}
+                          </button>
+                          <button 
+                            onClick={() => handleDeleteFactura(f.id)}
+                            className="w-9 h-9 flex items-center justify-center bg-white border border-slate-200 text-slate-400 rounded-xl hover:bg-rose-500 hover:border-rose-500 hover:text-white transition shadow-sm"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="py-20 flex flex-col items-center justify-center opacity-50">
                 <FileText className="w-12 h-12 mb-3 text-slate-300" />
-                <p className="text-slate-500 font-bold text-sm">No hay facturas cerradas con estos filtros.</p>
+                <p className="text-slate-500 font-bold text-sm">No hay facturas cerradas.</p>
               </div>
             )
           )}
@@ -648,16 +722,12 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         {isExportModalOpen && (
           <div className="fixed inset-0 z-[100] flex justify-center items-center p-4">
             <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setIsExportModalOpen(false)}
               className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm"
             />
             <motion.div 
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}
               className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl relative z-10"
             >
               <h3 className="text-xl font-black text-slate-800 mb-2">Exportar Trimestre</h3>
@@ -667,9 +737,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                 <div>
                   <label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Año Fiscal</label>
                   <input 
-                    type="number" 
-                    value={year}
-                    onChange={(e) => setYear(Number(e.target.value))}
+                    type="number" value={year} onChange={(e) => setYear(Number(e.target.value))}
                     className="w-full p-4 bg-slate-50 rounded-2xl text-sm font-black border-0 outline-none"
                   />
                 </div>
@@ -678,8 +746,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                   <div className="grid grid-cols-4 gap-2">
                     {[1, 2, 3, 4].map(q => (
                       <button
-                        key={q}
-                        onClick={() => setExportQuarter(q)}
+                        key={q} onClick={() => setExportQuarter(q)}
                         className={cn(
                           "py-3 rounded-xl text-xs font-black transition",
                           exportQuarter === q ? "bg-indigo-600 text-white shadow-lg" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
@@ -692,16 +759,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                 </div>
                 
                 <div className="pt-4">
-                  <button 
-                    onClick={handleExportGestoria}
-                    className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-black text-sm shadow-xl hover:bg-emerald-700 active:scale-95 transition flex justify-center items-center gap-2"
-                  >
+                  <button onClick={handleExportGestoria} className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-black text-sm shadow-xl hover:bg-emerald-700 active:scale-95 transition flex justify-center items-center gap-2">
                     <Download className="w-4 h-4" /> DESCARGAR EXCEL
                   </button>
-                  <button 
-                    onClick={() => setIsExportModalOpen(false)}
-                    className="w-full text-slate-400 text-xs font-bold py-3 hover:text-slate-600 mt-2"
-                  >
+                  <button onClick={() => setIsExportModalOpen(false)} className="w-full text-slate-400 text-xs font-bold py-3 hover:text-slate-600 mt-2">
                     Cancelar
                   </button>
                 </div>
@@ -714,16 +775,12 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         {selectedGroup && (
           <div className="fixed inset-0 z-[100] flex justify-center items-center p-4">
             <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setSelectedGroup(null)}
               className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm"
             />
             <motion.div 
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}
               className="bg-white w-full max-w-2xl rounded-[2.5rem] p-8 shadow-2xl relative z-10 flex flex-col max-h-[90vh]"
             >
               <button onClick={() => setSelectedGroup(null)} className="absolute top-6 right-6 text-slate-300 hover:text-slate-500 text-2xl transition">✕</button>
@@ -731,14 +788,15 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
               <div className="border-b border-slate-100 pb-4 mb-4 flex justify-between items-end">
                 <div>
                   <h3 className="text-2xl font-black text-slate-800">{selectedGroup.label}</h3>
-                  <p className="text-xs font-bold text-indigo-500 uppercase tracking-widest mt-1">Cierre de mes manual</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <p className="text-xs font-bold text-indigo-500 uppercase tracking-widest">Cierre de mes manual</p>
+                    <span className="text-[10px] font-black bg-slate-100 text-slate-500 px-2 py-0.5 rounded uppercase">
+                      {BUSINESS_UNITS.find(u => u.id === selectedGroup.unitId)?.name}
+                    </span>
+                  </div>
                 </div>
                 
-                {/* 🚀 MEJORA 1: Botón Seleccionar Todo */}
-                <button 
-                  onClick={handleToggleAllAlbs}
-                  className="flex items-center gap-1 text-[10px] font-black uppercase text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition"
-                >
+                <button onClick={handleToggleAllAlbs} className="flex items-center gap-1 text-[10px] font-black uppercase text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition">
                   <CheckSquare className="w-3 h-3" />
                   {modalForm.selectedAlbs.length === selectedGroup.ids.length ? 'Desmarcar Todos' : 'Marcar Todos'}
                 </button>
@@ -772,7 +830,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
               </div>
               
               <div className="mt-6 space-y-4">
-                {/* 🚀 MEJORA 2: Barra de estado más clara */}
                 <div className="flex items-center justify-between bg-slate-900 p-5 rounded-2xl text-white shadow-lg">
                   <div>
                     <span className="text-xs font-black uppercase tracking-widest text-slate-400 block mb-1">Total a Facturar</span>
@@ -794,10 +851,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                         value={modalForm.num.startsWith('SOCIO-') ? modalForm.num.split('-')[1] : ''}
                         onChange={(e) => {
                           const socio = e.target.value;
-                          setModalForm({ 
-                            ...modalForm, 
-                            num: `LIQ-${socio}-${modalForm.date.replace(/-/g,'')}`,
-                          });
+                          setModalForm({ ...modalForm, num: `LIQ-${socio}-${modalForm.date.replace(/-/g,'')}` });
                           setSelectedGroup(prev => prev ? { ...prev, label: socio } : null);
                         }}
                         className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:border-indigo-500 focus:bg-white transition"
@@ -847,16 +901,12 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         {selectedInvoice && (
           <div className="fixed inset-0 z-[100] flex justify-center items-center p-4">
             <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setSelectedInvoice(null)}
               className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm"
             />
             <motion.div 
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}
               className="bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl relative z-10"
             >
               <button onClick={() => setSelectedInvoice(null)} className="absolute top-6 right-6 text-slate-300 hover:text-slate-500 text-2xl transition">✕</button>
@@ -878,9 +928,20 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                   <span className="text-[10px] font-black text-slate-400 uppercase">Referencia</span>
                   <span className="text-xs font-mono font-bold text-slate-700">{selectedInvoice.num}</span>
                 </div>
-                <div className="flex justify-between items-center">
+                <div className="flex justify-between items-center mb-2">
                   <span className="text-[10px] font-black text-slate-400 uppercase">Fecha Emisión</span>
                   <span className="text-xs font-bold text-slate-700">{selectedInvoice.date}</span>
+                </div>
+                <div className="flex justify-between items-center border-t border-slate-200 pt-2 mt-2">
+                  <span className="text-[10px] font-black text-slate-400 uppercase">Unidad Asignada</span>
+                  <span className={cn(
+                    "text-[9px] font-black px-2 py-0.5 rounded border uppercase",
+                    BUSINESS_UNITS.find(u => u.id === selectedInvoice.unidad_negocio)?.color,
+                    BUSINESS_UNITS.find(u => u.id === selectedInvoice.unidad_negocio)?.bg,
+                    "border-current"
+                  )}>
+                    {BUSINESS_UNITS.find(u => u.id === selectedInvoice.unidad_negocio)?.name || 'Restaurante'}
+                  </span>
                 </div>
               </div>
 
