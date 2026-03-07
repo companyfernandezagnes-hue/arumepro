@@ -4,7 +4,12 @@ import {
   Wallet, 
   ArrowUpRight, 
   AlertCircle, 
-  TrendingUp 
+  TrendingUp,
+  Building2, 
+  Truck, 
+  ShoppingBag, 
+  Users,
+  SplitSquareHorizontal
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -19,6 +24,16 @@ import { ArumeEngine, Num } from '../services/engine';
 import { cn } from '../lib/utils';
 import { AppData } from '../types';
 
+// 🚀 DEFINICIÓN DE UNIDADES DE NEGOCIO (Directo en el archivo para evitar errores de importación)
+type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
+
+const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string; bg: string; hex: string }[] = [
+  { id: 'REST', name: 'Restaurante', icon: Building2, color: 'text-indigo-600', bg: 'bg-indigo-50', hex: '#4f46e5' },
+  { id: 'DLV', name: 'Delivery / Take Away', icon: Truck, color: 'text-amber-600', bg: 'bg-amber-50', hex: '#f59e0b' },
+  { id: 'SHOP', name: 'Tienda & Sakes', icon: ShoppingBag, color: 'text-emerald-600', bg: 'bg-emerald-50', hex: '#10b981' },
+  { id: 'CORP', name: 'Bloque Socios', icon: Users, color: 'text-slate-600', bg: 'bg-slate-100', hex: '#475569' },
+];
+
 export const DashboardView = ({ data }: { data: AppData }) => {
   const currentMonth = new Date().getMonth();
   const currentYear = new Date().getFullYear();
@@ -26,14 +41,63 @@ export const DashboardView = ({ data }: { data: AppData }) => {
   const stats = useMemo(() => ArumeEngine.getProfit(data, currentMonth, currentYear), [data, currentMonth, currentYear]);
   
   const chartData = useMemo(() => {
-    return (data.cierres || []).slice(-7).map(c => ({
+    return (data.cierres || []).slice(-7).map((c: any) => ({
       name: new Date(c.date).toLocaleDateString('es-ES', { weekday: 'short' }),
       venta: Num.parse(c.totalVenta)
     }));
   }, [data.cierres]);
 
+  // 🚀 CÁLCULO SEGURO DEL RENDIMIENTO POR UNIDAD
+  const unitBreakdown = useMemo(() => {
+    // Si tu engine.ts ya devuelve esto, lo usamos. Si no, lo calculamos aquí para que no rompa la app.
+    if ((stats as any).unitBreakdown) return (stats as any).unitBreakdown;
+
+    const breakdown: Record<string, { income: number; expenses: number; profit: number }> = {
+      REST: { income: 0, expenses: 0, profit: 0 },
+      DLV: { income: 0, expenses: 0, profit: 0 },
+      SHOP: { income: 0, expenses: 0, profit: 0 },
+      CORP: { income: 0, expenses: 0, profit: 0 },
+    };
+
+    // Sumar Ingresos
+    (data.cierres || []).forEach((c: any) => {
+      const d = new Date(c.date);
+      if (d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
+        const unit = c.unidad_negocio || 'REST'; // Por defecto todo va al restaurante si no tiene etiqueta
+        if (breakdown[unit]) breakdown[unit].income += Num.parse(c.totalVenta);
+      }
+    });
+
+    // Sumar Gastos
+    (data.albaranes || []).forEach((a: any) => {
+      const d = new Date(a.date);
+      if (d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
+        const unit = a.unidad_negocio || 'REST';
+        if (breakdown[unit]) breakdown[unit].expenses += Num.parse(a.total);
+      }
+    });
+
+    // Calcular Beneficio (Profit)
+    Object.keys(breakdown).forEach(k => {
+      breakdown[k].profit = breakdown[k].income - breakdown[k].expenses;
+    });
+
+    return breakdown;
+  }, [data.cierres, data.albaranes, currentMonth, currentYear, stats]);
+
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in pb-24">
+      {/* 🚀 BANNER MULTI-LOCAL */}
+      <div className="bg-slate-900 p-6 rounded-[2.5rem] flex items-center justify-between shadow-xl text-white overflow-hidden relative">
+        <div className="absolute top-0 right-0 p-4 opacity-10">
+          <SplitSquareHorizontal className="w-32 h-32" />
+        </div>
+        <div className="relative z-10">
+          <h2 className="text-xl font-black tracking-tight">Consolidado del Grupo</h2>
+          <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest mt-1">Viendo métricas de todas las unidades de negocio</p>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Ingresos Mes</p>
@@ -84,7 +148,9 @@ export const DashboardView = ({ data }: { data: AppData }) => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* Desglose de Gastos Clásico */}
         <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
           <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-4">Desglose de Gastos</h3>
           <div className="space-y-4">
@@ -96,12 +162,12 @@ export const DashboardView = ({ data }: { data: AppData }) => {
             ].map(g => (
               <div key={g.label} className="space-y-1">
                 <div className="flex justify-between text-[10px] font-black uppercase">
-                  <span>{g.label}</span>
-                  <span>{Num.fmt(g.val)}</span>
+                  <span className="text-slate-600">{g.label}</span>
+                  <span className="text-slate-900">{Num.fmt(g.val)}</span>
                 </div>
                 <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                   <div 
-                    className={cn("h-full rounded-full", g.color)} 
+                    className={cn("h-full rounded-full transition-all duration-500", g.color)} 
                     style={{ width: `${stats.gastos.total ? (g.val / stats.gastos.total) * 100 : 0}%` }} 
                   />
                 </div>
@@ -110,6 +176,50 @@ export const DashboardView = ({ data }: { data: AppData }) => {
           </div>
         </div>
 
+        {/* 🚀 NUEVO: Rendimiento por Unidad (Multi-Local) */}
+        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-xl relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-amber-500 to-emerald-500"></div>
+          <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6">Rentabilidad por Unidad</h3>
+          <div className="space-y-5">
+            {BUSINESS_UNITS.map(unit => {
+              const uStat = unitBreakdown[unit.id] || { income: 0, expenses: 0, profit: 0 };
+              // Buscamos el mayor ingreso para escalar las barras proporcionalmente
+              const maxIncome = Math.max(...Object.values(unitBreakdown).map(u => u.income), 1);
+              
+              return (
+                <div key={unit.id} className="group">
+                  <div className="flex justify-between items-center mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <div className={cn("p-2 rounded-xl", unit.bg)}>
+                        <unit.icon className={cn("w-3 h-3", unit.color)} />
+                      </div>
+                      <span className="text-[10px] font-black text-slate-700 uppercase">{unit.name}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className={cn("text-sm font-black", uStat.profit >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                        {Num.fmt(uStat.profit)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden flex shadow-inner">
+                    <div 
+                      className="h-full transition-all duration-1000" 
+                      style={{ 
+                        width: `${(uStat.income / maxIncome) * 100}%`, 
+                        backgroundColor: unit.hex 
+                      }} 
+                    />
+                  </div>
+                  <p className="text-[8px] font-bold text-slate-400 mt-1 text-right">
+                    INGRESOS: {Num.fmt(uStat.income)}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Alertas del Sistema */}
         <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
           <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-4">Alertas de Sistema</h3>
           <div className="space-y-3">
@@ -122,17 +232,18 @@ export const DashboardView = ({ data }: { data: AppData }) => {
                 </div>
               </div>
             ))}
-            {data.facturas.filter(f => !f.paid).length > 0 && (
+            {data.facturas.filter((f: any) => !f.paid).length > 0 && (
               <div className="flex items-center gap-3 p-3 bg-amber-50 rounded-2xl border border-amber-100">
                 <Wallet className="w-4 h-4 text-amber-500" />
                 <div className="flex-1">
                   <p className="text-xs font-bold text-amber-900">Facturas Pendientes</p>
-                  <p className="text-[9px] text-amber-400 font-black uppercase">{data.facturas.filter(f => !f.paid).length} facturas por pagar</p>
+                  <p className="text-[9px] text-amber-400 font-black uppercase">{data.facturas.filter((f: any) => !f.paid).length} facturas por pagar</p>
                 </div>
               </div>
             )}
           </div>
         </div>
+
       </div>
     </div>
   );
