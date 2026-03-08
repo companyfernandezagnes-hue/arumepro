@@ -4,7 +4,8 @@ import {
   TrendingUp, TrendingDown, ChevronLeft, ChevronRight, 
   Building2, Hotel, ShoppingBag, Users, Layers, 
   Utensils, Coffee, Briefcase, Calculator, Brain,
-  BarChart3, Landmark, Target, FolderOpen, Download, FileText, CheckCircle2
+  BarChart3, Landmark, Target, FolderOpen, Download, FileText, CheckCircle2,
+  Sparkles, FileSpreadsheet // 🚀 AQUÍ ESTÁN LOS ICONOS QUE FALTABAN
 } from 'lucide-react';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { AppData } from '../types';
@@ -74,7 +75,7 @@ export const ReportsView = ({ data }: { data: AppData }) => {
       : 0.1; // fallback para no dividir por 0
     
     const breakEven = stats.gastos.estructura / margenContribucion;
-    const isProfitable = stats.ingresos.total > breakEven;
+    const isProfitable = stats.ingresos.total >= breakEven;
 
     return { breakEven, isProfitable, margenContribucion };
   }, [stats]);
@@ -92,13 +93,6 @@ export const ReportsView = ({ data }: { data: AppData }) => {
     Ingresos: stats.unitBreakdown[u.id].income,
     Gastos: stats.unitBreakdown[u.id].expenses,
   })).filter(d => d.Ingresos > 0 || d.Gastos > 0);
-
-  const trendData = [
-    { name: 'Sem 1', beneficio: stats.neto * 0.2 },
-    { name: 'Sem 2', beneficio: stats.neto * 0.4 },
-    { name: 'Sem 3', beneficio: stats.neto * 0.7 },
-    { name: 'Sem 4', beneficio: stats.neto },
-  ];
 
   // 🚀 DIRECTOR FINANCIERO IA
   const analyzeWithAI = async () => {
@@ -132,7 +126,7 @@ export const ReportsView = ({ data }: { data: AppData }) => {
       setAiInsight(response.text || "No se pudo generar el análisis.");
     } catch (error) {
       console.error(error);
-      setAiInsight("⚠️ Error de conexión con la IA. Inténtalo de nuevo.");
+      setAiInsight("⚠️ Error de conexión con la IA. Inténtalo de nuevo o comprueba tu cuota.");
     } finally {
       setIsAnalyzing(false);
     }
@@ -141,6 +135,23 @@ export const ReportsView = ({ data }: { data: AppData }) => {
   const simulateExport = (type: string) => {
     setExportHistory([{ date: new Date().toLocaleString(), type }, ...exportHistory]);
     alert(`Generando documento: ${type}... La descarga comenzará en breve.`);
+  };
+
+  // Custom Tooltip para Gráficos
+  const CustomTooltip = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-slate-900 text-white p-3 rounded-xl shadow-xl border border-slate-700 text-xs font-bold">
+          <p className="text-slate-400 mb-1">{payload[0].name || payload[0].payload.name}</p>
+          {payload.map((entry: any, index: number) => (
+            <p key={index} style={{ color: entry.color }}>
+              {entry.name}: {Num.fmt(entry.value)}
+            </p>
+          ))}
+        </div>
+      );
+    }
+    return null;
   };
 
   return (
@@ -186,7 +197,7 @@ export const ReportsView = ({ data }: { data: AppData }) => {
             <div className="text-sm md:text-base font-medium leading-relaxed whitespace-pre-line relative z-10">
               {aiInsight}
             </div>
-            <button onClick={() => setAiInsight(null)} className="absolute top-6 right-6 text-white/50 hover:text-white transition">✕</button>
+            <button onClick={() => setAiInsight(null)} className="absolute top-6 right-6 text-white/50 hover:text-white transition"><X className="w-5 h-5" /></button>
           </motion.div>
         )}
       </AnimatePresence>
@@ -214,24 +225,24 @@ export const ReportsView = ({ data }: { data: AppData }) => {
       
       {/* 📊 TAB 1: RESULTADOS P&L */}
       {activeTab === 'resultados' && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col justify-center">
+            <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col justify-center transition hover:shadow-md">
               <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Ingresos Mes</p>
               <p className="text-5xl font-black text-slate-800">{Num.fmt(stats.ingresos.total)}</p>
             </div>
-            <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col justify-center">
+            <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm flex flex-col justify-center transition hover:shadow-md">
               <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">Gastos Totales</p>
               <p className="text-5xl font-black text-rose-500">{Num.fmt(stats.gastos.total)}</p>
             </div>
-            <div className={cn("p-8 rounded-[3rem] shadow-xl relative overflow-hidden flex flex-col justify-center", stats.neto >= 0 ? "bg-slate-900 text-white" : "bg-rose-600 text-white")}>
+            <div className={cn("p-8 rounded-[3rem] shadow-xl relative overflow-hidden flex flex-col justify-center transition hover:shadow-2xl", stats.neto >= 0 ? "bg-slate-900 text-white" : "bg-rose-600 text-white")}>
               <div className="absolute -right-4 -bottom-4 opacity-10">
                 {stats.neto >= 0 ? <TrendingUp className="w-40 h-40" /> : <TrendingDown className="w-40 h-40" />}
               </div>
               <p className="text-xs font-black opacity-70 uppercase tracking-widest relative z-10 mb-2">Beneficio Neto</p>
               <p className="text-5xl font-black relative z-10">{Num.fmt(stats.neto)}</p>
               <div className="mt-4 relative z-10">
-                <span className="text-xs font-bold px-3 py-1.5 bg-white/20 rounded-xl backdrop-blur-sm">
+                <span className="text-xs font-bold px-3 py-1.5 bg-white/20 rounded-xl backdrop-blur-sm shadow-sm border border-white/10">
                   Margen Comercial: {stats.ingresos.total > 0 ? Num.round2((stats.neto / stats.ingresos.total) * 100) : 0}%
                 </span>
               </div>
@@ -247,7 +258,7 @@ export const ReportsView = ({ data }: { data: AppData }) => {
                     <Pie data={expenseChartData} cx="50%" cy="50%" innerRadius={80} outerRadius={110} paddingAngle={5} dataKey="value">
                       {expenseChartData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
                     </Pie>
-                    <Tooltip formatter={(value: number) => Num.fmt(value)} />
+                    <Tooltip content={<CustomTooltip />} />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
@@ -259,7 +270,7 @@ export const ReportsView = ({ data }: { data: AppData }) => {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={unitChartData}>
                     <XAxis dataKey="name" fontSize={10} tickLine={false} axisLine={false} />
-                    <Tooltip formatter={(value: number) => Num.fmt(value)} cursor={{ fill: 'transparent' }} />
+                    <Tooltip content={<CustomTooltip />} cursor={{ fill: 'transparent' }} />
                     <Bar dataKey="Ingresos" fill="#4f46e5" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="Gastos" fill="#f43f5e" radius={[4, 4, 0, 0]} />
                   </BarChart>
@@ -272,7 +283,7 @@ export const ReportsView = ({ data }: { data: AppData }) => {
 
       {/* 🏛️ TAB 2: CIERRE FISCAL */}
       {activeTab === 'fiscal' && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="space-y-6">
           <div className="bg-gradient-to-br from-slate-900 to-slate-800 p-10 rounded-[3rem] shadow-2xl text-white text-center">
             <p className="text-sm font-black text-slate-400 uppercase tracking-widest mb-2 flex justify-center items-center gap-2">
               <Landmark className="w-5 h-5" /> Previsión Liquidación IVA + IRPF (Mes)
@@ -286,7 +297,7 @@ export const ReportsView = ({ data }: { data: AppData }) => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm">
+            <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm transition hover:border-indigo-200">
               <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
                 <TrendingUp className="w-5 h-5 text-indigo-500" /> IVA Repercutido (Ventas)
               </h3>
@@ -298,7 +309,7 @@ export const ReportsView = ({ data }: { data: AppData }) => {
               </div>
             </div>
 
-            <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm">
+            <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm transition hover:border-emerald-200">
               <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
                 <TrendingDown className="w-5 h-5 text-emerald-500" /> IVA Soportado (Gastos)
               </h3>
@@ -315,7 +326,7 @@ export const ReportsView = ({ data }: { data: AppData }) => {
 
       {/* 🎯 TAB 3: KPIs & BI */}
       {activeTab === 'kpis' && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-slate-900 p-8 rounded-[3rem] shadow-xl text-white">
               <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-8 flex items-center gap-2">
@@ -336,7 +347,7 @@ export const ReportsView = ({ data }: { data: AppData }) => {
                 <p className="text-4xl font-black text-indigo-900">{Num.fmt(biMetrics.breakEven)}</p>
                 <p className="text-[10px] text-indigo-400 font-bold mt-2">Tienes que vender esto para no perder dinero este mes.</p>
               </div>
-              <div className={cn("p-8 rounded-[3rem] border shadow-sm text-center flex flex-col justify-center h-1/2", biMetrics.isProfitable ? "bg-emerald-50 border-emerald-100" : "bg-rose-50 border-rose-100")}>
+              <div className={cn("p-8 rounded-[3rem] border shadow-sm text-center flex flex-col justify-center h-1/2 transition-colors", biMetrics.isProfitable ? "bg-emerald-50 border-emerald-200" : "bg-rose-50 border-rose-200")}>
                 <p className={cn("text-xs font-black uppercase tracking-widest mb-2", biMetrics.isProfitable ? "text-emerald-600" : "text-rose-600")}>Estado Actual</p>
                 <p className={cn("text-3xl font-black", biMetrics.isProfitable ? "text-emerald-900" : "text-rose-900")}>
                   {biMetrics.isProfitable ? "✅ EN BENEFICIOS" : "⚠️ EN PÉRDIDAS"}
@@ -349,26 +360,26 @@ export const ReportsView = ({ data }: { data: AppData }) => {
 
       {/* 📁 TAB 4: CARPETA DOCS */}
       {activeTab === 'carpeta' && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm text-center group hover:border-emerald-200 transition">
-              <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition">
+            <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm text-center group hover:border-emerald-300 transition-all hover:shadow-lg">
+              <div className="w-20 h-20 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform">
                 <FileSpreadsheet className="w-10 h-10" />
               </div>
               <h3 className="text-xl font-black text-slate-800 mb-2">Exportar Contabilidad</h3>
               <p className="text-xs text-slate-500 mb-6">Genera un Excel limpio para tu gestor con todas las facturas y cierres Z cuadrados.</p>
-              <button onClick={() => simulateExport('Excel Contable')} className="bg-emerald-600 text-white px-8 py-3 rounded-2xl font-black text-xs uppercase shadow-lg hover:bg-emerald-700 transition">
+              <button onClick={() => simulateExport('Excel Contable')} className="bg-emerald-600 text-white px-8 py-3 rounded-2xl font-black text-xs uppercase shadow-lg hover:bg-emerald-700 transition-colors">
                 Descargar Excel .xlsx
               </button>
             </div>
 
-            <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm text-center group hover:border-rose-200 transition">
-              <div className="w-20 h-20 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition">
+            <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm text-center group hover:border-rose-300 transition-all hover:shadow-lg">
+              <div className="w-20 h-20 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform">
                 <FileText className="w-10 h-10" />
               </div>
               <h3 className="text-xl font-black text-slate-800 mb-2">Resumen Fiscal PDF</h3>
               <p className="text-xs text-slate-500 mb-6">Documento PDF con la previsión de IVA, bases imponibles y gráficos listos para imprimir.</p>
-              <button onClick={() => simulateExport('PDF Fiscal')} className="bg-rose-600 text-white px-8 py-3 rounded-2xl font-black text-xs uppercase shadow-lg hover:bg-rose-700 transition">
+              <button onClick={() => simulateExport('PDF Fiscal')} className="bg-rose-600 text-white px-8 py-3 rounded-2xl font-black text-xs uppercase shadow-lg hover:bg-rose-700 transition-colors">
                 Descargar Informe .pdf
               </button>
             </div>
@@ -381,7 +392,7 @@ export const ReportsView = ({ data }: { data: AppData }) => {
             {exportHistory.length > 0 ? (
               <div className="space-y-3">
                 {exportHistory.map((ex, i) => (
-                  <div key={i} className="flex justify-between items-center bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                  <div key={i} className="flex justify-between items-center bg-white p-4 rounded-2xl border border-slate-100 shadow-sm hover:shadow transition-shadow">
                     <span className="font-bold text-slate-700 text-sm flex items-center gap-2">
                       <CheckCircle2 className="w-4 h-4 text-emerald-500" /> {ex.type}
                     </span>
@@ -408,7 +419,7 @@ const RatioRow = ({ label, val, target, isWarning = false, isMega = false }: any
   const over = val > target;
   return (
     <div className={cn(
-      "flex items-center justify-between p-4 md:p-5 rounded-3xl border transition-colors",
+      "flex items-center justify-between p-4 md:p-5 rounded-3xl border transition-colors hover:bg-slate-800/80",
       isMega ? "border-indigo-500/30 bg-indigo-500/10" : "border-slate-800 bg-slate-800/50"
     )}>
        <div>
