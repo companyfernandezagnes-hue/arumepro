@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Upload, FileSpreadsheet, CheckCircle2, Database,
-  ArrowRight, FileText, Sparkles, Loader2, Camera, Layers, Receipt, Mic, Square, AlertTriangle
+  ArrowRight, FileText, Sparkles, Loader2, Camera, Layers, Receipt, Mic, Square, AlertTriangle, FileDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
@@ -190,12 +190,15 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     facturaIa?: any;
     albaranIa?: any;
   } | null>(null);
+  
+  // Drag & Drop visual
   const [isDragging, setIsDragging] = useState(false);
 
   // Estados de Voz
   const [recording, setRecording] = useState(false);
   const mediaRecRef = useRef<MediaRecorder|null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const runId = useRef(0);
 
   const generarHash = async (prov: string, num: string, date: string, total: number) => {
     const text = `${prov.toLowerCase().trim()}|${num.toLowerCase().trim()}|${date}|${total.toFixed(2)}`;
@@ -205,15 +208,17 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
   };
 
-  // 🚀 LECTOR UNIVERSAL (PDF/IMG)
+  // 🚀 LECTOR UNIVERSAL (PDF/IMG) + SALVAVIDAS
   const procesarDocumentoIA = async (file: File | Blob, mode: ImportMode) => {
+    const myRunId = ++runId.current;
     const apiKey = sessionStorage.getItem('gemini_api_key') || localStorage.getItem('gemini_api_key');
-    if (!apiKey) return alert("⚠️ Conecta tu IA en la pestaña Configuración primero.");
-
+    
     setIsScanning(true);
     setProcessedData(null);
 
     try {
+      if (!apiKey) throw new Error("NO_API_KEY");
+
       let base64Data = "";
       let mimeType = file.type;
 
@@ -226,22 +231,29 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         base64Data = btoa(new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), ''));
       }
 
+      // PLAN A: GEMINI (El Rayo)
       const prompt = mode === 'ia_factura' ? PROMPT_FACTURA : PROMPT_ALBARAN;
       const datosIA = await callGemini(apiKey, mimeType, base64Data, prompt);
+      if (myRunId !== runId.current) return;
 
       if (mode === 'ia_factura') {
         const prov = datosIA.proveedor || "Desconocido";
         const numF = datosIA.num_factura || `S/N-${Date.now()}`;
         const fecha = normalizeDate(datosIA.fecha);
-        const totalPdf = asNum(datosIA.total);
+        
+        // Parsing robusto
+        const totalPdf = asNum(datosIA.total) || 0;
+        const baseNum = asNum(datosIA.base) || Number((totalPdf / 1.10).toFixed(2));
+        const ivaNum = asNum(datosIA.iva) || Number((totalPdf - baseNum).toFixed(2));
 
         setProcessedData({
           facturaIa: {
             id: `fac-ia-${Date.now()}`,
             hash: await generarHash(prov, numF, fecha, totalPdf),
             proveedor: prov, num_factura: numF, fecha: fecha,
-            base: asNum(datosIA.base), iva: asNum(datosIA.iva), total_pdf: totalPdf,
-            pagada: false, cuadra: false, status: 'pendiente', notas: "IA Scanner"
+            base: baseNum, iva: ivaNum, total_pdf: totalPdf,
+            pagada: false, cuadra: false, status: 'pendiente', notas: "IA Scanner",
+            unidad_negocio: 'REST'
           }
         });
       } else {
@@ -273,14 +285,83 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         });
       }
     } catch (error: any) {
-      console.error("Error AI Scan:", error);
-      alert(`⚠️ Error leyendo documento. Revisa que el ticket esté claro.`);
+      if (myRunId !== runId.current) return;
+      console.warn("⚠️ Gemini falló. Activando Plan B (Salvavidas local)...");
+
+      // 🚀 PLAN B: SALVAVIDAS LOCAL (OCR o PDF.js)
+      try {
+        let extractedText = "";
+        let possibleTotal = 0;
+
+        if (file.type.includes('image')) {
+           const tesseractModule = await import('tesseract.js');
+           const Tesseract = tesseractModule.default || tesseractModule;
+           const { data: { text } } = await Tesseract.recognize(file as File, 'spa');
+           extractedText = text;
+        } else if (file.type === 'application/pdf') {
+           const pdfjsModule = await import('pdfjs-dist');
+           const pdfjsLib = pdfjsModule.default || pdfjsModule;
+           pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+           
+           const arrayBuffer = await file.arrayBuffer();
+           const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+           
+           for (let i = 1; i <= pdfDoc.numPages; i++) {
+             const page = await pdfDoc.getPage(i);
+             const textContent = await page.getTextContent();
+             extractedText += textContent.items.map((item: any) => item.str).join(' ') + '\n';
+           }
+        } 
+        
+        // Mini-Cerebro: Busca números e ignora códigos de barras
+        const matches = extractedText.match(/(\d+([.,]\d{2}))/g);
+        if (matches) {
+            const nums = matches.map(m => parseFloat(m.replace(',', '.')));
+            const validNums = nums.filter(n => n < 50000); 
+            possibleTotal = validNums.length > 0 ? Math.max(...validNums) : 0;
+        }
+
+        const fallbackBase = Number((possibleTotal / 1.10).toFixed(2));
+        const fallbackIva = Number((possibleTotal - fallbackBase).toFixed(2));
+        const today = new Date().toISOString().split('T')[0];
+
+        if (mode === 'ia_factura') {
+          setProcessedData({
+            facturaIa: {
+              id: `fac-fall-${Date.now()}`,
+              hash: `fall-${Date.now()}`,
+              proveedor: file.type.includes('image') ? '📷 OCR Rescate' : '📄 PDF Rescate',
+              num_factura: 'S/N-REVISAR', 
+              fecha: today,
+              base: fallbackBase, iva: fallbackIva, total_pdf: possibleTotal,
+              pagada: false, cuadra: false, status: 'pendiente', notas: "Generado por Rescate Local",
+              unidad_negocio: 'REST'
+            }
+          });
+        } else {
+          setProcessedData({
+            albaranIa: {
+              id: `alb-fall-${Date.now()}`,
+              prov: file.type.includes('image') ? '📷 OCR Rescate' : '📄 PDF Rescate',
+              date: today, num: 'S/N-REVISAR', socio: "Arume",
+              notes: "Generado por Rescate Local. Revisar líneas.",
+              items: [{ q: 1, n: "Gasto recuperado", unit: "ud", t: possibleTotal, rate: 10, base: fallbackBase, tax: fallbackIva, unitPrice: possibleTotal }],
+              total: possibleTotal, base: fallbackBase, taxes: fallbackIva,
+              invoiced: false, paid: false, reconciled: false,
+              status: 'warning', unitId: 'REST',
+            }
+          });
+        }
+        alert("⚠️ Gemini no pudo procesarlo. Se ha extraído un borrador de rescate para que lo edites.");
+      } catch (fallbackErr) {
+        alert(`⚠️ Error crítico: No se pudo leer ni con IA ni con rescate local.`);
+      }
     } finally {
-      setIsScanning(false);
+      if (myRunId === runId.current) setIsScanning(false);
     }
   };
 
-  // 🎙️ MAGIA DE VOZ
+  // 🎙️ MAGIA DE VOZ (Optimizada)
   const startVoiceForAlbaran = async () => {
     if (recording) {
       mediaRecRef.current?.stop();
@@ -397,7 +478,10 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       const fecha = normalizeDate(fila['Fecha'] || fila['FECHA']);
       const producto = fila['Producto'] || fila['Articulo'] || 'Varios';
       const cantidad = Num.parse(fila['Cantidad'] || fila['Uds'] || 1);
-      const total = Num.parse(fila['Total'] || fila['Importe'] || 0);
+      
+      // Manejo robusto de números en Excel (soporta comas y strings raros)
+      const rawTotal = String(fila['Total'] || fila['Importe'] || "0").replace(',', '.').replace(/[^0-9.-]+/g, "");
+      const total = Num.parse(rawTotal);
       
       const ivaCol = fila['IVA'] ?? fila['iva'] ?? fila['Iva'];
       const rate = [4,10,21].includes(Number(ivaCol)) ? Number(ivaCol) as 4|10|21 : (
@@ -415,7 +499,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       });
     });
 
-    // Reconciliamos todos los excel para evitar descuadres de IVA
     const albaranesReconciliados = Object.values(agrupados).map(al => {
       const rec = reconcileAlbaran(al);
       return {
@@ -440,7 +523,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     filas.forEach(fila => {
       const nombreProducto = fila['Producto'] || fila['Articulo'];
       const cantidadVendida = Num.parse(fila['Cantidad'] || fila['Uds']);
-      const totalLinea = Num.parse(fila['Total'] || fila['Importe']);
+      const totalLinea = Num.parse(String(fila['Total'] || fila['Importe']).replace(',','.'));
       if (nombreProducto && cantidadVendida > 0) {
         totalVentaDelDia += totalLinea;
         desglosePlatos.push({ nombre: nombreProducto, cantidad: cantidadVendida, total: totalLinea });
@@ -450,6 +533,29 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       cierre: { id: `cierre-imp-${Date.now()}`, date: DateUtil.today(), totalVenta: totalVentaDelDia, origen: 'Importación TPV', efectivo: 0, tarjeta: 0, apps: 0, notas: "Importado desde TPV", descuadre: 0, unitId: 'REST' },
       ventasMenu: { fecha: DateUtil.today(), platos: desglosePlatos }
     });
+  };
+
+  // Drag & Drop Handlers
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isDragging) setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFileUpload(e as any);
+    }
   };
 
   useEffect(() => {
@@ -490,8 +596,12 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       if (!newData.facturas) newData.facturas = [];
       newData.facturas.push(processedData.facturaIa);
       
-      // Enviar a la automatización de Arume n8n
-      fetch(n8nWebhookURL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(processedData.facturaIa) }).catch(e => console.warn("Error n8n", e));
+      // 🚀 N8N en modo "Fantasma" (No bloquea la UI si falla)
+      fetch(n8nWebhookURL, { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify(processedData.facturaIa) 
+      }).catch(() => { /* Falla en silencio, a la app le da igual */ });
       
       await onSave(newData);
       onNavigate('facturas'); 
@@ -502,18 +612,39 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       await onSave(newData);
       onNavigate('albaranes');
     }
-    alert("¡Datos integrados en el ERP con éxito!");
+    alert("¡Datos guardados con éxito en la base de datos!");
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6 animate-fade-in pb-24">
-      <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-slate-100">
+    <div 
+      className={cn("max-w-3xl mx-auto space-y-6 animate-fade-in pb-24 min-h-[80vh] relative", isDragging && "bg-indigo-50/50 rounded-[3rem]")}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* OVERLAY DRAG & DROP */}
+      <AnimatePresence>
+        {isDragging && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[999] bg-indigo-600/90 backdrop-blur-sm rounded-[3rem] border-4 border-dashed border-white flex flex-col items-center justify-center pointer-events-none"
+          >
+            <FileDown className="w-24 h-24 text-white mb-4 animate-bounce" />
+            <h2 className="text-4xl font-black text-white tracking-tighter">¡Suéltalo aquí!</h2>
+            <p className="text-indigo-200 font-bold mt-2">La IA lo atrapará al vuelo</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-slate-100 relative z-10">
         <header className="text-center mb-8 flex flex-col items-center">
-          <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-[2rem] flex items-center justify-center text-3xl mb-4 transform rotate-3">
+          <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-[2rem] flex items-center justify-center text-3xl mb-4 transform rotate-3 shadow-inner">
             <Upload className="w-8 h-8" />
           </div>
           <h2 className="text-2xl font-black text-slate-800 tracking-tighter">Bandeja de Entrada</h2>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Sube archivos, tickets y facturas (PDF o Imagen)</p>
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Sube archivos, tickets y facturas</p>
           
           {/* BOTÓN MÁGICO DE VOZ */}
           {importMode === 'ia_albaran' && (
@@ -547,13 +678,10 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
           </button>
         </div>
 
-        {/* DROPZONE */}
+        {/* DROPZONE VISUAL */}
         <div 
-          onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-          onDragLeave={() => setIsDragging(false)}
-          onDrop={(e) => { e.preventDefault(); setIsDragging(false); handleFileUpload(e); }}
           className={cn(
-            "border-2 border-dashed rounded-[2.5rem] p-12 text-center transition-all cursor-pointer relative group",
+            "border-2 border-dashed rounded-[2.5rem] p-12 text-center transition-all relative group overflow-hidden",
             isDragging ? "border-indigo-500 bg-indigo-50" : "border-slate-200 hover:border-indigo-300 hover:bg-slate-50",
             (isScanning || recording) && "opacity-50 pointer-events-none"
           )}
@@ -561,16 +689,16 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
           <input 
             type="file" disabled={isScanning || recording} onChange={handleFileUpload}
             accept={importMode.startsWith('ia_') ? ".pdf, image/jpeg, image/png, image/webp" : ".xlsx, .xls, .csv"} 
-            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" 
           />
-          <div className="space-y-4">
+          <div className="space-y-4 relative z-10 pointer-events-none">
             <div className="w-16 h-16 bg-white rounded-[2rem] shadow-sm border border-slate-100 flex items-center justify-center mx-auto group-hover:scale-110 transition-transform">
               {isScanning ? <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /> : 
                importMode.startsWith('ia_') ? <Receipt className="w-8 h-8 text-indigo-500" /> : <FileSpreadsheet className="w-8 h-8 text-slate-400" />}
             </div>
             <div>
               <p className="text-sm font-black text-slate-600">
-                {isScanning ? "El Cerebro IA está procesando..." : "Pulsa aquí, arrastra o pega (Ctrl+V)"}
+                {isScanning ? "El Cerebro IA está procesando..." : "Arrastra un archivo aquí o haz clic"}
               </p>
               <p className="text-[10px] text-slate-400 mt-1 font-bold uppercase tracking-widest">
                 {importMode.startsWith('ia_') ? "Soporta PDFs y Fotografías (JPG, PNG)" : "Formatos: .xlsx, .csv"}
@@ -593,11 +721,17 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
                 </div>
               </div>
 
-              {/* AVISO DE DESCUADRE (La magia de Copilot) */}
+              {/* AVISOS DE DESCUADRE O RESCATE */}
               {importMode === 'ia_albaran' && processedData.albaranIa && processedData.albaranIa.status === 'warning' && (
                 <div className="px-4 py-3 rounded-2xl text-[10px] font-black bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4" />
-                  ⚠️ LA IA DETECTÓ UN DESCUADRE ENTRE LAS LÍNEAS Y EL TOTAL. REVISAR.
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{processedData.albaranIa.notes || "LA IA DETECTÓ UN DESCUADRE ENTRE LAS LÍNEAS Y EL TOTAL."}</span>
+                </div>
+              )}
+              {importMode === 'ia_factura' && processedData.facturaIa && processedData.facturaIa.proveedor.includes('Rescate') && (
+                <div className="px-4 py-3 rounded-2xl text-[10px] font-black bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  SE HA USADO EL SISTEMA LOCAL DE RESCATE. COMPRUEBA QUE EL TOTAL SEA CORRECTO.
                 </div>
               )}
 
