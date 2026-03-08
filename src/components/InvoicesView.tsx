@@ -32,9 +32,9 @@ const REAL_PARTNERS = ['PAU', 'JERONI', 'AGNES', 'ONLY ONE', 'TIENDA DE SAKES'];
 const superNorm = (s: string) => {
   if (!s) return 'desconocido';
   return s.toLowerCase()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Quita acentos
-    .replace(/\b(s\.?l\.?|s\.?a\.?|s\.?l\.?u\.?|s\.?c\.?p\.?)\b/gi, '') // Quita S.L., S.A., etc.
-    .replace(/[^a-z0-9]/g, '') // Quita TODO lo que no sea letra o número (espacios, guiones, puntos)
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") 
+    .replace(/\b(s\.?l\.?|s\.?a\.?|s\.?l\.?u\.?|s\.?c\.?p\.?)\b/gi, '') 
+    .replace(/[^a-z0-9]/g, '') 
     .trim();
 };
 
@@ -66,11 +66,11 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const draftsIA = useMemo(() => {
     return (data.facturas || []).filter(f => f.status === 'draft').map(draft => {
       const mesDraft = draft.date.substring(0, 7);
-      const provDraftNormalizado = superNorm(draft.prov); // 🚀 Usamos el Súper Normalizador
+      const provDraftNormalizado = superNorm(draft.prov); 
       
       const albaranesCandidatos = (data.albaranes || []).filter(a => 
         !a.invoiced && 
-        superNorm(a.prov) === provDraftNormalizado && // Comparamos ignorando S.L y espacios
+        superNorm(a.prov) === provDraftNormalizado && 
         a.date.startsWith(mesDraft)
       );
 
@@ -101,14 +101,14 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     }
   };
 
-  // 🚀 LECTOR DE PDF / IMÁGENES NATIVO (EL "RAYO")
+  // 🚀 LECTOR DE PDF / IMÁGENES NATIVO (EL "RAYO" + SALVAVIDAS SEGURO)
   const processLocalFile = async (file: File) => {
     const apiKey = sessionStorage.getItem('gemini_api_key') || localStorage.getItem('gemini_api_key');
-    if (!apiKey) return alert("⚠️ Necesitas conectar tu API de IA en Configuración para procesar PDFs locales.");
+    setIsSyncing(true); 
 
-    setIsSyncing(true); // Usamos el spinner del botón
     try {
-      // 1. Convertir PDF o Imagen a Base64
+      if (!apiKey) throw new Error("NO_API_KEY");
+
       const base64Data = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve((reader.result as string).split(',')[1]);
@@ -116,7 +116,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         reader.readAsDataURL(file);
       });
 
-      // 2. Enviar a Gemini (¡Soporta application/pdf nativamente!)
+      // PLAN A: Enviar a Gemini (El Rayo)
       const ai = new GoogleGenAI({ apiKey });
       const prompt = `Analiza esta factura. Devuelve SOLO un JSON estricto con los datos extraídos:
       {
@@ -138,7 +138,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       const cleanText = (response.text || "").replace(/(?:json)?/gi, '').replace(/```/g, '').trim();
       const rawJson = JSON.parse(cleanText);
 
-      // 3. Crear un "Draft" simulado como si viniera de n8n
       const newData = { ...data };
       if (!newData.facturas) newData.facturas = [];
 
@@ -154,15 +153,74 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         reconciled: false,
         source: 'email-ia',
         status: 'draft',
-        unidad_negocio: 'REST' // Por defecto
+        unidad_negocio: 'REST' 
       });
 
       await onSave(newData);
-      alert("✅ Factura procesada. Búscala en los borradores de la IA.");
+      alert("✅ Factura procesada al instante por la IA. Búscala en los borradores.");
 
     } catch (e) {
-      console.error(e);
-      alert("⚠️ Error al leer el documento. ¿Es un PDF o imagen válida?");
+      console.warn("⚠️ Gemini falló. Activando el Plan B de Emergencia...");
+      
+      // 🚀 PLAN B: EL SALVAVIDAS LOCAL SEGURO
+      try {
+        let extractedText = "";
+        let possibleTotal = 0;
+
+        if (file.type.includes('image')) {
+           // 📸 OCR PARA IMÁGENES
+           const tesseractModule = await import('tesseract.js');
+           const Tesseract = tesseractModule.default || tesseractModule;
+           const { data: { text } } = await Tesseract.recognize(file, 'spa');
+           extractedText = text;
+        } else if (file.type === 'application/pdf') {
+           // 📄 LECTOR PARA PDFs NATIVO (Carga segura)
+           // Usamos dynamic import apuntando al CDN oficial para evitar problemas de build con Vite
+           const pdfjsLib = await import('[https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.mjs](https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.mjs)' as any);
+           pdfjsLib.GlobalWorkerOptions.workerSrc = '[https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.mjs](https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.mjs)';
+           
+           const arrayBuffer = await file.arrayBuffer();
+           const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+           
+           for (let i = 1; i <= pdfDoc.numPages; i++) {
+             const page = await pdfDoc.getPage(i);
+             const textContent = await page.getTextContent();
+             extractedText += textContent.items.map((item: any) => item.str).join(' ') + '\n';
+           }
+        } 
+        
+        // 🧠 Mini-cerebro: Busca el número más grande que parezca un precio en el texto
+        const matches = extractedText.match(/(\d+([.,]\d{2}))/g);
+        if (matches) {
+            const nums = matches.map(m => parseFloat(m.replace(',', '.')));
+            possibleTotal = Math.max(...nums);
+        }
+        
+        const newData = { ...data };
+        if (!newData.facturas) newData.facturas = [];
+        
+        newData.facturas.push({
+          id: 'draft-fallback-' + Date.now(),
+          num: 'REVISAR MANUAL',
+          date: new Date().toISOString().split('T')[0],
+          prov: file.type.includes('image') ? '📷 OCR Emergencia' : `📄 PDF Rescatado`,
+          total: String(possibleTotal || 0),
+          base: String(possibleTotal ? (possibleTotal / 1.10).toFixed(2) : 0),
+          tax: String(possibleTotal ? (possibleTotal - (possibleTotal / 1.10)).toFixed(2) : 0),
+          paid: false,
+          reconciled: false,
+          source: 'email-ia',
+          status: 'draft',
+          unidad_negocio: 'REST'
+        });
+
+        await onSave(newData);
+        alert(`⚠️ Los tokens de la IA se agotaron.\nPero el Sistema de Rescate ha leído el archivo y creado un borrador. Por favor, revisa los datos.`);
+
+      } catch (fallbackErr) {
+        console.error(fallbackErr);
+        alert("⚠️ Error crítico: Ni la IA ni el Lector de Emergencia pudieron procesar este archivo.");
+      }
     } finally {
       setIsSyncing(false);
     }
@@ -266,14 +324,12 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       }
 
       const rawOwner = (mode === 'proveedor') ? (a.prov || 'Sin Proveedor') : (a.socio || 'PENDIENTE');
-      // 🚀 Aplicamos el Súper-Normalizador a la llave de agrupación para juntar "Coca cola" y "COCA-COLA S.L."
       const ownerKey = superNorm(rawOwner); 
       
       const unitId = (a as any).unitId || 'REST';
       const groupKey = `${ownerKey}_${unitId}`;
 
       if (!byMonth[mk].groups[groupKey]) {
-        // Guardamos el primer nombre original bonito que encontremos (ej: "Coca-Cola S.L.")
         byMonth[mk].groups[groupKey] = { label: rawOwner, unitId: unitId, t: 0, ids: [], count: 0 };
       }
       
@@ -430,7 +486,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 via-indigo-500 to-emerald-500"></div>
             <h3 className="text-white text-lg font-black flex items-center gap-2 mb-4">
               <Mail className="w-5 h-5 text-purple-400 animate-bounce" /> 
-              Auditoría de Facturas Email 
+              Borradores y Auditoría 
               <span className="bg-purple-600 text-xs px-2 py-0.5 rounded-full">{draftsIA.length}</span>
             </h3>
             
@@ -442,8 +498,15 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                 )}>
                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div className="flex-1">
-                      <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest mb-1">Leído en el PDF</p>
-                      <h4 className="text-white font-black text-xl">{d.prov}</h4>
+                      <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest mb-1">Leído en el Documento</p>
+                      {d.prov.includes('Emergencia') || d.prov.includes('PDF:') ? (
+                        <h4 className="text-amber-400 font-black text-xl flex items-center gap-2">
+                           <AlertCircle className="w-5 h-5" /> {d.prov}
+                        </h4>
+                      ) : (
+                        <h4 className="text-white font-black text-xl">{d.prov}</h4>
+                      )}
+                      
                       <p className="text-slate-400 text-xs font-mono">Ref: {d.num} | Fecha: {d.date}</p>
                       <p className="text-3xl font-black text-white mt-2">{Num.fmt(Math.abs(Num.parse(d.total)))}</p>
                     </div>
@@ -463,7 +526,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                           ))}
                         </div>
                       ) : (
-                        <p className="text-rose-400 text-[10px] font-bold italic py-2">⚠️ No hay albaranes pendientes este mes.</p>
+                        <p className="text-rose-400 text-[10px] font-bold italic py-2">⚠️ No hay albaranes pendientes este mes para este proveedor.</p>
                       )}
                     </div>
                   </div>
@@ -550,9 +613,9 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
               onClick={() => fileInputRef.current?.click()}
               disabled={isSyncing}
               className="bg-indigo-50 border border-indigo-100 text-indigo-600 px-4 py-2 rounded-xl text-[10px] font-black hover:bg-indigo-100 transition flex items-center gap-2"
-              title="Arrastra un PDF aquí o haz clic para subir"
+              title="Abre tu PDF o Foto aquí"
             >
-              <UploadCloud className="w-4 h-4" /> <span className="hidden md:inline">SUBIR PDF O FOTO</span>
+              <UploadCloud className="w-4 h-4" /> <span className="hidden md:inline">SUBIR PDF / FOTO</span>
             </button>
 
             <button 
@@ -561,15 +624,40 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
             >
               <Download className="w-4 h-4" />
             </button>
-
             <button 
               onClick={handleSyncIA}
               disabled={isSyncing}
               className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-4 py-2 rounded-xl text-[10px] font-black hover:shadow-lg hover:scale-105 transition flex items-center gap-2 disabled:opacity-50"
             >
               {isSyncing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-              <span className="hidden md:inline">TRAER DE GMAIL</span>
+              <span className="hidden md:inline">LEER EMAILS</span>
             </button>
+            <button 
+              onClick={notifyOverdue}
+              className="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-xl text-[10px] font-black hover:bg-slate-50 transition flex items-center gap-2 shadow-sm"
+            >
+              <Bell className="w-4 h-4 text-rose-500" />
+            </button>
+            <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-full border border-slate-200">
+              <button 
+                onClick={() => setMode('proveedor')}
+                className={cn(
+                  "px-4 py-1.5 rounded-full text-[10px] font-black uppercase transition-all",
+                  mode === 'proveedor' ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-slate-600"
+                )}
+              >
+                Prov
+              </button>
+              <button 
+                onClick={() => setMode('socio')}
+                className={cn(
+                  "px-4 py-1.5 rounded-full text-[10px] font-black uppercase transition-all",
+                  mode === 'socio' ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-slate-600"
+                )}
+              >
+                Socios
+              </button>
+            </div>
           </div>
         </div>
 
@@ -606,10 +694,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           </div>
           
           <div className="relative w-full md:w-96 flex gap-2">
-            <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200 shrink-0">
-              <button onClick={() => setMode('proveedor')} className={cn("px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all", mode === 'proveedor' ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-slate-600")}>Prov</button>
-              <button onClick={() => setMode('socio')} className={cn("px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all", mode === 'socio' ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-slate-600")}>Socios</button>
-            </div>
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input 
