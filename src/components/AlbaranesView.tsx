@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Truck, Search, Plus, Zap, Download, Trash2, Camera, AlertTriangle,
   CheckCircle2, Clock, FileSpreadsheet, Calculator, Building2, ShoppingBag, 
-  Users, Hotel, Layers, Image as ImageIcon, Mic, Square, Edit3, Save, X, RefreshCw
+  Users, Hotel, Layers, Image as ImageIcon, Mic, Square, Edit3, Save, X, RefreshCw, XCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppData, Albaran } from '../types';
@@ -85,12 +85,6 @@ const extractJSON = (rawText: string) => {
     if (start === -1 || end === -1) return {};
     return JSON.parse(clean.substring(start, end + 1));
   } catch { return {}; }
-};
-
-const cleanMime = (t: string) => {
-  const base = (t || '').split(';')[0].trim().toLowerCase();
-  const ok = ['audio/webm','audio/ogg','audio/mpeg','audio/mp3','audio/wav','audio/mp4'];
-  return ok.includes(base) ? base : 'audio/webm';
 };
 
 const compressImageToBase64 = async (file: File | Blob): Promise<string> => {
@@ -265,14 +259,10 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   // ==========================================
   const startVoiceRecording = async (mode: 'new' | 'edit') => {
     if (recordingMode) {
+      // SOLO PARAMOS EL MICRO, NO RELLENAMOS NADA AQUÍ (Para evitar el Doble Pegado)
       mediaRecRef.current?.stop();
       if (speechRecRef.current) {
         try { speechRecRef.current.stop(); } catch(e){}
-      }
-      
-      const textoHablado = nativeTranscriptRef.current.trim();
-      if (textoHablado && mode === 'new') {
-        setForm(prev => ({ ...prev, text: (prev.text ? prev.text + "\n" : "") + "🎤 " + textoHablado }));
       }
       return;
     }
@@ -379,9 +369,8 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
       if (mode === 'new') {
         setForm(prev => ({
-          ...prev, prov: rec.proveedor, date: rec.fecha, num: rec.num, unitId: rec.unidad || 'REST',
-          // Respetamos lo escrito previamente
-          text: prev.text + "\n" + itemsReconciliados.map(l => `${l.q}x ${l.n} ${l.t}`).join('\n')
+          ...prev, prov: rec.proveedor || prev.prov, date: rec.fecha || prev.date, num: rec.num || prev.num, unitId: rec.unidad || 'REST',
+          text: (prev.text ? prev.text + "\n" : "") + itemsReconciliados.map(l => `${l.q}x ${l.n} ${l.t}`).join('\n')
         }));
       } else if (mode === 'edit' && editForm) {
         setEditForm({
@@ -391,9 +380,26 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         alert("✨ ¡Albarán modificado por voz y recalculado!");
       }
     } catch (e: any) {
-      // Fallback
-      if (mode === 'new') {
-        alert("⚠️ Gemini falló, pero tu texto está guardado en el recuadro.");
+      // 🚀 EL MINI-CEREBRO ENTRANDO EN ACCIÓN (SOLO SI GEMINI FALLA)
+      const fallback = nativeTranscriptRef.current.trim();
+      
+      if (fallback && mode === 'new') {
+        // Traducimos las palabras a números y símbolos para que la app lo entienda
+        let formattedFallback = fallback
+          .replace(/ euros?/gi, '€')
+          .replace(/ con /gi, '.')
+          .replace(/ coma /gi, '.')
+          .replace(/ por ciento/gi, '%')
+          .replace(/ iva /gi, ' ')
+          .replace(/kilos?/gi, 'kg')
+          .replace(/litros?/gi, 'l')
+          .replace(/unidades?/gi, 'ud');
+
+        setForm(prev => ({ 
+          ...prev, 
+          text: (prev.text ? prev.text + "\n" : "") + formattedFallback 
+        }));
+        alert("⚠️ Gemini no pudo procesar los números exactos, pero hemos insertado tu texto traducido en el recuadro para que lo revises.");
       } else {
         alert("⚠️ La IA no entendió el dictado.");
       }
@@ -711,7 +717,15 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
               <button onClick={handleQuickAdd} className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center hover:bg-indigo-200 transition"><Plus className="w-4 h-4" /></button>
             </div>
 
-            <textarea value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="Ej: 5 kg Salmón 150.00" className="w-full h-32 bg-slate-50 rounded-2xl p-4 text-xs font-mono border-0 outline-none resize-none mb-3 shadow-inner focus:bg-white transition" />
+            {/* CAJA DE TEXTO CON BOTÓN LIMPIAR */}
+            <div className="relative group">
+              <textarea value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="Ej: 5 kg Salmón 150.00" className="w-full h-32 bg-slate-50 rounded-2xl p-4 pr-10 text-xs font-mono border-0 outline-none resize-none mb-3 shadow-inner focus:bg-white transition" />
+              {form.text && (
+                <button onClick={() => setForm({...form, text: ''})} className="absolute top-4 right-4 text-slate-300 hover:text-rose-500 transition">
+                  <XCircle className="w-5 h-5" />
+                </button>
+              )}
+            </div>
             
             <div className="mt-3 space-y-1 max-h-52 overflow-y-auto custom-scrollbar px-1 bg-slate-50/50 rounded-xl p-2 min-h-[50px]">
               {analyzedItems.length > 0 ? analyzedItems.map((it, idx) => it && (
@@ -731,7 +745,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white p-2 rounded-full shadow-sm border border-slate-100 flex items-center px-4">
             <Search className="w-4 h-4 text-slate-400 shrink-0" />
-            <input value={searchQ} onChange={(e) => setSearchQ(e.target.value)} type="text" placeholder="Buscar por proveedor..." className="bg-transparent text-sm font-bold outline-none w-full text-slate-600 pl-3" />
+            <input value={searchQ} onChange={(e) => setSearchQ(e.target.value)} type="text" placeholder="Buscar por proveedor o ref..." className="bg-transparent text-sm font-bold outline-none w-full text-slate-600 pl-3" />
           </div>
 
           <div className="space-y-3 pb-20">
@@ -765,7 +779,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         </div>
       </div>
 
-      {/* 🚀 MODAL EDICIÓN Y VOZ (El nuevo centro de mando interactivo) */}
+      {/* 🚀 MODAL EDICIÓN Y VOZ */}
       <AnimatePresence>
         {editingAlbaran && editForm && (
           <div className="fixed inset-0 z-[200] flex justify-center items-center p-4">
