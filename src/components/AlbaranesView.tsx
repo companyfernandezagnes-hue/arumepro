@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Truck, Search, Plus, Zap, Download, Trash2, Camera, AlertTriangle,
   CheckCircle2, Clock, FileSpreadsheet, Calculator, Building2, ShoppingBag, 
-  Users, Hotel, Layers, Image as ImageIcon, Mic, Square, Edit3, Save, X
+  Users, Hotel, Layers, Image as ImageIcon, Mic, Square, Edit3, Save, X, RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppData, Albaran } from '../types';
@@ -164,10 +164,13 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const pasteLock = useRef(false);
   const runId = useRef(0);
 
-  // Estados de Voz
+  // 🎙️ ESTADOS DE VOZ (Texto en Vivo)
   const [recordingMode, setRecordingMode] = useState<'new' | 'edit' | null>(null);
+  const [liveTranscript, setLiveTranscript] = useState(''); 
   const mediaRecRef = useRef<MediaRecorder|null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const nativeTranscriptRef = useRef<string>('');
+  const speechRecRef = useRef<any>(null);
 
   // Formulario Principal
   const [form, setForm] = useState({
@@ -257,36 +260,80 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   }, [isAnalyzing, recordingMode]);
 
 
-  // 🎙️ 2. AUDIO ESTABLE Y LIGERO
+  // ==========================================
+  // 🎙️ 2. GRABACIÓN MEJORADA (TEXTO EN VIVO)
+  // ==========================================
   const startVoiceRecording = async (mode: 'new' | 'edit') => {
     if (recordingMode) {
-      // SI ESTÁ GRABANDO, LO PARAMOS.
       mediaRecRef.current?.stop();
+      if (speechRecRef.current) {
+        try { speechRecRef.current.stop(); } catch(e){}
+      }
+      
+      const textoHablado = nativeTranscriptRef.current.trim();
+      if (textoHablado && mode === 'new') {
+        setForm(prev => ({ ...prev, text: (prev.text ? prev.text + "\n" : "") + "🎤 " + textoHablado }));
+      }
       return;
     }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const supports = (type: string) => MediaRecorder.isTypeSupported(type);
-      const mimePref = supports('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : supports('audio/mp4') ? 'audio/mp4' : 'audio/webm';
+      
+      nativeTranscriptRef.current = '';
+      setLiveTranscript('');
 
-      const mr = new MediaRecorder(stream, { mimeType: mimePref, audioBitsPerSecond: 24_000 });
+      try {
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (SpeechRecognition) {
+          const recognition = new SpeechRecognition();
+          recognition.lang = 'es-ES';
+          recognition.continuous = true;
+          recognition.interimResults = true; 
+          
+          recognition.onresult = (event: any) => {
+            let text = '';
+            for (let i = 0; i < event.results.length; ++i) {
+              text += event.results[i][0].transcript + ' ';
+            }
+            nativeTranscriptRef.current = text;
+            setLiveTranscript(text); 
+          };
+          
+          speechRecRef.current = recognition;
+          recognition.start();
+        }
+      } catch (speechErr) {
+        console.warn("⚠️ El dictado nativo no es compatible con este navegador.");
+      }
+
+      const supports = (type: string) => MediaRecorder.isTypeSupported(type);
+      let mimePref = '';
+      if (supports('audio/webm;codecs=opus')) mimePref = 'audio/webm;codecs=opus';
+      else if (supports('audio/mp4')) mimePref = 'audio/mp4'; 
+      else if (supports('audio/webm')) mimePref = 'audio/webm';
+
+      const options = mimePref ? { mimeType: mimePref, audioBitsPerSecond: 24_000 } : undefined;
+      const mr = new MediaRecorder(stream, options);
+      
       mediaRecRef.current = mr;
       chunksRef.current = [];
 
       mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
       mr.onstop = async () => {
-        const mimeType = mimePref;
-        const audioBlob = new Blob(chunksRef.current, { type: mimeType });
+        const finalMime = mr.mimeType || 'audio/webm';
+        const audioBlob = new Blob(chunksRef.current, { type: finalMime });
         stream.getTracks().forEach(t => t.stop());
         setRecordingMode(null);
-        await processVoice(audioBlob, mimeType, mode);
+        await processVoice(audioBlob, finalMime, mode);
       };
 
       mr.start();
       setRecordingMode(mode);
-      setTimeout(() => { if (mr.state === 'recording') mr.stop(); }, 60000);
-    } catch {
-      alert("No se pudo acceder al micrófono.");
+      setTimeout(() => { if (mr.state === 'recording') mr.stop(); }, 60000); 
+      
+    } catch (err: any) {
+      alert(`⚠️ No podemos acceder al micro. Comprueba el candado de la barra de direcciones de tu navegador.`);
     }
   };
 
@@ -296,7 +343,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
     setIsAnalyzing(true);
     try {
-      const base64 = await new Promise<string>((resolve) => {
+      const base64Audio = await new Promise<string>((resolve) => {
         const fr = new FileReader();
         fr.onload = () => resolve((fr.result as string).split(',')[1]);
         fr.readAsDataURL(audioBlob);
@@ -309,12 +356,19 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         Devuelve SOLO el JSON actualizado manteniendo la estructura original:
         { "proveedor": "string", "fecha": "YYYY-MM-DD", "num": "string", "unidad": "REST"|"SHOP", "lineas": [ {"qty": 1, "name": "string", "unit": "ud", "unit_price": 0, "tax_rate": 4|10|21, "total": 0} ] }`;
 
-      const datosIA = await callGemini(apiKey, cleanM, base64, prompt);
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: base64Audio, mimeType: cleanM } }] }],
+        config: { responseMimeType: "application/json", temperature: 0.1 }
+      });
+
+      const rawJson = extractJSON(response.text || "");
 
       const al: AlbaranIA = {
-        proveedor: datosIA.proveedor || "Desconocido", fecha: normalizeDate(datosIA.fecha),
-        num: datosIA.num || "S/N", unidad: (datosIA.unidad === 'SHOP' ? 'SHOP' : 'REST'),
-        lineas: Array.isArray(datosIA.lineas) ? datosIA.lineas : [], sum_total: asNum(datosIA.sum_total),
+        proveedor: rawJson.proveedor || "Desconocido", fecha: normalizeDate(rawJson.fecha),
+        num: rawJson.num || "S/N", unidad: (rawJson.unidad === 'SHOP' ? 'SHOP' : 'REST'),
+        lineas: Array.isArray(rawJson.lineas) ? rawJson.lineas : [], sum_total: asNum(rawJson.sum_total),
       };
       
       const rec = reconcileAlbaran(al);
@@ -326,7 +380,8 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       if (mode === 'new') {
         setForm(prev => ({
           ...prev, prov: rec.proveedor, date: rec.fecha, num: rec.num, unitId: rec.unidad || 'REST',
-          text: itemsReconciliados.map(l => `${l.q}x ${l.n} ${l.t}`).join('\n')
+          // Respetamos lo escrito previamente
+          text: prev.text + "\n" + itemsReconciliados.map(l => `${l.q}x ${l.n} ${l.t}`).join('\n')
         }));
       } else if (mode === 'edit' && editForm) {
         setEditForm({
@@ -336,7 +391,12 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         alert("✨ ¡Albarán modificado por voz y recalculado!");
       }
     } catch (e: any) {
-      alert("La IA no entendió el dictado.");
+      // Fallback
+      if (mode === 'new') {
+        alert("⚠️ Gemini falló, pero tu texto está guardado en el recuadro.");
+      } else {
+        alert("⚠️ La IA no entendió el dictado.");
+      }
     } finally {
       setIsAnalyzing(false);
     }
@@ -516,16 +576,19 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     <div className={cn("animate-fade-in space-y-6 pb-24", isAnalyzing && "transition-none")}>
       <datalist id="providers-list">{uniqueProviders.map(p => <option key={p} value={p} />)}</datalist>
 
-      {/* OVERLAY DE VOZ NO BLOQUEANTE (Botón gigante arriba) */}
+      {/* OVERLAY DE VOZ NO BLOQUEANTE CON TRANSCRIPCIÓN EN VIVO */}
       {recordingMode && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] bg-rose-600 text-white px-6 py-4 rounded-[2rem] shadow-[0_10px_40px_rgba(225,29,72,0.4)] flex flex-col items-center cursor-pointer animate-pulse border-2 border-rose-400" onClick={() => startVoiceRecording(recordingMode)}>
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 w-11/12 max-w-md z-[9999] bg-slate-900 text-white px-6 py-4 rounded-[2rem] shadow-[0_10px_40px_rgba(225,29,72,0.4)] flex flex-col items-center cursor-pointer border-2 border-indigo-500" onClick={() => startVoiceRecording(recordingMode)}>
           <div className="flex items-center gap-3">
-            <Mic className="w-8 h-8 animate-bounce" />
+            <Mic className="w-8 h-8 text-rose-500 animate-bounce" />
             <div>
-              <p className="font-black text-lg uppercase tracking-widest leading-none">Grabando...</p>
-              <p className="text-xs font-bold opacity-80">Pulsa este botón para detener</p>
+              <p className="font-black text-lg uppercase tracking-widest leading-none">Escuchando...</p>
+              <p className="text-xs font-bold opacity-80 text-rose-300">Pulsa para detener</p>
             </div>
           </div>
+          <p className="mt-3 text-xs text-slate-300 text-center italic line-clamp-3 w-full">
+            {liveTranscript || "Dicta el albarán con claridad..."}
+          </p>
         </div>
       )}
 
