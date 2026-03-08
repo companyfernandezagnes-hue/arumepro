@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
-  FileText, Search, ChevronLeft, ChevronRight, Zap, Users, Building2, Package, CheckCircle2, Clock, Trash2, AlertCircle, Link as LinkIcon, Mail, ArrowRight, X, RefreshCw, Download, Bell, CheckSquare, Hotel, ShoppingBag, Layers, UploadCloud
+  FileText, Search, ChevronLeft, ChevronRight, Zap, Users, Building2, Package, CheckCircle2, Clock, Trash2, AlertCircle, Link as LinkIcon, Mail, ArrowRight, X, RefreshCw, Download, Bell, CheckSquare, Hotel, ShoppingBag, Layers, UploadCloud, FileDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
@@ -50,6 +50,9 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportQuarter, setExportQuarter] = useState(Math.floor(new Date().getMonth() / 3) + 1);
   
+  // DRAG & DROP STATE
+  const [isDragging, setIsDragging] = useState(false);
+
   // Modal State
   const [selectedGroup, setSelectedGroup] = useState<{ label: string; ids: string[], unitId: BusinessUnit } | null>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<Factura | null>(null);
@@ -174,7 +177,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
            const { data: { text } } = await Tesseract.recognize(file, 'spa');
            extractedText = text;
         } else if (file.type === 'application/pdf') {
-           // 📄 LECTOR PARA PDFs NATIVO (Carga blindada para Vite)
+           // 📄 LECTOR PARA PDFs NATIVO (Carga segura Vite)
            const pdfjsModule = await import('pdfjs-dist');
            const pdfjsLib = pdfjsModule.default || pdfjsModule;
            pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
@@ -189,11 +192,12 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
            }
         } 
         
-        // 🧠 Mini-cerebro: Busca el número más grande que parezca un precio en el texto
+        // 🧠 Mini-cerebro: Busca el número más grande que parezca un precio en el texto (evita códigos de barras)
         const matches = extractedText.match(/(\d+([.,]\d{2}))/g);
         if (matches) {
             const nums = matches.map(m => parseFloat(m.replace(',', '.')));
-            possibleTotal = Math.max(...nums);
+            const validNums = nums.filter(n => n < 50000);
+            possibleTotal = validNums.length > 0 ? Math.max(...validNums) : 0;
         }
         
         const newData = { ...data };
@@ -223,6 +227,34 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       }
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  // 🚀 HANDLERS DE ARRASTRAR Y SOLTAR
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isDragging) setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      if (file.type === 'application/pdf' || file.type.startsWith('image/')) {
+        processLocalFile(file);
+      } else {
+        alert("⚠️ Solo se permiten archivos PDF o imágenes.");
+      }
     }
   };
 
@@ -472,7 +504,28 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   };
 
   return (
-    <div className="animate-fade-in space-y-6 pb-24">
+    <div 
+      className={cn("animate-fade-in space-y-6 pb-24 min-h-screen relative", isDragging && "bg-indigo-50/50")}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* OVERLAY DE DRAG & DROP */}
+      <AnimatePresence>
+        {isDragging && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-[999] bg-indigo-600/90 backdrop-blur-sm rounded-[3rem] border-4 border-dashed border-white flex flex-col items-center justify-center pointer-events-none"
+          >
+            <FileDown className="w-24 h-24 text-white mb-4 animate-bounce" />
+            <h2 className="text-4xl font-black text-white tracking-tighter">¡Suelta tu PDF aquí!</h2>
+            <p className="text-indigo-200 font-bold mt-2">La IA lo procesará al instante</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* IA Audit Section */}
       <AnimatePresence>
         {draftsIA.length > 0 && (
@@ -499,6 +552,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div className="flex-1">
                       <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest mb-1">Leído en el Documento</p>
+                      {/* Si es un draft manual de emergencia, le ponemos estilo especial */}
                       {d.prov.includes('Emergencia') || d.prov.includes('PDF:') ? (
                         <h4 className="text-amber-400 font-black text-xl flex items-center gap-2">
                            <AlertCircle className="w-5 h-5" /> {d.prov}
@@ -565,7 +619,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       </AnimatePresence>
 
       {/* Main Section */}
-      <section className="p-6 bg-white rounded-[2.5rem] shadow-sm border border-slate-100">
+      <section className="p-6 bg-white rounded-[2.5rem] shadow-sm border border-slate-100 relative z-10">
         <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-6">
           <div className="flex flex-wrap gap-2">
             <button
@@ -596,6 +650,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           </div>
           
           <div className="flex items-center gap-2">
+            {/* 🚀 BOTÓN NUEVO: SUBIR PDF / IMAGEN LOCAL */}
             <input 
               type="file" 
               ref={fileInputRef} 
