@@ -174,10 +174,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
            const { data: { text } } = await Tesseract.recognize(file, 'spa');
            extractedText = text;
         } else if (file.type === 'application/pdf') {
-           // 📄 LECTOR PARA PDFs NATIVO (Carga segura)
-           // Usamos dynamic import apuntando al CDN oficial para evitar problemas de build con Vite
-           const pdfjsLib = await import('[https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.mjs](https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.mjs)' as any);
-           pdfjsLib.GlobalWorkerOptions.workerSrc = '[https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.mjs](https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.mjs)';
+           // 📄 LECTOR PARA PDFs NATIVO (Carga blindada para Vite)
+           const pdfjsModule = await import('pdfjs-dist');
+           const pdfjsLib = pdfjsModule.default || pdfjsModule;
+           pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
            
            const arrayBuffer = await file.arrayBuffer();
            const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -596,7 +596,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           </div>
           
           <div className="flex items-center gap-2">
-            {/* 🚀 BOTÓN NUEVO: SUBIR PDF / IMAGEN LOCAL */}
             <input 
               type="file" 
               ref={fileInputRef} 
