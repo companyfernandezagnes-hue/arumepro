@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
-  Truck, Search, Plus, Zap, Download, Trash2, Camera, AlertTriangle,
-  CheckCircle2, Clock, FileSpreadsheet, Calculator, Building2, ShoppingBag, 
+  Truck, Search, Plus, Download, Trash2, Camera, AlertTriangle,
+  CheckCircle2, Clock, Building2, ShoppingBag, 
   Users, Hotel, Layers, Image as ImageIcon, Mic, Square, Edit3, Save, X, RefreshCw, XCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import * as XLSX from 'xlsx';
 import { AppData, Albaran } from '../types';
 import { Num, ArumeEngine } from '../services/engine';
 import { cn } from '../lib/utils';
@@ -181,23 +182,30 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const [editForm, setEditForm] = useState<Albaran | null>(null);
 
   const uniqueProviders = useMemo(() => Array.from(new Set((data.albaranes || []).map(a => a.prov).filter(Boolean))).sort(), [data.albaranes]);
+  
   const priceIndex = useMemo(() => {
     const m = new Map<string, number>();
-    (data.albaranes || []).forEach(a => { (a.items || []).forEach(it => { m.set(norm(it.n), it.unitPrice ?? (it.q ? Num.round2(it.t / it.q) : it.t)); }); });
+    (data.albaranes || []).forEach(a => { 
+      (a.items || []).forEach(it => { 
+        m.set(norm(it.n), it.unitPrice ?? (it.q ? Num.round2(it.t / it.q) : it.t)); 
+      }); 
+    });
     return m;
   }, [data.albaranes]);
 
-  // 🚀 1. LECTOR IMAGEN IA
+  // 🚀 1. LECTOR IMAGEN IA + PLAN B (TESSERACT OCR)
   const processImageWithAI = async (file: File | Blob) => {
     const myRunId = ++runId.current;
     const apiKey = sessionStorage.getItem('gemini_api_key') || localStorage.getItem('gemini_api_key');
-    if (!apiKey) return alert("⚠️ Conecta tu IA primero en Configuración.");
-
+    
     setIsAnalyzing(true); setPriceAlerts([]);
     
     try {
       const objUrl = objectUrlFromFile(file);
       setScannedImage(objUrl);
+
+      // Si no hay API Key, forzamos el error para que salte al OCR gratuito (Plan B)
+      if (!apiKey) throw new Error("NO_API_KEY");
 
       const base64Data = await compressImageToBase64(file);
       const datosIA = await callGemini(apiKey, "image/jpeg", base64Data, PROMPT_ALBARAN);
@@ -221,11 +229,30 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       
       setForm(prev => ({
         ...prev, prov: rec.proveedor, date: rec.fecha, num: rec.num, unitId: rec.unidad || 'REST',
-        text: rec.lineas.map(l => `${l.qty}x ${l.name} ${l.total}`).join('\n') 
+        text: (prev.text ? prev.text + "\n" : "") + rec.lineas.map(l => `${l.qty}x ${l.name} ${l.total}`).join('\n') 
       }));
 
     } catch (err: any) {
-      if (myRunId === runId.current) { alert(`⚠️ Problema: ${err.message}`); setScannedImage(null); }
+      if (myRunId !== runId.current) return;
+
+      console.warn("⚠️ Gemini falló o no está configurado. Saltando al Plan B (Tesseract OCR)...");
+      
+      try {
+        // 🚀 PLAN B: OCR LOCAL CON TESSERACT.JS
+        const tesseractModule = await import('tesseract.js');
+        const Tesseract = tesseractModule.default || tesseractModule;
+        
+        const { data: { text } } = await Tesseract.recognize(file, 'spa');
+        
+        setForm(prev => ({
+          ...prev, 
+          text: (prev.text ? prev.text + "\n\n" : "") + "--- TEXTO RECUPERADO (OCR LOCAL) ---\n" + text 
+        }));
+        
+        alert("⚠️ Gemini no está disponible o falló. El OCR local gratuito ha rescatado el texto del ticket. Revísalo en la caja de texto.");
+      } catch (ocrErr) {
+        alert(`⚠️ Problema crítico: No hemos podido leer la imagen ni con IA ni con el OCR local.`);
+      }
     } finally {
       if (myRunId === runId.current) setIsAnalyzing(false);
     }
@@ -259,7 +286,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   // ==========================================
   const startVoiceRecording = async (mode: 'new' | 'edit') => {
     if (recordingMode) {
-      // SOLO PARAMOS EL MICRO, NO RELLENAMOS NADA AQUÍ (Para evitar el Doble Pegado)
+      // 🛑 AL DETENER, SOLO PARAMOS EL MICRO. El envío a Gemini se hace en `mr.onstop`.
       mediaRecRef.current?.stop();
       if (speechRecRef.current) {
         try { speechRecRef.current.stop(); } catch(e){}
@@ -329,10 +356,11 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
   const processVoice = async (audioBlob: Blob, mimeType: string, mode: 'new' | 'edit') => {
     const apiKey = sessionStorage.getItem('gemini_api_key') || localStorage.getItem('gemini_api_key');
-    if (!apiKey) return alert("Conecta tu IA primero.");
-
     setIsAnalyzing(true);
+    
     try {
+      if (!apiKey) throw new Error("NO_API_KEY");
+
       const base64Audio = await new Promise<string>((resolve) => {
         const fr = new FileReader();
         fr.onload = () => resolve((fr.result as string).split(',')[1]);
@@ -384,7 +412,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       const fallback = nativeTranscriptRef.current.trim();
       
       if (fallback && mode === 'new') {
-        // Traducimos las palabras a números y símbolos para que la app lo entienda
+        // Traducimos las palabras a números y símbolos para que el analizador de texto lo entienda
         let formattedFallback = fallback
           .replace(/ euros?/gi, '€')
           .replace(/ con /gi, '.')
@@ -393,15 +421,15 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
           .replace(/ iva /gi, ' ')
           .replace(/kilos?/gi, 'kg')
           .replace(/litros?/gi, 'l')
-          .replace(/unidades?/gi, 'ud');
+          .replace(/unidades?/gi, 'x');
 
         setForm(prev => ({ 
           ...prev, 
           text: (prev.text ? prev.text + "\n" : "") + formattedFallback 
         }));
-        alert("⚠️ Gemini no pudo procesar los números exactos, pero hemos insertado tu texto traducido en el recuadro para que lo revises.");
+        alert("⚠️ Gemini no pudo procesar el audio, pero hemos pegado tu dictado en la caja de texto para que no lo pierdas.");
       } else {
-        alert("⚠️ La IA no entendió el dictado.");
+        alert("⚠️ La IA no entendió el dictado y no se pudo capturar el texto.");
       }
     } finally {
       setIsAnalyzing(false);
@@ -409,26 +437,33 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   };
 
 
-  // 🚀 3. GUARDADO ORIGINAL Y AGRUPACIONES
+  // 🚀 3. GUARDADO ORIGINAL Y AGRUPACIONES (Mejorado para aceptar más formatos de número)
   const parseSmartLine = (line: string) => {
     let clean = line.replace(/[€$]/g, '').replace(/,/g, '.').trim();
     if (clean.length < 5) return null;
     let rate = 10; 
     if (clean.match(/\b21\s?%/)) rate = 21; else if (clean.match(/\b4\s?%/)) rate = 4;
+    
     const upper = clean.toUpperCase();
     if (upper.includes("ALCOHOL") || upper.includes("GINEBRA") || upper.includes("SERV") || upper.includes("VINO") || upper.includes("SAKE")) rate = 21;
     if (upper.includes("PAN ") || upper.includes("HUEVO") || upper.includes("LECHE") || upper.includes("FRUTA")) rate = 4;
-    const numbers = [...clean.matchAll(/(\d+\.\d{2})/g)].map(m => parseFloat(m[1]));
+    
+    // Busca números enteros o con decimales (ej: 10, 10.5, 10.50)
+    const numbers = [...clean.matchAll(/(\d+([.,]\d{1,3})?)/g)].map(m => parseFloat(m[1].replace(',','.')));
     if (numbers.length === 0) return null;
     const totalLine = numbers[numbers.length - 1]; 
+    
     let qty = 1;
     const qtyMatch = clean.match(/^(\d+(\.\d{1,3})?)\s*(kg|uds|x|\*|l|gr)/i);
     if (qtyMatch) qty = parseFloat(qtyMatch[1]);
+    
     let name = clean.replace(totalLine.toString(), '').replace(/\d+(\.\d{1,3})?\s*(kg|uds|x|\*|l|gr)/i, '').replace(/\b(4|10|21)\s?%/, '').replace(/\.{2,}/g, '').trim();
     if (name.length < 2) name = "Varios Indefinido";
+    
     const unitPrice = qty > 0 ? totalLine / qty : totalLine;
     const baseLine = totalLine / (1 + rate / 100);
     const taxLine = totalLine - baseLine;
+    
     return { q: qty, n: name, t: totalLine, rate, base: baseLine, tax: taxLine, unit: unitPrice };
   };
 
@@ -497,6 +532,25 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     alert("¡Albarán guardado correctamente en su bloque!");
   };
 
+  // 🚀 EXPORTAR EXCEL GESTORÍA
+  const handleExportList = () => {
+    if (filteredAlbaranes.length === 0) return alert("No hay albaranes en la lista para exportar.");
+    const rows = filteredAlbaranes.map(a => ({
+      'FECHA': a.date,
+      'PROVEEDOR': a.prov,
+      'REF': a.num || 'S/N',
+      'UNIDAD': BUSINESS_UNITS.find(u => u.id === (a.unitId || 'REST'))?.name || 'Restaurante',
+      'BASE IMPONIBLE': Num.fmt(a.base),
+      'IVA': Num.fmt(a.taxes),
+      'TOTAL': Num.fmt(a.total),
+      'PAGADO': a.paid ? 'SÍ' : 'NO'
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Albaranes");
+    XLSX.writeFile(wb, `Albaranes_Arume_${new Date().toLocaleDateString('sv-SE')}.xlsx`);
+  };
 
   // 🚀 4. GESTIÓN DEL MODAL Y EDICIÓN MANUAL REAL
   const openEditModal = (albaran: Albaran) => { setEditingAlbaran(albaran); setEditForm(albaran); setIsEditMode(false); };
@@ -639,12 +693,17 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         </div>
       </header>
 
-      {/* Selector */}
-      <div className="flex flex-wrap gap-2 px-1">
-        <button onClick={() => setSelectedUnit('ALL')} className={cn("px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all border flex items-center gap-1.5", selectedUnit === 'ALL' ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50")}><Layers className="w-3 h-3" /> Ver Todos</button>
-        {BUSINESS_UNITS.map(unit => (
-          <button key={unit.id} onClick={() => setSelectedUnit(unit.id)} className={cn("px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all border flex items-center gap-1.5", selectedUnit === unit.id ? `${unit.color.replace('text-', 'bg-')} text-white border-transparent shadow-md` : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50")}><unit.icon className="w-3 h-3" /> {unit.name}</button>
-        ))}
+      {/* Selector y Botón Excel */}
+      <div className="flex flex-col md:flex-row justify-between items-center gap-4 px-1">
+        <div className="flex flex-wrap gap-2">
+          <button onClick={() => setSelectedUnit('ALL')} className={cn("px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all border flex items-center gap-1.5", selectedUnit === 'ALL' ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50")}><Layers className="w-3 h-3" /> Ver Todos</button>
+          {BUSINESS_UNITS.map(unit => (
+            <button key={unit.id} onClick={() => setSelectedUnit(unit.id)} className={cn("px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all border flex items-center gap-1.5", selectedUnit === unit.id ? `${unit.color.replace('text-', 'bg-')} text-white border-transparent shadow-md` : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50")}><unit.icon className="w-3 h-3" /> {unit.name}</button>
+          ))}
+        </div>
+        <button onClick={handleExportList} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-[10px] font-black hover:bg-emerald-700 transition flex items-center gap-2 shadow-sm w-full md:w-auto justify-center">
+          <Download className="w-4 h-4" /> EXPORTAR LISTA ACTUAL
+        </button>
       </div>
 
       {/* KPIs */}
@@ -717,7 +776,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
               <button onClick={handleQuickAdd} className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center hover:bg-indigo-200 transition"><Plus className="w-4 h-4" /></button>
             </div>
 
-            {/* CAJA DE TEXTO CON BOTÓN LIMPIAR */}
+            {/* 🚀 CAJA DE TEXTO CON BOTÓN LIMPIAR */}
             <div className="relative group">
               <textarea value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="Ej: 5 kg Salmón 150.00" className="w-full h-32 bg-slate-50 rounded-2xl p-4 pr-10 text-xs font-mono border-0 outline-none resize-none mb-3 shadow-inner focus:bg-white transition" />
               {form.text && (
@@ -825,7 +884,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                   </div>
 
                   <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 space-y-2">
-                    {/* 🚀 EDICIÓN MANUAL CELDAS (Inputs reales) */}
+                    {/* 🚀 EDICIÓN MANUAL CELDAS */}
                     {editForm.items?.map((it, i) => (
                       <div key={i} className="flex justify-between items-center text-xs border-b border-slate-200 last:border-0 pb-2 last:pb-0 pt-2 first:pt-0 group gap-2">
                         {isEditMode ? (
