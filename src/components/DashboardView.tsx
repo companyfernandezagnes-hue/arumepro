@@ -23,7 +23,7 @@ import {
   Tooltip, 
   ResponsiveContainer 
 } from 'recharts';
-import { ArumeEngine, Num } from '../services/engine';
+import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
 import { AppData } from '../types';
 
@@ -78,16 +78,14 @@ export const DashboardView = ({ data }: { data: AppData }) => {
     return `Año ${selectedYear}`;
   }, [viewMode, selectedMonth, selectedQuarter, selectedYear]);
 
-  // 🚀 CÁLCULO MÁSTER DINÁMICO (Compatible con Mes, Trimestre o Año)
-  const stats = useMemo(() => {
-    let monthsToCalc: number[] = [];
-    if (viewMode === 'month') monthsToCalc = [selectedMonth];
-    else if (viewMode === 'quarter') {
-      const start = (selectedQuarter - 1) * 3;
-      monthsToCalc = [start, start + 1, start + 2];
-    } else {
-      monthsToCalc = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-    }
+  // 🚀 EL NUEVO CEREBRO FINANCIERO (Adiós al bug de los 54k)
+  const dashboardStats = useMemo(() => {
+    const breakdown: Record<string, { income: number; expenses: number; profit: number }> = {
+      REST: { income: 0, expenses: 0, profit: 0 },
+      DLV: { income: 0, expenses: 0, profit: 0 },
+      SHOP: { income: 0, expenses: 0, profit: 0 },
+      CORP: { income: 0, expenses: 0, profit: 0 },
+    };
 
     const aggregated = {
       ingresos: { total: 0 },
@@ -96,28 +94,122 @@ export const DashboardView = ({ data }: { data: AppData }) => {
       ratios: { primeCost: 0, foodCost: 0 }
     };
 
-    // Sumamos los datos de ArumeEngine mes a mes para una precisión matemática perfecta
-    monthsToCalc.forEach(m => {
-      const s = ArumeEngine.getProfit(data, m, selectedYear);
-      aggregated.ingresos.total += s.ingresos.total;
-      aggregated.gastos.total += s.gastos.total;
-      aggregated.gastos.comida += s.gastos.comida;
-      aggregated.gastos.bebida += s.gastos.bebida;
-      aggregated.gastos.personal += s.gastos.personal;
-      aggregated.gastos.estructura += s.gastos.estructura;
-      aggregated.neto += s.neto;
+    let monthsToCalc: number[] = [];
+    if (viewMode === 'month') monthsToCalc = [selectedMonth];
+    else if (viewMode === 'quarter') {
+      const start = (selectedQuarter - 1) * 3;
+      monthsToCalc = [start, start + 1, start + 2];
+    } else {
+      monthsToCalc = [0,1,2,3,4,5,6,7,8,9,10,11];
+    }
+
+    const isDateInPeriod = (dateStr: string) => {
+      if (!dateStr) return false;
+      const d = new Date(dateStr);
+      if (d.getFullYear() !== selectedYear) return false;
+      if (viewMode === 'month') return d.getMonth() === selectedMonth;
+      if (viewMode === 'quarter') return Math.floor(d.getMonth() / 3) + 1 === selectedQuarter;
+      return true;
+    };
+
+    // 1. INGRESOS - Cierres Z (REST, SHOP)
+    (data.cierres || []).forEach((c: any) => {
+      if (isDateInPeriod(c.date)) {
+        const unit = c.unidad_negocio || 'REST'; 
+        const t = Num.parse(c.totalVenta);
+        if (breakdown[unit] && unit !== 'DLV') breakdown[unit].income += t;
+        aggregated.ingresos.total += t;
+      }
     });
 
-    // Recalculamos Ratios globalmente sobre los totales sumados
+    // 2. INGRESOS - Facturas a Clientes (HOTELES / DLV)
+    (data.facturas || []).forEach((f: any) => {
+      if (isDateInPeriod(f.date) && f.status !== 'draft') {
+        // Es un ingreso SOLO si tiene un Cliente válido (y no es el Z DIARIO automático)
+        if (f.cliente && f.cliente !== 'Z DIARIO' && f.cliente.trim() !== '') {
+           const unit = f.unidad_negocio || 'DLV';
+           const t = Math.abs(Num.parse(f.total));
+           if (breakdown[unit]) breakdown[unit].income += t;
+           aggregated.ingresos.total += t;
+        }
+      }
+    });
+
+    // 3. GASTOS - Albaranes (Proveedores)
+    (data.albaranes || []).forEach((a: any) => {
+      if (isDateInPeriod(a.date)) {
+        const unit = a.unidad_negocio || a.unitId || 'REST';
+        const t = Num.parse(a.total);
+        if (breakdown[unit]) breakdown[unit].expenses += t;
+        aggregated.gastos.total += t;
+
+        // Clasificación básica de gastos (Si tiene 21% de IVA asumimos que es Bebida/Alcohol)
+        const hasAlcohol = (a.items || []).some((i:any) => i.rate === 21);
+        if (hasAlcohol) aggregated.gastos.bebida += t;
+        else aggregated.gastos.comida += t;
+      }
+    });
+
+    // 4. GASTOS - Facturas de Proveedores directas (Sin albaranes)
+    (data.facturas || []).forEach((f: any) => {
+      if (isDateInPeriod(f.date) && f.status !== 'draft') {
+        // Es un gasto si NO tiene cliente, o el cliente está vacío
+        if (!f.cliente || f.cliente === 'Z DIARIO' || f.cliente.trim() === '') {
+          // Evitar doble conteo: Solo sumamos la factura si NO tiene albaranes dentro
+          if (!f.albaranIdsArr || f.albaranIdsArr.length === 0) {
+            const unit = f.unidad_negocio || 'REST';
+            const t = Math.abs(Num.parse(f.total));
+            if (breakdown[unit]) breakdown[unit].expenses += t;
+            aggregated.gastos.total += t;
+            aggregated.gastos.estructura += t; // Los gastos directos sin albarán suelen ser servicios/estructura
+          }
+        }
+      }
+    });
+
+    // 5. GASTOS FIJOS (Proporcionales)
+    monthsToCalc.forEach(m => {
+      const currentMonthKey = `pagos_${selectedYear}_${m + 1}`;
+      const pagadosIds = (data.control_pagos || {})[currentMonthKey] || [];
+      
+      (data.gastos_fijos || []).forEach((g: any) => {
+        if (g.active !== false && pagadosIds.includes(g.id)) {
+          const unit = g.unitId || 'REST';
+          let amount = parseFloat(g.amount as any) || 0;
+          if (g.freq === 'anual') amount = amount / 12;
+          if (g.freq === 'trimestral') amount = amount / 3;
+          
+          if (breakdown[unit]) breakdown[unit].expenses += amount;
+          aggregated.gastos.total += amount;
+
+          if (String(g.category).toLowerCase().includes('nómina') || String(g.category).toLowerCase().includes('personal')) {
+             aggregated.gastos.personal += amount;
+          } else {
+             aggregated.gastos.estructura += amount;
+          }
+        }
+      });
+    });
+
+    // 6. CALCULAR BENEFICIO Y RATIOS GLOBALES
+    Object.keys(breakdown).forEach(k => {
+      breakdown[k].profit = breakdown[k].income - breakdown[k].expenses;
+    });
+
+    aggregated.neto = aggregated.ingresos.total - aggregated.gastos.total;
     if (aggregated.ingresos.total > 0) {
       aggregated.ratios.foodCost = (aggregated.gastos.comida / aggregated.ingresos.total) * 100;
       aggregated.ratios.primeCost = ((aggregated.gastos.comida + aggregated.gastos.bebida + aggregated.gastos.personal) / aggregated.ingresos.total) * 100;
     }
 
-    return aggregated;
-  }, [data, viewMode, selectedMonth, selectedQuarter, selectedYear]);
+    return { breakdown, aggregated };
+  }, [data.cierres, data.albaranes, data.facturas, data.gastos_fijos, data.control_pagos, viewMode, selectedMonth, selectedQuarter, selectedYear]);
 
-  // 🚀 GRÁFICO INTELIGENTE (Muestra días si es mes, muestra meses si es Q/Año)
+  // Variables cómodas para usar en la vista
+  const stats = dashboardStats.aggregated;
+  const unitBreakdown = dashboardStats.breakdown;
+
+  // 🚀 GRÁFICO INTELIGENTE (Días vs Meses)
   const chartData = useMemo(() => {
     if (viewMode === 'month') {
       const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
@@ -149,83 +241,6 @@ export const DashboardView = ({ data }: { data: AppData }) => {
     }
   }, [data.cierres, viewMode, selectedMonth, selectedQuarter, selectedYear]);
 
-  // 🚀 RENTABILIDAD POR UNIDAD B2B ADAPTADA AL TIEMPO SELECCIONADO
-  const unitBreakdown = useMemo(() => {
-    const breakdown: Record<string, { income: number; expenses: number; profit: number }> = {
-      REST: { income: 0, expenses: 0, profit: 0 },
-      DLV: { income: 0, expenses: 0, profit: 0 },
-      SHOP: { income: 0, expenses: 0, profit: 0 },
-      CORP: { income: 0, expenses: 0, profit: 0 },
-    };
-
-    const isDateInPeriod = (dateStr: string) => {
-      if (!dateStr) return false;
-      const d = new Date(dateStr);
-      if (d.getFullYear() !== selectedYear) return false;
-      if (viewMode === 'month') return d.getMonth() === selectedMonth;
-      if (viewMode === 'quarter') return Math.floor(d.getMonth() / 3) + 1 === selectedQuarter;
-      return true;
-    };
-
-    // 1. INGRESOS RESTAURANTE Y TIENDA (Cierres Z)
-    (data.cierres || []).forEach((c: any) => {
-      if (isDateInPeriod(c.date)) {
-        const unit = c.unidad_negocio || 'REST'; 
-        if (breakdown[unit] && unit !== 'DLV') breakdown[unit].income += Num.parse(c.totalVenta);
-      }
-    });
-
-    // 2. INGRESOS HOTELES (Facturas a Clientes)
-    (data.facturas || []).forEach((f: any) => {
-      if (isDateInPeriod(f.date)) {
-        if (f.unidad_negocio === 'DLV' && Num.parse(f.total) > 0 && f.cliente && f.cliente !== 'Z DIARIO') {
-          breakdown['DLV'].income += Num.parse(f.total);
-        }
-      }
-    });
-
-    // 3. GASTOS VARIABLES (Albaranes)
-    (data.albaranes || []).forEach((a: any) => {
-      if (isDateInPeriod(a.date)) {
-        const unit = a.unidad_negocio || 'REST';
-        if (breakdown[unit]) breakdown[unit].expenses += Num.parse(a.total);
-      }
-    });
-
-    // 4. GASTOS FIJOS PROPORCIONALES
-    let monthsToCalc: number[] = [];
-    if (viewMode === 'month') monthsToCalc = [selectedMonth];
-    else if (viewMode === 'quarter') {
-      const start = (selectedQuarter - 1) * 3;
-      monthsToCalc = [start, start + 1, start + 2];
-    } else {
-      monthsToCalc = [0,1,2,3,4,5,6,7,8,9,10,11];
-    }
-
-    monthsToCalc.forEach(m => {
-      const currentMonthKey = `pagos_${selectedYear}_${m + 1}`;
-      const pagadosIds = (data.control_pagos || {})[currentMonthKey] || [];
-      
-      (data.gastos_fijos || []).forEach((g: any) => {
-        if (g.active !== false && pagadosIds.includes(g.id)) {
-          const unit = g.unitId || 'REST';
-          const amount = parseFloat(g.amount as any) || 0;
-          let mensual = amount;
-          if (g.freq === 'anual') mensual = amount / 12;
-          if (g.freq === 'trimestral') mensual = amount / 3;
-          
-          if (breakdown[unit]) breakdown[unit].expenses += mensual;
-        }
-      });
-    });
-
-    // 5. BENEFICIO NETO
-    Object.keys(breakdown).forEach(k => {
-      breakdown[k].profit = breakdown[k].income - breakdown[k].expenses;
-    });
-
-    return breakdown;
-  }, [data.cierres, data.albaranes, data.facturas, data.gastos_fijos, data.control_pagos, viewMode, selectedMonth, selectedQuarter, selectedYear]);
 
   return (
     <div className="space-y-6 animate-fade-in pb-24">
