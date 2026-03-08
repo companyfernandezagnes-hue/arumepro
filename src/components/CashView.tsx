@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   ChevronLeft, ChevronRight, CreditCard, Banknote, Truck, Sparkles, 
   Trash2, CheckCircle2, Clock, AlertTriangle, RefreshCw, Image as ImageIcon, 
-  Scan, Building2, ShoppingBag, Layers, SplitSquareHorizontal, Mic, Square, Plus
+  Scan, Building2, ShoppingBag, Layers, SplitSquareHorizontal, Mic, Square, Plus, Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppData, Cierre, Factura } from '../types';
