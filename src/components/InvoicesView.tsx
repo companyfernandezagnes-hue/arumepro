@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
-  FileText, Search, ChevronLeft, ChevronRight, Zap, Users, Building2, Package, CheckCircle2, Clock, Trash2, AlertCircle, Link as LinkIcon, Mail, ArrowRight, X, RefreshCw, Download, Bell, CheckSquare, Hotel, ShoppingBag, Layers, UploadCloud, FileDown
+  FileText, Search, ChevronLeft, ChevronRight, Zap, Users, Building2, Package, CheckCircle2, Clock, Trash2, AlertCircle, Link as LinkIcon, Mail, ArrowRight, X, RefreshCw, Download, Bell, CheckSquare, Hotel, ShoppingBag, Layers, UploadCloud, FileDown, FileArchive
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
@@ -28,7 +28,7 @@ interface InvoicesViewProps {
 
 const REAL_PARTNERS = ['PAU', 'JERONI', 'AGNES', 'ONLY ONE', 'TIENDA DE SAKES'];
 
-// 🚀 SUPER NORMALIZADOR: Evita duplicados borrando S.L., S.A., espacios y guiones
+// 🚀 SUPER NORMALIZADOR
 const superNorm = (s: string) => {
   if (!s) return 'desconocido';
   return s.toLowerCase()
@@ -112,12 +112,15 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     try {
       if (!apiKey) throw new Error("NO_API_KEY");
 
-      const base64Data = await new Promise<string>((resolve, reject) => {
+      // 1. Convertir el archivo completo a Base64 para guardarlo y mandarlo a la IA
+      const fileBase64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        reader.onload = () => resolve(reader.result as string); // Conservamos el DataURL completo (ej: data:application/pdf;base64,JVBE...)
         reader.onerror = error => reject(error);
         reader.readAsDataURL(file);
       });
+      
+      const soloBase64 = fileBase64.split(',')[1]; // Para enviarlo limpio a Gemini
 
       // PLAN A: Enviar a Gemini (El Rayo)
       const ai = new GoogleGenAI({ apiKey });
@@ -134,7 +137,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: base64Data, mimeType: file.type } }] }],
+        contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: soloBase64, mimeType: file.type } }] }],
         config: { responseMimeType: "application/json", temperature: 0.1 }
       });
 
@@ -156,28 +159,33 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         reconciled: false,
         source: 'email-ia',
         status: 'draft',
-        unidad_negocio: 'REST' 
+        unidad_negocio: 'REST',
+        file_base64: fileBase64 // 💾 GUARDAMOS EL ARCHIVO PARA LA GESTORÍA
       });
 
       await onSave(newData);
-      alert("✅ Factura procesada al instante por la IA. Búscala en los borradores.");
+      alert("✅ Factura procesada al instante por la IA y Documento Guardado. Búscala en los borradores.");
 
     } catch (e) {
       console.warn("⚠️ Gemini falló. Activando el Plan B de Emergencia...");
       
-      // 🚀 PLAN B: EL SALVAVIDAS LOCAL SEGURO
       try {
         let extractedText = "";
         let possibleTotal = 0;
 
+        // Recuperamos el archivo para guardarlo también en el plan B
+        const fileBase64 = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(file);
+        });
+
         if (file.type.includes('image')) {
-           // 📸 OCR PARA IMÁGENES
            const tesseractModule = await import('tesseract.js');
            const Tesseract = tesseractModule.default || tesseractModule;
            const { data: { text } } = await Tesseract.recognize(file, 'spa');
            extractedText = text;
         } else if (file.type === 'application/pdf') {
-           // 📄 LECTOR PARA PDFs NATIVO (Carga segura Vite)
            const pdfjsModule = await import('pdfjs-dist');
            const pdfjsLib = pdfjsModule.default || pdfjsModule;
            pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
@@ -192,7 +200,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
            }
         } 
         
-        // 🧠 Mini-cerebro: Busca el número más grande que parezca un precio en el texto (evita códigos de barras)
         const matches = extractedText.match(/(\d+([.,]\d{2}))/g);
         if (matches) {
             const nums = matches.map(m => parseFloat(m.replace(',', '.')));
@@ -215,11 +222,12 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           reconciled: false,
           source: 'email-ia',
           status: 'draft',
-          unidad_negocio: 'REST'
+          unidad_negocio: 'REST',
+          file_base64: fileBase64 // 💾 GUARDAMOS EL ARCHIVO PARA LA GESTORÍA TAMBIÉN AQUÍ
         });
 
         await onSave(newData);
-        alert(`⚠️ Los tokens de la IA se agotaron.\nPero el Sistema de Rescate ha leído el archivo y creado un borrador. Por favor, revisa los datos.`);
+        alert(`⚠️ Los tokens de la IA se agotaron.\nPero el Sistema de Rescate ha leído el archivo y creado un borrador. El archivo original está guardado.`);
 
       } catch (fallbackErr) {
         console.error(fallbackErr);
@@ -230,7 +238,32 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     }
   };
 
-  // 🚀 HANDLERS DE ARRASTRAR Y SOLTAR
+  // 🚀 FUNCIÓN PARA DESCARGAR EL PDF/IMAGEN DESDE BILKY
+  const handleDownloadFile = (factura: Factura) => {
+    if (!factura.file_base64) {
+      alert("Lo siento, no hay documento original guardado para esta factura.");
+      return;
+    }
+
+    try {
+      const a = document.createElement('a');
+      a.href = factura.file_base64;
+      
+      // Intentamos detectar la extensión por el MimeType (data:application/pdf;base...)
+      let ext = "pdf";
+      if (factura.file_base64.includes('image/jpeg')) ext = "jpg";
+      if (factura.file_base64.includes('image/png')) ext = "png";
+
+      a.download = `Factura_${factura.prov.replace(/[^a-z0-9]/gi, '_')}_${factura.num}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) {
+      alert("Hubo un error al intentar descargar el archivo.");
+    }
+  };
+
+  // Drag & Drop Handlers
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1144,6 +1177,18 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                     {BUSINESS_UNITS.find(u => u.id === selectedInvoice.unidad_negocio)?.name || 'Restaurante'}
                   </span>
                 </div>
+
+                {/* 🚀 BOTÓN DE DESCARGAR PDF GUARDADO */}
+                {selectedInvoice.file_base64 && (
+                  <div className="mt-4 pt-4 border-t border-slate-200">
+                    <button 
+                      onClick={() => handleDownloadFile(selectedInvoice)}
+                      className="w-full bg-slate-800 text-white py-3 rounded-xl font-black text-xs hover:bg-slate-900 transition flex items-center justify-center gap-2"
+                    >
+                      <FileArchive className="w-4 h-4" /> DESCARGAR DOCUMENTO ORIGINAL
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2 mb-6 max-h-48 overflow-y-auto custom-scrollbar pr-2">
