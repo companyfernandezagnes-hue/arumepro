@@ -250,155 +250,85 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     }
   };
 
-  // ==========================================
-  // 🎙️ GRABACIÓN PARALELA (GEMINI + VOSK)
+ // ==========================================
+  // 🎙️ GRABACIÓN PARALELA (GEMINI + NATIVE FALLBACK)
   // ==========================================
   const toggleRecording = async () => {
     if (isRecording) {
       mediaRecorderRef.current?.stop();
-      if (voskProcessorRef.current) {
-        voskProcessorRef.current.disconnect();
-        voskProcessorRef.current = null;
-      }
-      if (voskAudioCtxRef.current) {
-        voskAudioCtxRef.current.close();
+      if (speechRecRef.current) {
+        try { speechRecRef.current.stop(); } catch(e){}
       }
       return;
     }
 
     try {
+      // 1. Pedir acceso al micrófono
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
-      if (voskReady && voskModel) {
-        voskTranscriptRef.current = ''; 
-        const { Recognizer } = await import('vosk-browser');
-        const recognizer = new Recognizer(voskModel, 16000);
+      // 2. Intentar SpeechRecognition (Lo separamos para que si falla en Safari, no rompa lo demás)
+      try {
+        nativeTranscriptRef.current = '';
+        const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
         
-        const audioContext = new AudioContext({ sampleRate: 16000 });
-        voskAudioCtxRef.current = audioContext;
-        const source = audioContext.createMediaStreamSource(stream);
-        const processor = audioContext.createScriptProcessor(4096, 1, 1);
-
-        source.connect(processor);
-        processor.connect(audioContext.destination);
-
-        processor.onaudioprocess = (e) => {
-          const input = e.inputBuffer.getChannelData(0);
-          if (recognizer.acceptWaveform(input)) {
-             const result = recognizer.result();
-             if (result?.text) voskTranscriptRef.current += result.text + ' ';
-          }
-        };
-        voskProcessorRef.current = processor;
+        if (SpeechRecognition) {
+          const recognition = new SpeechRecognition();
+          recognition.lang = 'es-ES';
+          recognition.continuous = true;
+          recognition.interimResults = false;
+          
+          recognition.onresult = (event: any) => {
+            let currentTranscript = '';
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+              if (event.results[i].isFinal) {
+                currentTranscript += event.results[i][0].transcript + ' ';
+              }
+            }
+            nativeTranscriptRef.current += currentTranscript;
+          };
+          
+          speechRecRef.current = recognition;
+          recognition.start();
+        }
+      } catch (speechErr) {
+        console.warn("⚠️ El dictado nativo no es compatible con este navegador, pero seguimos con Gemini:", speechErr);
       }
 
+      // 3. GRABACIÓN PARA GEMINI (Con soporte adaptativo para Safari/Mac)
       const supports = (type: string) => MediaRecorder.isTypeSupported(type);
-      const mimePref = supports('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : supports('audio/mp4') ? 'audio/mp4' : 'audio/webm';
+      
+      // Buscamos el mejor formato que soporte tu navegador
+      let mimePref = '';
+      if (supports('audio/webm;codecs=opus')) mimePref = 'audio/webm;codecs=opus';
+      else if (supports('audio/mp4')) mimePref = 'audio/mp4'; // <- Safari suele usar este
+      else if (supports('audio/webm')) mimePref = 'audio/webm';
+      // Si no soporta ninguno de los anteriores, lo dejamos vacío para que el navegador elija por defecto
 
-      const mr = new MediaRecorder(stream, { mimeType: mimePref, audioBitsPerSecond: 24_000 });
+      const options = mimePref ? { mimeType: mimePref, audioBitsPerSecond: 24_000 } : undefined;
+      const mr = new MediaRecorder(stream, options);
+      
       mediaRecorderRef.current = mr;
       audioChunksRef.current = [];
 
       mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       mr.onstop = async () => {
-        const mimeType = cleanMime(mr.mimeType);
-        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        const finalMime = mr.mimeType || 'audio/webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: finalMime });
         stream.getTracks().forEach(t => t.stop());
         setIsRecording(false);
-        
-        if (voskReady) voskTranscriptRef.current += ' (Grabación terminada)';
-        
-        await processAudioWithAI(audioBlob, mimeType);
+        await processAudioWithAI(audioBlob, finalMime);
       };
 
       mr.start();
       setIsRecording(true);
       setTimeout(() => { if (mr.state === 'recording') toggleRecording(); }, 60000); 
-    } catch (err) {
-      alert("⚠️ No se pudo acceder al micrófono.");
-    }
-  };
-
-  const processAudioWithAI = async (audioBlob: Blob, mimeType: string) => {
-    const apiKey = sessionStorage.getItem('gemini_api_key') || localStorage.getItem('gemini_api_key');
-    setScanStatus('loading');
-    
-    try {
-      if (!apiKey) throw new Error("No API Key");
-
-      const base64Audio = await new Promise<string>((resolve) => {
-        const fr = new FileReader();
-        fr.onload = () => resolve((fr.result as string).split(',')[1]);
-        fr.readAsDataURL(audioBlob);
-      });
-
-      const ai = new GoogleGenAI({ apiKey });
-      const prompt = `Transcribe y extrae los datos de caja. Devuelve SOLO JSON con:
-      { "efectivo":0, "tpv1":0, "tpv2":0, "amex":0, "glovo":0, "uber":0, "apperStreet":0, "sobre_cash":0, "gastos":0, "venta_tienda":0, "notas":"" }`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: base64Audio, mimeType } }] }],
-        config: { responseMimeType: "application/json", temperature: 0.1 }
-      });
-
-      const rawJson = extractJSON(response.text || "");
-      actualizarFormConIA(rawJson, "Voz IA");
-      setScanStatus('success');
-
-    } catch (error: any) {
-      console.log("Gemini falló, usando texto Vosk recolectado en vivo");
-      const textoVosk = voskTranscriptRef.current.trim();
       
-      if (textoVosk) {
-        setForm(prev => ({
-          ...prev,
-          notas: (prev.notas || "") + "\n[Dictado Vosk Fallback]: " + textoVosk
-        }));
-        setScanStatus('success');
-        alert("⚠️ Gemini falló, pero Vosk salvó la transcripción en las NOTAS.");
-      } else {
-        setScanStatus('error');
-        alert("⚠️ Ambas IAs fallaron. ¿Hablaste lo suficientemente alto?");
-      }
-    } finally {
-      setTimeout(() => setScanStatus('idle'), 4000);
+    } catch (err: any) {
+      console.error("Error detallado del micrófono:", err);
+      // ¡AHORA SÍ VEREMOS EL ERROR REAL!
+      alert(`⚠️ Error técnico al intentar grabar: ${err.message || err.name}.`);
     }
   };
-
-  const actualizarFormConIA = (rawJson: any, origen: string = "IA") => {
-    setForm(prev => ({
-      ...prev,
-      date: rawJson.fecha ? normalizeDate(rawJson.fecha) : prev.date,
-      efectivo: String(asNum(rawJson.efectivo) || prev.efectivo),
-      tpv1: String(asNum(rawJson.tpv1) || prev.tpv1),
-      tpv2: String(asNum(rawJson.tpv2) || prev.tpv2),
-      amex: String(asNum(rawJson.amex) || prev.amex),
-      glovo: String(asNum(rawJson.glovo) || prev.glovo),
-      uber: String(asNum(rawJson.uber) || prev.uber),
-      apperStreet: String(asNum(rawJson.apperStreet) || prev.apperStreet),
-      tienda: String(asNum(rawJson.venta_tienda) || prev.tienda),
-      cajaFisica: asNum(rawJson.sobre_cash) > 0 ? (asNum(rawJson.sobre_cash) + fondoCaja).toFixed(2) : prev.cajaFisica,
-      notas: asNum(rawJson.gastos) > 0 ? `Gastos detectados (${origen}): ${rawJson.gastos}€. ${rawJson.notas || ''}` : (rawJson.notas || prev.notas),
-    }));
-  };
-
-  useEffect(() => {
-    const handlePaste = (e: ClipboardEvent) => {
-      if (scanStatus === 'loading') return;
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf("image") !== -1) {
-          const blob = items[i].getAsFile();
-          if (blob) { processImageWithAI(blob, !images.img1 ? 'img1' : 'img2'); break; }
-        }
-      }
-    };
-    window.addEventListener('paste', handlePaste);
-    return () => window.removeEventListener('paste', handlePaste);
-  }, [images, scanStatus]);
-
   // ==========================================
   // 💾 GUARDADO 
   // ==========================================
