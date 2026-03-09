@@ -2,7 +2,8 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   FileText, Search, ChevronLeft, ChevronRight, Zap, Users, Building2, Package, CheckCircle2, Clock, Trash2, AlertCircle, Link as LinkIcon, Mail, ArrowRight, X, RefreshCw, Download, Bell, CheckSquare, Hotel, ShoppingBag, Layers, UploadCloud, FileDown, FileArchive
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+// ✅ FIX 1: Cambiado a framer-motion (Suele romper la pantalla si no está bien)
+import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import { AppData, Factura, Albaran } from '../types';
 import { Num, DateUtil } from '../services/engine';
@@ -39,6 +40,9 @@ const superNorm = (s: string) => {
 };
 
 export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
+  // ✅ FIX 2: MODO SEGURO. Evita que la app explote si `data` es undefined un milisegundo al cargar.
+  const safeData = data || { facturas: [], albaranes: [] };
+
   const [activeTab, setActiveTab] = useState<'pend' | 'hist'>('pend');
   const [mode, setMode] = useState<'proveedor' | 'socio'>('proveedor');
   const [year, setYear] = useState(new Date().getFullYear());
@@ -52,7 +56,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   
   // 🛡️ DRAG & DROP STATE (CORREGIDO Y BLINDADO)
   const [isDragging, setIsDragging] = useState(false);
-  const dragDepth = useRef(0); // Contador de profundidad para evitar parpadeos
+  const dragDepth = useRef(0);
 
   // Modal State
   const [selectedGroup, setSelectedGroup] = useState<{ label: string; ids: string[], unitId: BusinessUnit } | null>(null);
@@ -66,30 +70,46 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 🛡️ SALVAVIDAS GLOBAL PARA EL DRAG & DROP
-  // Esto asegura que si el usuario suelta el archivo fuera de la ventana, la pantalla azul desaparezca.
+  // 🛡️ FIX 3: SALVAVIDAS GLOBAL EXTREMO PARA EL DRAG & DROP
   useEffect(() => {
     const handleGlobalDragEnd = () => {
       dragDepth.current = 0;
       setIsDragging(false);
     };
 
+    const onWindowDragLeave = (e: DragEvent) => {
+      const out = e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight;
+      if (out) { dragDepth.current = 0; setIsDragging(false); }
+    };
+
     window.addEventListener('dragend', handleGlobalDragEnd);
     window.addEventListener('drop', handleGlobalDragEnd);
+    window.addEventListener('dragleave', onWindowDragLeave);
     
     return () => {
       window.removeEventListener('dragend', handleGlobalDragEnd);
       window.removeEventListener('drop', handleGlobalDragEnd);
+      window.removeEventListener('dragleave', onWindowDragLeave);
     };
   }, []);
 
+  // Failsafe por tiempo: Si se queda azul por error, a los 4 segundos se quita solo.
+  useEffect(() => {
+    if (!isDragging) return;
+    const t = setTimeout(() => {
+      dragDepth.current = 0;
+      setIsDragging(false);
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [isDragging]);
+
   // --- IA AUDIT ENGINE ---
   const draftsIA = useMemo(() => {
-    return (data.facturas || []).filter(f => f.status === 'draft').map(draft => {
+    return (safeData.facturas || []).filter(f => f.status === 'draft').map(draft => {
       const mesDraft = draft.date.substring(0, 7);
       const provDraftNormalizado = superNorm(draft.prov); 
       
-      const albaranesCandidatos = (data.albaranes || []).filter(a => 
+      const albaranesCandidatos = (safeData.albaranes || []).filter(a => 
         !a.invoiced && 
         superNorm(a.prov) === provDraftNormalizado && 
         a.date.startsWith(mesDraft)
@@ -107,7 +127,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         cuadraPerfecto
       };
     });
-  }, [data.facturas, data.albaranes]);
+  }, [safeData.facturas, safeData.albaranes]);
 
   const handleSyncIA = async () => {
     setIsSyncing(true);
@@ -130,17 +150,15 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     try {
       if (!apiKey) throw new Error("NO_API_KEY");
 
-      // 1. Convertir el archivo completo a Base64 para guardarlo y mandarlo a la IA
       const fileBase64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string); // Conservamos el DataURL completo (ej: data:application/pdf;base64,JVBE...)
+        reader.onload = () => resolve(reader.result as string); 
         reader.onerror = error => reject(error);
         reader.readAsDataURL(file);
       });
       
-      const soloBase64 = fileBase64.split(',')[1]; // Para enviarlo limpio a Gemini
+      const soloBase64 = fileBase64.split(',')[1];
 
-      // PLAN A: Enviar a Gemini (El Rayo)
       const ai = new GoogleGenAI({ apiKey });
       const prompt = `Analiza esta factura. Devuelve SOLO un JSON estricto con los datos extraídos:
       {
@@ -162,7 +180,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       const cleanText = (response.text || "").replace(/(?:json)?/gi, '').replace(/```/g, '').trim();
       const rawJson = JSON.parse(cleanText);
 
-      const newData = { ...data };
+      const newData = { ...safeData };
       if (!newData.facturas) newData.facturas = [];
 
       newData.facturas.push({
@@ -178,7 +196,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         source: 'email-ia',
         status: 'draft',
         unidad_negocio: 'REST',
-        file_base64: fileBase64 // 💾 GUARDAMOS EL ARCHIVO PARA LA GESTORÍA
+        file_base64: fileBase64 
       });
 
       await onSave(newData);
@@ -191,7 +209,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         let extractedText = "";
         let possibleTotal = 0;
 
-        // Recuperamos el archivo para guardarlo también en el plan B
         const fileBase64 = await new Promise<string>((resolve) => {
             const reader = new FileReader();
             reader.onload = () => resolve(reader.result as string);
@@ -225,7 +242,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
             possibleTotal = validNums.length > 0 ? Math.max(...validNums) : 0;
         }
         
-        const newData = { ...data };
+        const newData = { ...safeData };
         if (!newData.facturas) newData.facturas = [];
         
         newData.facturas.push({
@@ -241,7 +258,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           source: 'email-ia',
           status: 'draft',
           unidad_negocio: 'REST',
-          file_base64: fileBase64 // 💾 GUARDAMOS EL ARCHIVO PARA LA GESTORÍA TAMBIÉN AQUÍ
+          file_base64: fileBase64 
         });
 
         await onSave(newData);
@@ -256,7 +273,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     }
   };
 
-  // 🚀 FUNCIÓN PARA DESCARGAR EL PDF/IMAGEN DESDE BILKY
   const handleDownloadFile = (factura: Factura) => {
     if (!factura.file_base64) {
       alert("Lo siento, no hay documento original guardado para esta factura.");
@@ -267,7 +283,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       const a = document.createElement('a');
       a.href = factura.file_base64;
       
-      // Intentamos detectar la extensión por el MimeType (data:application/pdf;base...)
       let ext = "pdf";
       if (factura.file_base64.includes('image/jpeg')) ext = "jpg";
       if (factura.file_base64.includes('image/png')) ext = "png";
@@ -281,13 +296,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     }
   };
 
-  // 🛡️ NUEVOS DRAG & DROP HANDLERS (Usando dragDepth)
   const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    dragDepth.current += 1; // Incrementamos la profundidad al entrar
-    
-    // Solo activamos el estado si estamos arrastrando archivos
+    dragDepth.current += 1;
     if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
       if (!isDragging) setIsDragging(true);
     }
@@ -301,20 +313,16 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    dragDepth.current -= 1; // Reducimos la profundidad al salir de un hijo
-    
-    // Si la profundidad es 0 o menor, realmente hemos salido del contenedor principal
+    dragDepth.current -= 1;
     if (dragDepth.current <= 0) {
       setIsDragging(false);
-      dragDepth.current = 0; // Prevenir números negativos por seguridad
+      dragDepth.current = 0;
     }
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    
-    // Limpiamos los estados al soltar
     setIsDragging(false);
     dragDepth.current = 0;
 
@@ -329,7 +337,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   };
 
   const handleConfirmAuditoriaIA = async (draftId: string) => {
-    const newData = { ...data };
+    const newData = { ...safeData };
     const draftIdx = newData.facturas.findIndex(f => f.id === draftId);
     const audit = draftsIA.find(d => d.id === draftId);
     
@@ -356,7 +364,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
   const handleDiscardDraftIA = async (id: string) => {
     if (!confirm("¿Eliminar factura leída por IA?")) return;
-    const newData = { ...data };
+    const newData = { ...safeData };
     newData.facturas = newData.facturas.filter(f => f.id !== id);
     await onSave(newData);
   };
@@ -367,7 +375,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     const startMonth = (q - 1) * 3 + 1;
     const endMonth = q * 3;
     
-    const filtered = (data.facturas || []).filter(f => {
+    const filtered = (safeData.facturas || []).filter(f => {
       if (f.status === 'draft') return false;
       if (selectedUnit !== 'ALL' && f.unidad_negocio !== selectedUnit) return false;
       const [fYear, fMonth] = f.date.split('-').map(Number);
@@ -404,7 +412,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
   // --- MANUAL GROUPING ---
   const pendingGroups = useMemo(() => {
-    const albs = (data.albaranes || []).filter(a => {
+    const albs = (safeData.albaranes || []).filter(a => {
       if (a.invoiced || !a.date.startsWith(year.toString())) return false;
       const itemUnit = (a as any).unitId || 'REST';
       if (selectedUnit !== 'ALL' && itemUnit !== selectedUnit) return false;
@@ -441,7 +449,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     });
 
     return Object.entries(byMonth).sort((a, b) => b[0].localeCompare(a[0]));
-  }, [data.albaranes, year, mode, searchQ, selectedUnit]);
+  }, [safeData.albaranes, year, mode, searchQ, selectedUnit]);
 
   const handleOpenGroup = (label: string, ids: string[], unitId: BusinessUnit) => {
     setSelectedGroup({ label, ids, unitId });
@@ -466,7 +474,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     if (!modalForm.num.trim()) return alert("Por favor, introduce el número de factura oficial.");
     if (modalForm.selectedAlbs.length === 0) return alert("Debes seleccionar al menos un albarán.");
 
-    const newData = { ...data };
+    const newData = { ...safeData };
     const ownerLabel = selectedGroup?.label || '';
 
     let totalFactura = 0;
@@ -503,7 +511,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
   // --- HISTORY ---
   const historyList = useMemo(() => {
-    return (data.facturas || []).filter(f => {
+    return (safeData.facturas || []).filter(f => {
       if (f.status === 'draft') return false;
       if (!f.date.startsWith(year.toString())) return false;
       if (selectedUnit !== 'ALL' && f.unidad_negocio !== selectedUnit) return false;
@@ -528,10 +536,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       }
       return true;
     }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [data.facturas, year, filterStatus, searchQ, selectedUnit, mode]);
+  }, [safeData.facturas, year, filterStatus, searchQ, selectedUnit, mode]);
 
   const handleTogglePago = async (id: string) => {
-    const newData = { ...data };
+    const newData = { ...safeData };
     const idx = newData.facturas.findIndex(f => f.id === id);
     if (idx !== -1) {
       newData.facturas[idx].paid = !newData.facturas[idx].paid;
@@ -540,12 +548,12 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   };
 
   const handleDeleteFactura = async (id: string) => {
-    const fac = data.facturas.find(f => f.id === id);
+    const fac = safeData.facturas.find(f => f.id === id);
     if (!fac) return;
     if (fac.reconciled) return alert("⚠️ No puedes borrar una factura que ya ha pasado por el Banco.");
     if (!confirm(`¿Borrar la factura ${fac.num} y liberar sus albaranes?`)) return;
 
-    const newData = { ...data };
+    const newData = { ...safeData };
     const ids = fac.albaranIdsArr || [];
     newData.albaranes = newData.albaranes.map(a => ids.includes(a.id) ? { ...a, invoiced: false } : a);
     newData.facturas = newData.facturas.filter(f => f.id !== id);
@@ -554,7 +562,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
   const notifyOverdue = async () => {
     const todayStr = new Date().toISOString().split('T')[0];
-    const overdue = (data.facturas || []).filter(f => 
+    const overdue = (safeData.facturas || []).filter(f => 
       !f.paid && 
       f.dueDate && 
       f.dueDate < todayStr && 
@@ -566,7 +574,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         overdue.slice(0, 5).map(f => `- ${f.prov}: ${Num.fmt(f.total)} (Venció: ${f.dueDate})`).join('\n') +
         (overdue.length > 5 ? `\n...y ${overdue.length - 5} más.` : '');
       
-      await NotificationService.sendAlert(data, msg, 'WARNING');
+      await NotificationService.sendAlert(safeData, msg, 'WARNING');
       alert("Alerta de vencimientos enviada a Telegram.");
     } else {
       alert("No hay facturas vencidas hoy.");
@@ -581,6 +589,11 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      {/* ✅ CHIVATO DE FUNCIONAMIENTO */}
+      <div className="fixed bottom-2 right-2 z-[999999] bg-black/80 text-white px-3 py-1 rounded text-[10px] font-mono pointer-events-none">
+        ✅ Render OK — Datos: {String((safeData?.facturas || []).length)}
+      </div>
+
       {/* 🚀 OVERLAY DE DRAG & DROP MEJORADO */}
       <AnimatePresence>
         {isDragging && (
@@ -588,8 +601,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            // Cambiado a "fixed" para que ocupe siempre toda la pantalla visible, con un z-index extremo.
-            // pointer-events-none asegura que el propio div azul no cause problemas al pasar el ratón por encima.
             className="fixed inset-0 z-[9999] bg-indigo-600/90 backdrop-blur-sm border-[16px] border-dashed border-white/40 flex flex-col items-center justify-center pointer-events-none"
           >
             <motion.div 
@@ -631,7 +642,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div className="flex-1">
                       <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest mb-1">Leído en el Documento</p>
-                      {/* Si es un draft manual de emergencia, le ponemos estilo especial */}
                       {d.prov.includes('Emergencia') || d.prov.includes('PDF:') ? (
                         <h4 className="text-amber-400 font-black text-xl flex items-center gap-2">
                            <AlertCircle className="w-5 h-5" /> {d.prov}
@@ -729,7 +739,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           </div>
           
           <div className="flex items-center gap-2">
-            {/* 🚀 BOTÓN NUEVO: SUBIR PDF / IMAGEN LOCAL */}
             <input 
               type="file" 
               ref={fileInputRef} 
@@ -867,11 +876,11 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         <div className="space-y-4">
           {activeTab === 'pend' ? (
             pendingGroups.length > 0 ? (
-              pendingGroups.map(([mk, data]) => (
+              pendingGroups.map(([mk, dataGroup]) => (
                 <div key={mk} className="mb-8 animate-fade-in">
-                  <h3 className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-3 px-2 border-b border-indigo-100 pb-2">{data.name}</h3>
+                  <h3 className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-3 px-2 border-b border-indigo-100 pb-2">{dataGroup.name}</h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {Object.values(data.groups).map((g: any) => {
+                    {Object.values(dataGroup.groups).map((g: any) => {
                       const unitConfig = BUSINESS_UNITS.find(u => u.id === g.unitId);
                       return (
                         <div 
@@ -1079,7 +1088,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
               </div>
               
               <div className="space-y-2 flex-1 overflow-y-auto pr-2 custom-scrollbar bg-slate-50 rounded-2xl p-4 border border-slate-100">
-                {(data.albaranes || []).filter(a => selectedGroup.ids.includes(a.id)).map(a => (
+                {(safeData.albaranes || []).filter(a => selectedGroup.ids.includes(a.id)).map(a => (
                   <label key={a.id} className="flex justify-between items-center py-3 border-b border-slate-200 last:border-0 cursor-pointer hover:bg-white px-3 rounded-xl transition shadow-sm hover:shadow">
                     <div className="flex items-center gap-4">
                       <div className="relative flex items-center justify-center">
@@ -1113,7 +1122,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                   </div>
                   <span className="text-4xl font-black text-emerald-400 tracking-tighter">
                     {Num.fmt(modalForm.selectedAlbs.reduce((acc, id) => {
-                      const alb = data.albaranes.find(a => a.id === id);
+                      const alb = safeData.albaranes.find(a => a.id === id);
                       return acc + (Num.parse(alb?.total) || 0);
                     }, 0))}
                   </span>
@@ -1242,7 +1251,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                   <>
                     <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-3 border-b border-indigo-100 pb-2">Albaranes Vinculados ({selectedInvoice.albaranIdsArr.length})</p>
                     {selectedInvoice.albaranIdsArr.map(id => {
-                      const alb = data.albaranes.find(a => a.id === id);
+                      const alb = safeData.albaranes.find(a => a.id === id);
                       return alb ? (
                         <div key={id} className="flex justify-between text-xs py-2 px-3 bg-white border border-slate-100 rounded-xl text-slate-600 font-bold hover:shadow-sm transition">
                           <span className="flex items-center gap-2"><Package className="w-3 h-3 text-slate-300"/> {alb.date}</span>
