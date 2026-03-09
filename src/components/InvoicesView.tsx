@@ -50,8 +50,9 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportQuarter, setExportQuarter] = useState(Math.floor(new Date().getMonth() / 3) + 1);
   
-  // DRAG & DROP STATE
+  // 🛡️ DRAG & DROP STATE (CORREGIDO Y BLINDADO)
   const [isDragging, setIsDragging] = useState(false);
+  const dragDepth = useRef(0); // Contador de profundidad para evitar parpadeos
 
   // Modal State
   const [selectedGroup, setSelectedGroup] = useState<{ label: string; ids: string[], unitId: BusinessUnit } | null>(null);
@@ -64,6 +65,23 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // 🛡️ SALVAVIDAS GLOBAL PARA EL DRAG & DROP
+  // Esto asegura que si el usuario suelta el archivo fuera de la ventana, la pantalla azul desaparezca.
+  useEffect(() => {
+    const handleGlobalDragEnd = () => {
+      dragDepth.current = 0;
+      setIsDragging(false);
+    };
+
+    window.addEventListener('dragend', handleGlobalDragEnd);
+    window.addEventListener('drop', handleGlobalDragEnd);
+    
+    return () => {
+      window.removeEventListener('dragend', handleGlobalDragEnd);
+      window.removeEventListener('drop', handleGlobalDragEnd);
+    };
+  }, []);
 
   // --- IA AUDIT ENGINE ---
   const draftsIA = useMemo(() => {
@@ -263,23 +281,42 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     }
   };
 
-  // Drag & Drop Handlers
+  // 🛡️ NUEVOS DRAG & DROP HANDLERS (Usando dragDepth)
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepth.current += 1; // Incrementamos la profundidad al entrar
+    
+    // Solo activamos el estado si estamos arrastrando archivos
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      if (!isDragging) setIsDragging(true);
+    }
+  };
+
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!isDragging) setIsDragging(true);
   };
 
   const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDragging(false);
+    dragDepth.current -= 1; // Reducimos la profundidad al salir de un hijo
+    
+    // Si la profundidad es 0 o menor, realmente hemos salido del contenedor principal
+    if (dragDepth.current <= 0) {
+      setIsDragging(false);
+      dragDepth.current = 0; // Prevenir números negativos por seguridad
+    }
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
+    
+    // Limpiamos los estados al soltar
     setIsDragging(false);
+    dragDepth.current = 0;
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
@@ -538,23 +575,32 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
   return (
     <div 
-      className={cn("animate-fade-in space-y-6 pb-24 min-h-screen relative", isDragging && "bg-indigo-50/50")}
+      className={cn("animate-fade-in space-y-6 pb-24 min-h-screen relative transition-colors duration-300", isDragging && "bg-indigo-50/50")}
+      onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* OVERLAY DE DRAG & DROP */}
+      {/* 🚀 OVERLAY DE DRAG & DROP MEJORADO */}
       <AnimatePresence>
         {isDragging && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="absolute inset-0 z-[999] bg-indigo-600/90 backdrop-blur-sm rounded-[3rem] border-4 border-dashed border-white flex flex-col items-center justify-center pointer-events-none"
+            // Cambiado a "fixed" para que ocupe siempre toda la pantalla visible, con un z-index extremo.
+            // pointer-events-none asegura que el propio div azul no cause problemas al pasar el ratón por encima.
+            className="fixed inset-0 z-[9999] bg-indigo-600/90 backdrop-blur-sm border-[16px] border-dashed border-white/40 flex flex-col items-center justify-center pointer-events-none"
           >
-            <FileDown className="w-24 h-24 text-white mb-4 animate-bounce" />
-            <h2 className="text-4xl font-black text-white tracking-tighter">¡Suelta tu PDF aquí!</h2>
-            <p className="text-indigo-200 font-bold mt-2">La IA lo procesará al instante</p>
+            <motion.div 
+              initial={{ scale: 0.8, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="flex flex-col items-center justify-center"
+            >
+              <FileDown className="w-32 h-32 text-white mb-6 animate-bounce" />
+              <h2 className="text-5xl font-black text-white tracking-tighter drop-shadow-lg">¡Suelta tu PDF aquí!</h2>
+              <p className="text-indigo-200 text-xl font-bold mt-4">La IA se encarga de extraer todos los datos</p>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
