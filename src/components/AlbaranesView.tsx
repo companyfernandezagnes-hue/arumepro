@@ -31,7 +31,7 @@ const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string
  * ======================================================= */
 
 type LineaIA = { qty: number; name: string; unit: string; unit_price: number; tax_rate: 4 | 10 | 21; total: number; };
-type AlbaranIA = { proveedor: string; fecha: string; num: string; unidad?: 'REST' | 'SHOP'; lineas: LineaIA[]; sum_base?: number; sum_tax?: number; sum_total?: number; };
+type AlbaranIA = { proveedor: string; fecha: string; num: string; unidad?: 'REST' | 'SHOP' | 'DLV' | 'CORP'; lineas: LineaIA[]; sum_base?: number; sum_tax?: number; sum_total?: number; };
 
 const TOL = 0.01;
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -130,7 +130,7 @@ const callGemini = async (apiKey: string, mimeType: string, base64Data: string, 
 
 const PROMPT_ALBARAN = `Analiza este albarán. Devuelve SOLO JSON estricto:
 {
-  "proveedor": "string", "fecha": "YYYY-MM-DD", "num": "string", "unidad": "REST" | "SHOP",
+  "proveedor": "string", "fecha": "YYYY-MM-DD", "num": "string", "unidad": "REST" | "SHOP" | "DLV" | "CORP",
   "lineas": [ {"qty": 1, "name": "string", "unit": "ud|kg|l", "unit_price": 0, "tax_rate": 4|10|21, "total": 0} ],
   "sum_total": 0
 }
@@ -193,7 +193,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     return m;
   }, [data.albaranes]);
 
-  // 🚀 1. LECTOR IMAGEN IA + PLAN B (TESSERACT OCR)
+  // 🚀 1. LECTOR IMAGEN / PDF IA + PLAN B (TESSERACT / PDFJS)
   const processImageWithAI = async (file: File | Blob) => {
     const myRunId = ++runId.current;
     const apiKey = sessionStorage.getItem('gemini_api_key') || localStorage.getItem('gemini_api_key');
@@ -201,19 +201,34 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     setIsAnalyzing(true); setPriceAlerts([]);
     
     try {
-      const objUrl = objectUrlFromFile(file);
-      setScannedImage(objUrl);
+      if (file.type.startsWith('image/')) {
+        setScannedImage(objectUrlFromFile(file));
+      }
 
-      // Si no hay API Key, forzamos el error para que salte al OCR gratuito (Plan B)
       if (!apiKey) throw new Error("NO_API_KEY");
 
-      const base64Data = await compressImageToBase64(file);
-      const datosIA = await callGemini(apiKey, "image/jpeg", base64Data, PROMPT_ALBARAN);
+      let base64Data = "";
+      let mimeType = file.type;
+
+      // FIX: Si es PDF lo leemos directo, si es imagen lo comprimimos
+      if (file.type === 'application/pdf') {
+        base64Data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string).split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+      } else {
+        base64Data = await compressImageToBase64(file);
+        mimeType = "image/jpeg";
+      }
+
+      const datosIA = await callGemini(apiKey, mimeType, base64Data, PROMPT_ALBARAN);
       if (myRunId !== runId.current) return; 
 
       const al: AlbaranIA = {
         proveedor: datosIA.proveedor || "Desconocido", fecha: normalizeDate(datosIA.fecha),
-        num: datosIA.num || "S/N", unidad: (datosIA.unidad === 'SHOP' ? 'SHOP' : 'REST'),
+        num: datosIA.num || "S/N", unidad: (datosIA.unidad || 'REST') as BusinessUnit,
         lineas: Array.isArray(datosIA.lineas) ? datosIA.lineas : [], sum_total: asNum(datosIA.sum_total),
       };
 
@@ -235,23 +250,40 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     } catch (err: any) {
       if (myRunId !== runId.current) return;
 
-      console.warn("⚠️ Gemini falló o no está configurado. Saltando al Plan B (Tesseract OCR)...");
+      console.warn("⚠️ Gemini falló o no está configurado. Saltando al Plan B local...");
       
       try {
-        // 🚀 PLAN B: OCR LOCAL CON TESSERACT.JS
-        const tesseractModule = await import('tesseract.js');
-        const Tesseract = tesseractModule.default || tesseractModule;
-        
-        const { data: { text } } = await Tesseract.recognize(file, 'spa');
+        let extractedText = "";
+
+        // 🚀 PLAN B: SOPORTE PARA PDF Y TESSERACT
+        if (file.type === 'application/pdf') {
+           const pdfjsModule = await import('pdfjs-dist');
+           const pdfjsLib = pdfjsModule.default || pdfjsModule;
+           pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+           
+           const arrayBuffer = await file.arrayBuffer();
+           const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+           
+           for (let i = 1; i <= pdfDoc.numPages; i++) {
+             const page = await pdfDoc.getPage(i);
+             const textContent = await page.getTextContent();
+             extractedText += textContent.items.map((item: any) => item.str).join(' ') + '\n';
+           }
+        } else {
+           const tesseractModule = await import('tesseract.js');
+           const Tesseract = tesseractModule.default || tesseractModule;
+           const { data: { text } } = await Tesseract.recognize(file, 'spa');
+           extractedText = text;
+        }
         
         setForm(prev => ({
           ...prev, 
-          text: (prev.text ? prev.text + "\n\n" : "") + "--- TEXTO RECUPERADO (OCR LOCAL) ---\n" + text 
+          text: (prev.text ? prev.text + "\n\n" : "") + "--- TEXTO RECUPERADO (LOCAL) ---\n" + extractedText 
         }));
         
-        alert("⚠️ Gemini no está disponible o falló. El OCR local gratuito ha rescatado el texto del ticket. Revísalo en la caja de texto.");
+        alert("⚠️ Gemini falló. El lector local ha rescatado el texto del documento. Revísalo en la caja de texto.");
       } catch (ocrErr) {
-        alert(`⚠️ Problema crítico: No hemos podido leer la imagen ni con IA ni con el OCR local.`);
+        alert(`⚠️ Problema crítico: No hemos podido leer el documento ni con IA ni con el lector local.`);
       }
     } finally {
       if (myRunId === runId.current) setIsAnalyzing(false);
@@ -372,7 +404,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         ${JSON.stringify(editForm)}
         Escucha el audio y aplica las modificaciones solicitadas (añadir, quitar o cambiar cantidad/precio).
         Devuelve SOLO el JSON actualizado manteniendo la estructura original:
-        { "proveedor": "string", "fecha": "YYYY-MM-DD", "num": "string", "unidad": "REST"|"SHOP", "lineas": [ {"qty": 1, "name": "string", "unit": "ud", "unit_price": 0, "tax_rate": 4|10|21, "total": 0} ] }`;
+        { "proveedor": "string", "fecha": "YYYY-MM-DD", "num": "string", "unidad": "REST"|"SHOP"|"DLV"|"CORP", "lineas": [ {"qty": 1, "name": "string", "unit": "ud", "unit_price": 0, "tax_rate": 4|10|21, "total": 0} ] }`;
 
       const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
@@ -385,7 +417,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
       const al: AlbaranIA = {
         proveedor: rawJson.proveedor || "Desconocido", fecha: normalizeDate(rawJson.fecha),
-        num: rawJson.num || "S/N", unidad: (rawJson.unidad === 'SHOP' ? 'SHOP' : 'REST'),
+        num: rawJson.num || "S/N", unidad: (rawJson.unidad || 'REST') as BusinessUnit,
         lineas: Array.isArray(rawJson.lineas) ? rawJson.lineas : [], sum_total: asNum(rawJson.sum_total),
       };
       
@@ -553,7 +585,12 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   };
 
   // 🚀 4. GESTIÓN DEL MODAL Y EDICIÓN MANUAL REAL
-  const openEditModal = (albaran: Albaran) => { setEditingAlbaran(albaran); setEditForm(albaran); setIsEditMode(false); };
+  // MODIFICADO: Ahora el modal se abre SIEMPRE en modo edición para que tengas el botón Guardar a la vista.
+  const openEditModal = (albaran: Albaran) => { 
+    setEditingAlbaran(albaran); 
+    setEditForm(albaran); 
+    setIsEditMode(true); 
+  };
   
   const handleItemChange = (index: number, field: string, value: any) => {
     if (!editForm || !editForm.items) return;
@@ -576,6 +613,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   
   const vaciarItems = () => setEditForm(f => f ? ({ ...f, items: [] }) : f);
 
+  // MODIFICADO: Guardado seguro de Socio y Unidad de Negocio
   const handleSaveEdits = async () => {
     if (!editForm) return;
     const newData = { ...data };
@@ -590,6 +628,8 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
       newData.albaranes[index] = { 
         ...editForm, 
+        socio: editForm.socio || "Arume",         // Guardado de Socio
+        unitId: editForm.unitId || "REST",        // Guardado de Unidad
         items: rec.lineas.map(l => ({ q: l.qty, n: l.name, unit: l.unit, t: l.total, rate: l.tax_rate, base: l.base, tax: l.tax, unitPrice: l.unit_price })),
         total: rec.sum_total, base: rec.sum_base, taxes: rec.sum_tax 
       };
@@ -849,64 +889,66 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
               
               <div className="border-b border-slate-100 pb-4 mb-6 flex justify-between items-end">
                 <div>
-                  <h3 className="text-2xl font-black text-slate-800 tracking-tighter">{isEditMode ? 'Editando Albarán' : 'Detalle del Gasto'}</h3>
+                  <h3 className="text-2xl font-black text-slate-800 tracking-tighter">Editando Albarán</h3>
                   <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest mt-1">Ref: {editForm.num}</p>
                 </div>
-                {!isEditMode && (
-                  <button onClick={() => setIsEditMode(true)} className="bg-indigo-50 text-indigo-600 p-2 rounded-xl hover:bg-indigo-100 transition"><Edit3 className="w-5 h-5" /></button>
-                )}
               </div>
               
               <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar space-y-6 relative">
                 
+                {/* 🚀 NUEVO GRID 2x2 PARA PROVEEDOR, FECHA, SOCIO Y UNIDAD */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
                     <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Proveedor</p>
-                    {isEditMode ? <input value={editForm.prov} onChange={e => setEditForm({...editForm, prov: e.target.value})} className="w-full bg-white border border-slate-200 rounded p-1 text-sm font-bold outline-none focus:border-indigo-500" /> : <p className="text-sm font-black text-slate-800">{editForm.prov}</p>}
+                    <input value={editForm.prov} onChange={e => setEditForm({...editForm, prov: e.target.value})} className="w-full bg-white border border-slate-200 rounded p-1 text-sm font-bold outline-none focus:border-indigo-500" />
                   </div>
+                  
                   <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
                     <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Fecha</p>
-                    {isEditMode ? <input type="date" value={editForm.date} onChange={e => setEditForm({...editForm, date: e.target.value})} className="w-full bg-white border border-slate-200 rounded p-1 text-sm font-bold outline-none focus:border-indigo-500" /> : <p className="text-sm font-black text-slate-800">{editForm.date}</p>}
+                    <input type="date" value={editForm.date} onChange={e => setEditForm({...editForm, date: e.target.value})} className="w-full bg-white border border-slate-200 rounded p-1 text-sm font-bold outline-none focus:border-indigo-500" />
+                  </div>
+
+                  {/* 🚀 CAMPO SOCIO */}
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Socio / Quién Pagó</p>
+                    <input type="text" value={editForm.socio || ""} onChange={(e) => setEditForm({ ...editForm, socio: e.target.value })} className="w-full bg-white border border-slate-200 rounded p-1 text-sm font-bold outline-none focus:border-indigo-500" placeholder="Socio..." />
+                  </div>
+
+                  {/* 🚀 CAMPO UNIDAD DE NEGOCIO */}
+                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Unidad</p>
+                    <select value={editForm.unitId || "REST"} onChange={(e) => setEditForm({ ...editForm, unitId: e.target.value as BusinessUnit })} className="w-full bg-white border border-slate-200 rounded p-1 text-sm font-bold outline-none focus:border-indigo-500">
+                      <option value="REST">Restaurante</option>
+                      <option value="DLV">Catering Hoteles</option>
+                      <option value="SHOP">Tienda Sake</option>
+                      <option value="CORP">Socios / Corp</option>
+                    </select>
                   </div>
                 </div>
 
                 <div className="space-y-2">
                   <div className="flex justify-between items-center ml-2">
                     <p className="text-[9px] font-black text-slate-400 uppercase">Desglose de productos</p>
-                    {isEditMode && (
-                      <div className="flex gap-2">
-                        <button onClick={vaciarItems} className="bg-rose-50 text-rose-600 px-2 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-rose-100 transition shadow-sm">Vaciar</button>
-                        <button onClick={() => startVoiceRecording('edit')} className="bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase flex items-center gap-1 hover:bg-indigo-200 transition shadow-sm">
-                          <Mic className="w-3 h-3" /> Dictar Cambios
-                        </button>
-                      </div>
-                    )}
+                    <div className="flex gap-2">
+                      <button onClick={vaciarItems} className="bg-rose-50 text-rose-600 px-2 py-1.5 rounded-lg text-[9px] font-black uppercase hover:bg-rose-100 transition shadow-sm">Vaciar</button>
+                      <button onClick={() => startVoiceRecording('edit')} className="bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase flex items-center gap-1 hover:bg-indigo-200 transition shadow-sm">
+                        <Mic className="w-3 h-3" /> Dictar Cambios
+                      </button>
+                    </div>
                   </div>
 
                   <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 space-y-2">
-                    {/* 🚀 EDICIÓN MANUAL CELDAS */}
                     {editForm.items?.map((it, i) => (
                       <div key={i} className="flex justify-between items-center text-xs border-b border-slate-200 last:border-0 pb-2 last:pb-0 pt-2 first:pt-0 group gap-2">
-                        {isEditMode ? (
-                          <>
-                            <input type="number" value={it.q} onChange={e => handleItemChange(i, 'q', asNum(e.target.value))} className="w-12 bg-white border border-slate-200 rounded p-1 font-bold text-center outline-none focus:border-indigo-500" />
-                            <span className="text-slate-400 font-bold">x</span>
-                            <input type="text" value={it.n} onChange={e => handleItemChange(i, 'n', e.target.value)} className="flex-1 bg-white border border-slate-200 rounded p-1 font-bold outline-none focus:border-indigo-500" />
-                            <input type="number" value={it.t} onChange={e => handleItemChange(i, 't', asNum(e.target.value))} className="w-16 bg-white border border-slate-200 rounded p-1 font-black text-right outline-none focus:border-indigo-500" />
-                            <button onClick={() => deleteItemFromEdit(i)} className="text-slate-300 hover:text-rose-500 transition ml-1"><Trash2 className="w-4 h-4" /></button>
-                          </>
-                        ) : (
-                          <>
-                            <span className="font-bold text-slate-700 flex-1"><b>{it.q}x</b> {it.n}</span>
-                            <span className="font-black text-slate-900 mr-2">{Num.fmt(it.t)}</span>
-                          </>
-                        )}
+                        <input type="number" value={it.q} onChange={e => handleItemChange(i, 'q', asNum(e.target.value))} className="w-12 bg-white border border-slate-200 rounded p-1 font-bold text-center outline-none focus:border-indigo-500" />
+                        <span className="text-slate-400 font-bold">x</span>
+                        <input type="text" value={it.n} onChange={e => handleItemChange(i, 'n', e.target.value)} className="flex-1 bg-white border border-slate-200 rounded p-1 font-bold outline-none focus:border-indigo-500" />
+                        <input type="number" value={it.t} onChange={e => handleItemChange(i, 't', asNum(e.target.value))} className="w-16 bg-white border border-slate-200 rounded p-1 font-black text-right outline-none focus:border-indigo-500" />
+                        <button onClick={() => deleteItemFromEdit(i)} className="text-slate-300 hover:text-rose-500 transition ml-1"><Trash2 className="w-4 h-4" /></button>
                       </div>
                     ))}
                     
-                    {isEditMode && (
-                      <button onClick={handleAddLine} className="mt-2 text-[10px] font-bold text-indigo-500 hover:text-indigo-700 flex items-center gap-1"><Plus className="w-3 h-3"/> Añadir línea manual</button>
-                    )}
+                    <button onClick={handleAddLine} className="mt-2 text-[10px] font-bold text-indigo-500 hover:text-indigo-700 flex items-center gap-1"><Plus className="w-3 h-3"/> Añadir línea manual</button>
 
                     <div className="mt-4 pt-2 border-t border-slate-300 border-dashed flex justify-between text-[10px] text-slate-500 font-bold">
                       <span>Base: {Num.fmt(editForm.base || 0)}</span>
@@ -918,23 +960,17 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                 <div className="flex justify-between items-center bg-slate-900 p-6 rounded-[2rem] text-white shadow-xl">
                   <div><p className="text-[10px] font-black text-slate-400 uppercase">Total Importe</p><p className="text-3xl font-black text-emerald-400">{Num.fmt(editForm.total)}</p></div>
                   <div className="text-right">
-                    {isEditMode ? (
-                       <label className="flex items-center gap-2 cursor-pointer bg-slate-800 p-2 rounded-xl">
-                         <input type="checkbox" checked={editForm.paid} onChange={e => setEditForm({...editForm, paid: e.target.checked})} className="w-4 h-4 accent-emerald-500" /><span className="text-[10px] font-bold">PAGADO</span>
-                       </label>
-                    ) : (
-                      <div className={cn("px-3 py-1 rounded-full text-[10px] font-black uppercase inline-block", editForm.paid ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400")}>{editForm.paid ? 'Pagado' : 'Pendiente'}</div>
-                    )}
+                    <label className="flex items-center gap-2 cursor-pointer bg-slate-800 p-2 rounded-xl">
+                      <input type="checkbox" checked={editForm.paid} onChange={e => setEditForm({...editForm, paid: e.target.checked})} className="w-4 h-4 accent-emerald-500" /><span className="text-[10px] font-bold">PAGADO</span>
+                    </label>
                   </div>
                 </div>
               </div>
 
+              {/* 🚀 BOTONES SIEMPRE VISIBLES */}
               <div className="mt-8 pt-6 border-t border-slate-100 flex gap-3">
-                {isEditMode ? (
-                  <><button onClick={() => setIsEditMode(false)} className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl font-black text-xs hover:bg-slate-200">CANCELAR</button><button onClick={handleSaveEdits} className="flex-[2] bg-indigo-600 text-white py-4 rounded-2xl font-black text-xs hover:bg-indigo-700 flex justify-center items-center gap-2 shadow-lg"><Save className="w-4 h-4" /> GUARDAR CAMBIOS</button></>
-                ) : (
-                  <><button onClick={() => handleDelete(editingAlbaran.id)} className="flex-1 bg-rose-50 text-rose-500 py-4 rounded-2xl font-black text-xs hover:bg-rose-100 flex justify-center items-center gap-2"><Trash2 className="w-4 h-4" /> ELIMINAR</button><button onClick={() => setEditingAlbaran(null)} className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl font-black text-xs hover:bg-slate-200">CERRAR</button></>
-                )}
+                <button onClick={() => setEditingAlbaran(null)} className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl font-black text-xs hover:bg-slate-200">CANCELAR</button>
+                <button onClick={handleSaveEdits} className="flex-[2] bg-indigo-600 text-white py-4 rounded-2xl font-black text-xs hover:bg-indigo-700 flex justify-center items-center gap-2 shadow-lg"><Save className="w-4 h-4" /> GUARDAR CAMBIOS</button>
               </div>
             </motion.div>
           </div>
