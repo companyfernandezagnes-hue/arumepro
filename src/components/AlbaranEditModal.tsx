@@ -2,6 +2,7 @@ import React from 'react';
 import { Save, Trash2, X, Plus, Mic } from 'lucide-react';
 import { Albaran } from '../types';
 import { Num } from '../services/engine';
+import { BusinessUnit } from '../views/AlbaranesView';
 
 interface AlbaranEditModalProps {
   editForm: Albaran;
@@ -71,7 +72,7 @@ export const AlbaranEditModal = ({ editForm, sociosReales, setEditForm, onClose,
               <input type="date" value={editForm.date} onChange={e => setEditForm(prev => prev ? {...prev, date: e.target.value} : null)} className="w-full bg-white border border-slate-200 rounded p-1 text-sm font-bold outline-none focus:border-indigo-500" />
             </div>
 
-            {/* 🚀 SELECTOR DE SOCIOS SEGURO */}
+            {/* 🚀 SELECTOR DE SOCIOS A PRUEBA DE FALLOS */}
             <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
               <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Pagado por (Socio)</p>
               <select 
@@ -88,7 +89,7 @@ export const AlbaranEditModal = ({ editForm, sociosReales, setEditForm, onClose,
 
             <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
               <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Unidad Negocio</p>
-              <select value={editForm.unitId || "REST"} onChange={(e) => setEditForm(prev => prev ? { ...prev, unitId: e.target.value as any } : null)} className="w-full bg-white border border-slate-200 rounded p-1 text-sm font-bold outline-none focus:border-indigo-500">
+              <select value={editForm.unitId || "REST"} onChange={(e) => setEditForm(prev => prev ? { ...prev, unitId: e.target.value as BusinessUnit } : null)} className="w-full bg-white border border-slate-200 rounded p-1 text-sm font-bold outline-none focus:border-indigo-500">
                 <option value="REST">Restaurante</option>
                 <option value="DLV">Catering Hoteles</option>
                 <option value="SHOP">Tienda Sake</option>
