@@ -539,20 +539,67 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [safeData.facturas, year, filterStatus, searchQ, selectedUnit, mode]);
 
+ // 🚀 LÓGICA ERP: Control de Pagos y Estados (Soluciona Error 10)
   const handleTogglePago = async (id: string) => {
     const newData = { ...safeData };
     const idx = newData.facturas.findIndex(f => f.id === id);
+    
     if (idx !== -1) {
-      newData.facturas[idx].paid = !newData.facturas[idx].paid;
+      const factura = newData.facturas[idx];
+      
+      // Si ya estaba conciliada con el banco, bloqueamos la acción por seguridad
+      if (factura.reconciled) {
+        alert("🔒 ACCIÓN DENEGADA: Esta factura ya está conciliada con el Banco. Para modificarla, desvincúlala primero en el módulo de Tesorería.");
+        return;
+      }
+
+      const isCurrentlyPaid = factura.paid;
+      
+      // Alternamos el estado booleano
+      factura.paid = !isCurrentlyPaid;
+      
+      if (!isCurrentlyPaid) {
+        // PASA A PAGADA
+        factura.status = 'paid';
+        factura.fecha_pago = DateUtil.today(); // Usamos tu robusto motor de fechas
+      } else {
+        // VUELVE A PENDIENTE
+        factura.status = 'approved'; 
+        factura.fecha_pago = undefined;
+      }
+
+      // Guardamos en la base de datos central
       await onSave(newData);
     }
   };
 
+ // 🛡️ UX SEGURA: Confirmación antes de borrar (Soluciona Error 16)
   const handleDeleteFactura = async (id: string) => {
     const fac = safeData.facturas.find(f => f.id === id);
     if (!fac) return;
-    if (fac.reconciled) return alert("⚠️ No puedes borrar una factura que ya ha pasado por el Banco.");
-    if (!confirm(`¿Borrar la factura ${fac.num} y liberar sus albaranes?`)) return;
+    
+    // Regla de negocio: No se borran facturas que ya pasaron por el banco
+    if (fac.reconciled) {
+      alert("⚠️ No puedes borrar una factura que ya ha sido procesada y validada por el Banco.");
+      return;
+    }
+    
+    // Confirmación nativa del navegador para evitar borrados accidentales
+    const isConfirmed = window.confirm(`🛑 ¿Estás seguro de que deseas ELIMINAR DEFINITIVAMENTE la factura ${fac.num || 'sin número'} de ${fac.prov || fac.cliente}? \n\nLos albaranes vinculados volverán a quedar libres y pendientes de facturar.`);
+    
+    if (!isConfirmed) return;
+
+    const newData = { ...safeData };
+    const ids = fac.albaranIdsArr || [];
+    
+    // Liberamos los albaranes para que vuelvan a estar disponibles
+    newData.albaranes = newData.albaranes.map(a => ids.includes(a.id) ? { ...a, invoiced: false } : a);
+    
+    // Eliminamos la factura
+    newData.facturas = newData.facturas.filter(f => f.id !== id);
+    
+    await onSave(newData);
+  };
 
     const newData = { ...safeData };
     const ids = fac.albaranIdsArr || [];
