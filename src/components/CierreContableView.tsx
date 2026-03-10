@@ -1,18 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
-  Lock, 
-  Unlock, 
-  ChevronLeft, 
-  ChevronRight, 
-  Calendar,
-  TrendingUp,
-  TrendingDown,
-  AlertCircle,
-  History,
-  CheckCircle2,
-  XCircle
+  Lock, Unlock, ChevronLeft, ChevronRight, History, 
+  CheckCircle2, AlertCircle, TrendingUp, TrendingDown 
 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { AppData, CierreMensual } from '../types';
 import { ArumeEngine, Num } from '../services/engine';
 import { cn } from '../lib/utils';
@@ -24,208 +15,173 @@ interface CierreContableViewProps {
 
 export const CierreContableView: React.FC<CierreContableViewProps> = ({ data, onSave }) => {
   const [year, setYear] = useState(new Date().getFullYear());
-  const meses = [
-    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
-    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
-  ];
+  const meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+
+  // 🚀 OPTIMIZACIÓN: Calculamos los snapshots de todo el año de una sola vez
+  const yearlySnapshots = useMemo(() => {
+    return meses.map((_, i) => {
+      const profitData = ArumeEngine.getProfit(data, i + 1, year);
+      return {
+        ventas: profitData.ingresos.total,
+        compras: profitData.gastos.comida + profitData.gastos.bebida + profitData.gastos.otros,
+        fijos: profitData.gastos.personal + profitData.gastos.estructura,
+        amortizaciones: profitData.gastos.amortizacion,
+        resultado: profitData.neto
+      };
+    });
+  }, [data, year]);
 
   const cierresMensuales = data.cierres_mensuales || [];
 
-  const getSnapshot = (mesIndex: number, anio: number) => {
-    const profitData = ArumeEngine.getProfit(data, mesIndex, anio);
-    return {
-      ventas: profitData.ingresos.total,
-      compras: profitData.gastos.comida + profitData.gastos.bebida + profitData.gastos.otros,
-      fijos: profitData.gastos.personal + profitData.gastos.estructura,
-      amortizaciones: profitData.gastos.amortizacion,
-      resultado: profitData.neto
-    };
-  };
+  const handleCerrarMes = async (mesIndex: number, snapshot: any) => {
+    if (snapshot.ventas === 0) {
+      return alert("⚠️ No puedes cerrar un mes sin ventas registradas.");
+    }
 
-  const handleCerrarMes = async (mesIndex: number, anio: number) => {
-    if (!confirm(`¿Estás SEGURO de cerrar ${meses[mesIndex]} ${anio}?\n\n⚠️ Esta acción guardará una copia fija de los datos.`)) return;
+    const confirmMsg = `¿Cerrar ${meses[mesIndex]} ${year}?\n\n` +
+      `Ventas: ${Num.fmt(snapshot.ventas)}\n` +
+      `Resultado: ${Num.fmt(snapshot.resultado)}\n\n` +
+      `🔒 Esto creará un registro permanente e inalterable.`;
 
-    const snapshot = getSnapshot(mesIndex, anio);
+    if (!confirm(confirmMsg)) return;
+
     const nuevoCierre: CierreMensual = {
-      id: Date.now().toString(),
+      id: `cierre-${year}-${mesIndex}-${Date.now()}`,
       mes: mesIndex,
-      anio: anio,
+      anio: year,
       fecha_cierre: new Date().toISOString(),
       snapshot: snapshot
     };
 
-    const newData = {
+    await onSave({
       ...data,
       cierres_mensuales: [...cierresMensuales, nuevoCierre]
-    };
-
-    await onSave(newData);
+    });
   };
 
   const handleAbrirMes = async (id: string) => {
-    if (!confirm("⚠️ ¿Reabrir este mes? \n\nLos datos volverán a calcularse en vivo.")) return;
-
-    const newData = {
+    if (!confirm("⚠️ ¿Deseas reabrir este periodo? Los datos volverán a ser calculados en tiempo real.")) return;
+    await onSave({
       ...data,
       cierres_mensuales: cierresMensuales.filter(c => c.id !== id)
-    };
-
-    await onSave(newData);
-  };
-
-  const changeYear = (delta: number) => {
-    setYear(prev => prev + delta);
+    });
   };
 
   return (
-    <div className="animate-fade-in space-y-6 pb-24">
-      {/* Header */}
-      <header className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4">
-        <div>
-          <h2 className="text-xl font-black text-slate-800 tracking-tight">Cierre Contable</h2>
-          <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest flex items-center gap-2">
-            <History className="w-3 h-3" />
-            Congelar Periodos y Auditoría
-          </p>
-        </div>
+    <div className="animate-fade-in space-y-8 pb-24">
+      {/* HEADER CON SELECTOR DE AÑO */}
+      <header className="bg-white p-8 rounded-[3rem] shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-6">
         <div className="flex items-center gap-4">
-          <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
-            <button 
-              onClick={() => changeYear(-1)} 
-              className="w-10 h-10 flex items-center justify-center text-slate-500 font-bold hover:bg-white rounded-lg transition shadow-sm"
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-            <span className="px-6 py-1 font-black text-slate-700 flex items-center text-lg">
-              {year}
-            </span>
-            <button 
-              onClick={() => changeYear(1)} 
-              className="w-10 h-10 flex items-center justify-center text-slate-500 font-bold hover:bg-white rounded-lg transition shadow-sm"
-            >
-              <ChevronRight className="w-5 h-5" />
-            </button>
+          <div className="p-4 bg-indigo-50 rounded-3xl text-indigo-600">
+            <Lock className="w-8 h-8" />
           </div>
+          <div>
+            <h2 className="text-2xl font-black text-slate-800 tracking-tighter">Cierre Contable</h2>
+            <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Auditoría y Bloqueo de Resultados</p>
+          </div>
+        </div>
+
+        <div className="flex items-center bg-slate-100 p-2 rounded-[2rem] border border-slate-200 shadow-inner">
+          <button onClick={() => setYear(y => y - 1)} className="p-3 hover:bg-white rounded-2xl transition shadow-sm text-slate-600"><ChevronLeft /></button>
+          <span className="px-8 font-black text-xl text-slate-800">{year}</span>
+          <button onClick={() => setYear(y => y + 1)} className="p-3 hover:bg-white rounded-2xl transition shadow-sm text-slate-600"><ChevronRight /></button>
         </div>
       </header>
 
-      {/* Grid */}
+      
+
+      {/* GRID DE MESES */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {meses.map((nombreMes, i) => {
           const cierre = cierresMensuales.find(c => c.mes === i && c.anio === year);
           const isClosed = !!cierre;
-          const datos = isClosed ? cierre.snapshot : getSnapshot(i, year);
+          const datos = isClosed ? cierre.snapshot : yearlySnapshots[i];
           
-          const today = new Date();
-          const currentMonth = today.getMonth();
-          const currentYear = today.getFullYear();
-          
-          const canClose = !isClosed && (year < currentYear || (year === currentYear && i <= currentMonth));
+          const now = new Date();
+          const isFuture = year > now.getFullYear() || (year === now.getFullYear() && i > now.getMonth());
+          const canClose = !isClosed && !isFuture;
 
           return (
-            <motion.div 
-              layout
+            <motion.div
               key={`${year}-${i}`}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.05 }}
               className={cn(
-                "p-6 rounded-[2.5rem] shadow-sm relative overflow-hidden transition-all duration-300 border group",
+                "relative p-8 rounded-[3rem] border transition-all duration-500",
                 isClosed 
-                  ? 'bg-slate-900 text-white border-slate-800' 
-                  : (canClose 
-                      ? 'bg-white border-slate-100 hover:shadow-xl hover:border-indigo-100' 
-                      : 'bg-slate-50 border-transparent opacity-60 grayscale')
+                  ? "bg-slate-900 border-slate-800 text-white shadow-2xl" 
+                  : "bg-white border-slate-100 hover:border-indigo-200 hover:shadow-xl"
               )}
             >
-              <div className="flex justify-between items-start mb-6">
+              {/* STATUS BADGE */}
+              <div className="flex justify-between items-start mb-8">
                 <div>
-                  <h3 className={cn("font-black text-xl", isClosed ? 'text-white' : 'text-slate-800')}>
-                    {nombreMes}
-                  </h3>
-                  <p className={cn("text-[9px] font-bold uppercase tracking-widest mt-1", isClosed ? 'text-indigo-400' : 'text-slate-400')}>
-                    {isClosed ? 'Periodo Congelado' : 'Periodo Abierto'}
-                  </p>
+                  <h3 className="text-2xl font-black tracking-tighter">{nombreMes}</h3>
+                  <div className={cn("flex items-center gap-1.5 mt-1 text-[10px] font-black uppercase tracking-widest", isClosed ? "text-indigo-400" : "text-slate-400")}>
+                    {isClosed ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
+                    {isClosed ? "Contabilidad Cerrada" : "Periodo en Vivo"}
+                  </div>
                 </div>
-                <div className={cn(
-                  "px-3 py-1 rounded-full text-[9px] font-black uppercase flex items-center gap-1.5",
-                  isClosed ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-100 text-slate-500'
-                )}>
-                  {isClosed ? <Lock className="w-3 h-3" /> : <Unlock className="w-3 h-3" />}
-                  {isClosed ? 'CERRADO' : 'ABIERTO'}
-                </div>
+                {datos.resultado !== 0 && (
+                  <div className={cn("p-2 rounded-2xl", datos.resultado > 0 ? "bg-emerald-500/10 text-emerald-500" : "bg-rose-500/10 text-rose-500")}>
+                    {datos.resultado > 0 ? <TrendingUp /> : <TrendingDown />}
+                  </div>
+                )}
               </div>
 
-              <div className="space-y-3 mb-6">
-                <div className="flex justify-between items-center text-xs">
-                  <span className={isClosed ? 'text-slate-400' : 'text-slate-500'}>Ventas Totales</span>
-                  <span className={cn("font-black", isClosed ? 'text-white' : 'text-slate-900')}>
-                    {Num.fmt(datos.ventas)}
-                  </span>
+              {/* DATA ROWS */}
+              <div className="space-y-4 mb-8">
+                <div className="flex justify-between text-sm font-bold">
+                  <span className="opacity-50">Ventas</span>
+                  <span>{Num.fmt(datos.ventas)}</span>
                 </div>
-                <div className="flex justify-between items-center text-xs">
-                  <span className={isClosed ? 'text-slate-400' : 'text-slate-500'}>Compras (Var.)</span>
-                  <span className={cn("font-black", isClosed ? 'text-rose-300' : 'text-rose-500')}>
-                    -{Num.fmt(datos.compras)}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center text-xs">
-                  <span className={isClosed ? 'text-slate-400' : 'text-slate-500'}>Estructura (Fijo)</span>
-                  <span className={cn("font-black", isClosed ? 'text-orange-300' : 'text-orange-500')}>
-                    -{Num.fmt(datos.fijos)}
-                  </span>
+                <div className="flex justify-between text-sm font-bold text-rose-400">
+                  <span className="opacity-50">Costes Totales</span>
+                  <span>-{Num.fmt(datos.compras + datos.fijos + datos.amortizaciones)}</span>
                 </div>
                 
-                <div className={cn("w-full h-px my-4", isClosed ? 'bg-slate-800' : 'bg-slate-100')}></div>
-                
-                <div className="flex justify-between items-center">
-                  <span className={cn("text-[10px] font-black uppercase tracking-widest", isClosed ? 'text-slate-500' : 'text-slate-400')}>
-                    Beneficio Neto
-                  </span>
+                <div className={cn("h-px w-full my-4", isClosed ? "bg-slate-800" : "bg-slate-100")} />
+
+                <div className="flex justify-between items-end">
+                  <span className="text-[10px] font-black uppercase opacity-40">Resultado Neto</span>
                   <div className="text-right">
-                    <p className={cn(
-                      "text-xl font-black",
-                      datos.resultado >= 0 
-                        ? (isClosed ? 'text-emerald-400' : 'text-emerald-600') 
-                        : (isClosed ? 'text-rose-400' : 'text-rose-600')
+                    <p className={cn("text-2xl font-black tracking-tighter", 
+                      datos.resultado >= 0 ? "text-emerald-400" : "text-rose-400"
                     )}>
                       {Num.fmt(datos.resultado)}
                     </p>
-                    <p className={cn("text-[9px] font-bold", isClosed ? 'text-slate-500' : 'text-slate-400')}>
-                      Margen: {datos.ventas > 0 ? ((datos.resultado / datos.ventas) * 100).toFixed(1) : 0}%
-                    </p>
+                    <p className="text-[10px] font-bold opacity-40">MARGEN: {datos.ventas > 0 ? ((datos.resultado / datos.ventas) * 100).toFixed(1) : 0}%</p>
                   </div>
                 </div>
               </div>
 
+              {/* ACTIONS */}
               {canClose && (
                 <button 
-                  onClick={() => handleCerrarMes(i, year)} 
-                  className="w-full py-4 bg-indigo-50 text-indigo-600 font-black text-[10px] uppercase tracking-widest rounded-2xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm active:scale-95"
+                  onClick={() => handleCerrarMes(i, datos)}
+                  className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-700 transition-all active:scale-95 shadow-lg shadow-indigo-200"
                 >
-                  ❄️ CONGELAR MES {nombreMes.toUpperCase()}
+                  Congelar Resultados
                 </button>
               )}
-              
+
               {isClosed && (
-                <div className="mt-6 pt-4 border-t border-slate-800 flex justify-between items-center">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-                    <p className="text-[9px] text-slate-500 italic">
-                      Auditado {new Date(cierre.fecha_cierre).toLocaleDateString()}
-                    </p>
+                <div className="flex items-center justify-between mt-4">
+                  <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                    Auditado
                   </div>
-                  <button 
-                    onClick={() => handleAbrirMes(cierre.id)} 
-                    className="text-[9px] font-black text-rose-400 hover:text-white hover:bg-rose-500 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
-                  >
-                    <Unlock className="w-2.5 h-2.5" />
-                    REABRIR
+                  <button onClick={() => handleAbrirMes(cierre.id)} className="text-[10px] font-black text-rose-500 hover:underline">
+                    REABRIR PERIODO
                   </button>
                 </div>
               )}
 
-              {!isClosed && !canClose && (
-                <div className="flex items-center gap-2 justify-center py-4 text-slate-400">
+              {isFuture && (
+                <div className="flex items-center justify-center gap-2 py-4 text-slate-300">
                   <AlertCircle className="w-4 h-4" />
-                  <span className="text-[10px] font-bold uppercase tracking-widest">Periodo Futuro</span>
+                  <span className="text-[10px] font-black uppercase tracking-widest">No Disponible</span>
                 </div>
               )}
             </motion.div>
