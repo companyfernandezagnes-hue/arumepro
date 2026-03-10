@@ -3,7 +3,7 @@ import {
   FileText, Search, ChevronLeft, ChevronRight, Zap, Users, Building2, Package, CheckCircle2, Clock, Trash2, AlertCircle, Link as LinkIcon, Mail, ArrowRight, X, RefreshCw, Download, Bell, CheckSquare, Hotel, ShoppingBag, Layers, UploadCloud, FileDown, FileArchive
 } from 'lucide-react';
 
-// ✅ LIBRERÍAS ACTIVADAS (Asegúrate de haber puesto "framer-motion" en el package.json)
+// ✅ LIBRERÍAS ACTIVADAS
 import { motion, AnimatePresence } from 'framer-motion'; 
 import * as XLSX from 'xlsx';
 import { GoogleGenAI } from "@google/genai";
@@ -13,6 +13,7 @@ import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
 import { proxyFetch } from '../services/api';
 import { NotificationService } from '../services/notifications';
+
 // 🚀 TIPOS B2B
 export type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
 
@@ -28,6 +29,7 @@ interface InvoicesViewProps {
   onSave: (newData: AppData) => Promise<void>;
 }
 
+// TODO: Extraer a data/partners.ts en el futuro
 const REAL_PARTNERS = ['PAU', 'JERONI', 'AGNES', 'ONLY ONE', 'TIENDA DE SAKES'];
 
 // 🚀 SUPER NORMALIZADOR
@@ -41,7 +43,7 @@ const superNorm = (s: string) => {
 };
 
 export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
-  // ✅ FIX 2: MODO SEGURO. Evita que la app explote si `data` es undefined un milisegundo al cargar.
+  // ✅ FIX 2: MODO SEGURO
   const safeData = data || { facturas: [], albaranes: [] };
 
   const [activeTab, setActiveTab] = useState<'pend' | 'hist'>('pend');
@@ -55,7 +57,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportQuarter, setExportQuarter] = useState(Math.floor(new Date().getMonth() / 3) + 1);
   
-  // 🛡️ DRAG & DROP STATE (CORREGIDO Y BLINDADO)
+  // 🛡️ DRAG & DROP STATE
   const [isDragging, setIsDragging] = useState(false);
   const dragDepth = useRef(0);
 
@@ -64,7 +66,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [selectedInvoice, setSelectedInvoice] = useState<Factura | null>(null);
   const [modalForm, setModalForm] = useState({ 
     num: '', 
-    date: new Date().toISOString().split('T')[0], 
+    date: DateUtil.today(), 
     selectedAlbs: [] as string[],
     unitId: 'REST' as BusinessUnit
   });
@@ -94,7 +96,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     };
   }, []);
 
-  // Failsafe por tiempo: Si se queda azul por error, a los 4 segundos se quita solo.
   useEffect(() => {
     if (!isDragging) return;
     const t = setTimeout(() => {
@@ -143,7 +144,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     }
   };
 
-  // 🚀 LECTOR DE PDF / IMÁGENES NATIVO (EL "RAYO" + SALVAVIDAS SEGURO)
+  // 🚀 LECTOR DE PDF / IMÁGENES NATIVO
   const processLocalFile = async (file: File) => {
     const apiKey = sessionStorage.getItem('gemini_api_key') || localStorage.getItem('gemini_api_key');
     setIsSyncing(true); 
@@ -187,7 +188,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       newData.facturas.push({
         id: 'draft-local-' + Date.now(),
         num: rawJson.num || 'S/N',
-        date: rawJson.fecha || new Date().toISOString().split('T')[0],
+        date: rawJson.fecha || DateUtil.today(),
         prov: rawJson.proveedor || 'Proveedor Desconocido',
         total: String(rawJson.total || 0),
         base: String(rawJson.base || 0),
@@ -249,7 +250,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         newData.facturas.push({
           id: 'draft-fallback-' + Date.now(),
           num: 'REVISAR MANUAL',
-          date: new Date().toISOString().split('T')[0],
+          date: DateUtil.today(),
           prov: file.type.includes('image') ? '📷 OCR Emergencia' : `📄 PDF Rescatado`,
           total: String(possibleTotal || 0),
           base: String(possibleTotal ? (possibleTotal / 1.10).toFixed(2) : 0),
@@ -288,7 +289,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       if (factura.file_base64.includes('image/jpeg')) ext = "jpg";
       if (factura.file_base64.includes('image/png')) ext = "png";
 
-      a.download = `Factura_${factura.prov.replace(/[^a-z0-9]/gi, '_')}_${factura.num}.${ext}`;
+      a.download = `Factura_${(factura.prov || 'Factura').replace(/[^a-z0-9]/gi, '_')}_${factura.num || 'SN'}.${ext}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -357,14 +358,14 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       unitToAssign = (audit.candidatos[0] as any).unitId || 'REST';
     }
 
-    newData.facturas[draftIdx].status = 'approved';
+    newData.facturas[draftIdx].status = 'approved'; // Pendiente de pago
     newData.facturas[draftIdx].source = 'email-ia';
     newData.facturas[draftIdx].unidad_negocio = unitToAssign; 
     await onSave(newData);
   };
 
   const handleDiscardDraftIA = async (id: string) => {
-    if (!confirm("¿Eliminar factura leída por IA?")) return;
+    if (!window.confirm("¿Eliminar factura leída por IA?")) return;
     const newData = { ...safeData };
     newData.facturas = newData.facturas.filter(f => f.id !== id);
     await onSave(newData);
@@ -456,7 +457,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     setSelectedGroup({ label, ids, unitId });
     setModalForm({
       num: '',
-      date: new Date().toISOString().split('T')[0],
+      date: DateUtil.today(),
       selectedAlbs: [...ids],
       unitId: unitId
     });
@@ -502,7 +503,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       paid: false,
       reconciled: false,
       source: 'manual-group',
-      status: 'approved',
+      status: 'approved', // Factura generada y pendiente de pago
       unidad_negocio: modalForm.unitId 
     });
 
@@ -539,7 +540,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [safeData.facturas, year, filterStatus, searchQ, selectedUnit, mode]);
 
- // 🚀 LÓGICA ERP: Control de Pagos y Estados (Soluciona Error 10)
+  // 🚀 LÓGICA ERP: Control de Pagos y Estados (Soluciona Error 10)
   const handleTogglePago = async (id: string) => {
     const newData = { ...safeData };
     const idx = newData.facturas.findIndex(f => f.id === id);
@@ -547,7 +548,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     if (idx !== -1) {
       const factura = newData.facturas[idx];
       
-      // Si ya estaba conciliada con el banco, bloqueamos la acción por seguridad
       if (factura.reconciled) {
         alert("🔒 ACCIÓN DENEGADA: Esta factura ya está conciliada con el Banco. Para modificarla, desvincúlala primero en el módulo de Tesorería.");
         return;
@@ -555,36 +555,30 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
       const isCurrentlyPaid = factura.paid;
       
-      // Alternamos el estado booleano
       factura.paid = !isCurrentlyPaid;
       
       if (!isCurrentlyPaid) {
-        // PASA A PAGADA
         factura.status = 'paid';
-        factura.fecha_pago = DateUtil.today(); // Usamos tu robusto motor de fechas
+        factura.fecha_pago = DateUtil.today();
       } else {
-        // VUELVE A PENDIENTE
         factura.status = 'approved'; 
         factura.fecha_pago = undefined;
       }
 
-      // Guardamos en la base de datos central
       await onSave(newData);
     }
   };
 
- // 🛡️ UX SEGURA: Confirmación antes de borrar (Soluciona Error 16)
+  // 🛡️ UX SEGURA: Confirmación antes de borrar (Soluciona Error 16)
   const handleDeleteFactura = async (id: string) => {
     const fac = safeData.facturas.find(f => f.id === id);
     if (!fac) return;
     
-    // Regla de negocio: No se borran facturas que ya pasaron por el banco
     if (fac.reconciled) {
       alert("⚠️ No puedes borrar una factura que ya ha sido procesada y validada por el Banco.");
       return;
     }
     
-    // Confirmación nativa del navegador para evitar borrados accidentales
     const isConfirmed = window.confirm(`🛑 ¿Estás seguro de que deseas ELIMINAR DEFINITIVAMENTE la factura ${fac.num || 'sin número'} de ${fac.prov || fac.cliente}? \n\nLos albaranes vinculados volverán a quedar libres y pendientes de facturar.`);
     
     if (!isConfirmed) return;
@@ -592,24 +586,14 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     const newData = { ...safeData };
     const ids = fac.albaranIdsArr || [];
     
-    // Liberamos los albaranes para que vuelvan a estar disponibles
-    newData.albaranes = newData.albaranes.map(a => ids.includes(a.id) ? { ...a, invoiced: false } : a);
-    
-    // Eliminamos la factura
-    newData.facturas = newData.facturas.filter(f => f.id !== id);
-    
-    await onSave(newData);
-  };
-
-    const newData = { ...safeData };
-    const ids = fac.albaranIdsArr || [];
     newData.albaranes = newData.albaranes.map(a => ids.includes(a.id) ? { ...a, invoiced: false } : a);
     newData.facturas = newData.facturas.filter(f => f.id !== id);
+    
     await onSave(newData);
   };
 
   const notifyOverdue = async () => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = DateUtil.today();
     const overdue = (safeData.facturas || []).filter(f => 
       !f.paid && 
       f.dueDate && 
@@ -622,8 +606,14 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         overdue.slice(0, 5).map(f => `- ${f.prov}: ${Num.fmt(f.total)} (Venció: ${f.dueDate})`).join('\n') +
         (overdue.length > 5 ? `\n...y ${overdue.length - 5} más.` : '');
       
-      await NotificationService.sendAlert(safeData, msg, 'WARNING');
-      alert("Alerta de vencimientos enviada a Telegram.");
+      // Aseguramos que no falle si NotificationService no está implementado
+      try {
+          await NotificationService.sendAlert(safeData, msg, 'WARNING');
+          alert("Alerta de vencimientos enviada a Telegram.");
+      } catch (e) {
+          console.warn(e);
+          alert("Alerta local: Tienes facturas vencidas.");
+      }
     } else {
       alert("No hay facturas vencidas hoy.");
     }
@@ -637,12 +627,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      {/* ✅ CHIVATO DE FUNCIONAMIENTO */}
       <div className="fixed bottom-2 right-2 z-[999999] bg-black/80 text-white px-3 py-1 rounded text-[10px] font-mono pointer-events-none">
         ✅ Render OK — Datos: {String((safeData?.facturas || []).length)}
       </div>
 
-      {/* 🚀 OVERLAY DE DRAG & DROP MEJORADO */}
       <AnimatePresence>
         {isDragging && (
           <motion.div 
@@ -664,7 +652,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         )}
       </AnimatePresence>
 
-      {/* IA Audit Section */}
       <AnimatePresence>
         {draftsIA.length > 0 && (
           <motion.div 
@@ -755,7 +742,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         )}
       </AnimatePresence>
 
-      {/* Main Section */}
       <section className="p-6 bg-white rounded-[2.5rem] shadow-sm border border-slate-100 relative z-10">
         <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-6">
           <div className="flex flex-wrap gap-2">
@@ -1040,7 +1026,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         </div>
       </section>
 
-      {/* Export Modal */}
       <AnimatePresence>
         {isExportModalOpen && (
           <motion.div 
@@ -1099,7 +1084,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         )}
       </AnimatePresence>
 
-      {/* Group Manual Modal */}
       <AnimatePresence>
         {selectedGroup && (
           <motion.div 
@@ -1200,7 +1184,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                         type="text" 
                         value={modalForm.num}
                         onChange={(e) => setModalForm({ ...modalForm, num: e.target.value })}
-                        placeholder="Ej: F-2026/012" 
+                        placeholder="Ej: F-2024/012" 
                         className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:border-indigo-500 focus:bg-white transition"
                       />
                     </div>
@@ -1229,7 +1213,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         )}
       </AnimatePresence>
 
-      {/* Detail Modal */}
       <AnimatePresence>
         {selectedInvoice && (
           <motion.div 
@@ -1281,7 +1264,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                   </span>
                 </div>
 
-                {/* 🚀 BOTÓN DE DESCARGAR PDF GUARDADO */}
                 {selectedInvoice.file_base64 && (
                   <div className="mt-4 pt-4 border-t border-slate-200">
                     <button 
