@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 
 // ✅ LIBRERÍAS ACTIVADAS
-import { motion, AnimatePresence } from 'framer-motion'; 
+import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { GoogleGenAI } from "@google/genai";
 
