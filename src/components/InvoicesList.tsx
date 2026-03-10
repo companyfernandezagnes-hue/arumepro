@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
-import { FileText, CheckCircle2, Clock, Trash2, Link as LinkIcon, AlertCircle } from 'lucide-react';
-// 🛡️ CORRECCIÓN: Importamos el tipo extendido desde InvoicesView para asegurar compatibilidad
+import { FileText, CheckCircle2, Clock, Trash2, Link as LinkIcon, AlertCircle, Building2, User } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+// 🛡️ Mantenemos el tipado estricto
 import { FacturaExtended, BusinessUnit } from './InvoicesView'; 
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
@@ -20,47 +21,57 @@ interface InvoicesListProps {
   onDelete: (id: string) => void;
 }
 
-export const InvoicesList = ({
-  facturas, searchQ, selectedUnit, mode, filterStatus, year, businessUnits, sociosReales, superNorm, onOpenDetail, onTogglePago, onDelete
-}: InvoicesListProps) => {
-
-  const historyList = useMemo(() => {
+/* =======================================================
+ * 🧠 HOOK DE FILTRADO ALTO RENDIMIENTO (Sugerencia Auditoría)
+ * Aisla la lógica matemática del render visual. Pre-calcula
+ * las variables pesadas (como normalizaciones) fuera del bucle.
+ * ======================================================= */
+function useInvoicesFilters(
+  facturas: FacturaExtended[], 
+  year: number, 
+  filterStatus: string, 
+  searchQ: string, 
+  selectedUnit: string, 
+  mode: string, 
+  sociosReales: string[], 
+  superNorm: (s: string | undefined | null) => string
+) {
+  return useMemo(() => {
     try {
+      // 🚀 OPTIMIZACIÓN: Pre-calculamos constantes fuera del bucle .filter()
+      const yearStr = year.toString();
+      const searchN = searchQ ? superNorm(searchQ) : '';
+      const normalizedSocios = sociosReales.map(s => superNorm(s));
+
       return facturas.filter(f => {
-        if (!f) return false;
-        if (f.status === 'draft') return false;
-        if (!(f.date || '').startsWith(year.toString())) return false;
+        // 1. Descartar borradores y nulos rápidamente
+        if (!f || f.status === 'draft') return false;
+        if (!(f.date || '').startsWith(yearStr)) return false;
         if (selectedUnit !== 'ALL' && f.unidad_negocio !== selectedUnit) return false;
         
-        // 🚀 FILTRO ERP ESTRICTO: Lógica para separar Proveedores de Socios
-        const isCompra = f.tipo === 'compra';
-        const isVenta = f.tipo === 'venta';
-        const esSocioPorNombre = sociosReales.some(socio => 
-          superNorm(f.cliente).includes(superNorm(socio)) || superNorm(f.prov).includes(superNorm(socio))
-        );
-
-        // 1. JAMÁS mostrar cajas o bancos en la lista de facturas
+        // 2. JAMÁS mostrar cajas o bancos
         if (f.tipo === 'caja' || (f as any).tipo === 'banco') return false;
 
-        // 2. Filtrar por la pestaña activa (Proveedores vs Socios)
+        // 3. Evaluar Proveedor vs Socio (Optimizado)
+        const normCliente = superNorm(f.cliente);
+        const normProv = superNorm(f.prov);
+        const esSocioPorNombre = normalizedSocios.some(socio => normCliente.includes(socio) || normProv.includes(socio));
+        const isCompra = f.tipo === 'compra';
+
         if (mode === 'proveedor') {
-          // Un proveedor es una 'compra' que NO es de un socio
           if (!isCompra || esSocioPorNombre) return false; 
         } else if (mode === 'socio') {
-          // Un socio es una factura donde el cliente o proveedor está en la lista SOCIOS_REALES
           if (!esSocioPorNombre) return false;
         }
 
-        // 3. Filtrar por estado de pago
+        // 4. Estados de pago
         if (filterStatus === 'pending' && f.paid) return false;
         if (filterStatus === 'paid' && !f.paid) return false;
         if (filterStatus === 'reconciled' && !f.reconciled) return false;
 
-        // 4. Búsqueda por texto
-        if (searchQ) {
-          const ownerNorm = superNorm(f.prov || f.cliente || '');
-          const searchN = superNorm(searchQ);
-          if (!ownerNorm.includes(searchN) && !superNorm(f.num || '').includes(searchN)) return false;
+        // 5. Búsqueda por texto (Super rápida porque searchN ya está calculado)
+        if (searchN) {
+          if (!normProv.includes(searchN) && !normCliente.includes(searchN) && !superNorm(f.num || '').includes(searchN)) return false;
         }
         
         return true;
@@ -69,80 +80,132 @@ export const InvoicesList = ({
       console.error("Error en historyList:", e);
       return [];
     }
-  }, [facturas, year, filterStatus, searchQ, selectedUnit, mode, superNorm, sociosReales]); 
+  }, [facturas, year, filterStatus, searchQ, selectedUnit, mode, sociosReales, superNorm]);
+}
+
+/* =======================================================
+ * 🎨 COMPONENTE UI: LISTA DE FACTURAS
+ * ======================================================= */
+// 🚀 React.memo previene re-renders si escribimos en otros inputs de la vista principal
+export const InvoicesList = React.memo(({
+  facturas, searchQ, selectedUnit, mode, filterStatus, year, businessUnits, sociosReales, superNorm, onOpenDetail, onTogglePago, onDelete
+}: InvoicesListProps) => {
+
+  const historyList = useInvoicesFilters(facturas, year, filterStatus, searchQ, selectedUnit, mode, sociosReales, superNorm);
 
   if (historyList.length === 0) {
     return (
-      <div className="py-20 flex flex-col items-center justify-center opacity-50 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
-        <FileText className="w-12 h-12 mb-3 text-slate-300" />
-        <p className="text-slate-500 font-bold text-sm">No hay facturas en esta vista.</p>
-      </div>
+      <motion.div 
+        initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+        className="py-24 flex flex-col items-center justify-center bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200"
+      >
+        <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm mb-4">
+          <FileText className="w-8 h-8 text-slate-300" />
+        </div>
+        <p className="text-slate-500 font-black text-sm uppercase tracking-widest">Lista Vacía</p>
+        <p className="text-slate-400 text-xs mt-1">No hay {mode === 'socio' ? 'liquidaciones' : 'facturas'} para estos filtros.</p>
+      </motion.div>
     );
   }
 
   return (
     <div className="space-y-3">
-      {historyList.map(f => {
-        const unitConfig = businessUnits.find(u => u.id === f.unidad_negocio);
-        return (
-          <div key={f.id} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 hover:shadow-md transition">
-            <div className="flex-1 cursor-pointer" onClick={() => onOpenDetail(f)}>
-              <div className="flex flex-wrap items-center gap-2 mb-1">
-                <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded uppercase">{f.date}</span>
-                
-                {unitConfig && (
-                  <span className={cn(
-                    "text-[9px] font-black px-2 py-0.5 rounded border uppercase",
-                    unitConfig.color, unitConfig.bg, "border-current opacity-70"
-                  )}>
-                    {unitConfig.name.split(' ')[0]}
-                  </span>
-                )}
+      {/* 🚀 ANIMATE PRESENCE: Transiciones suaves al borrar o filtrar */}
+      <AnimatePresence mode="popLayout">
+        {historyList.map(f => {
+          const unitConfig = businessUnits.find(u => u.id === f.unidad_negocio);
+          const titular = mode === 'socio' ? (f.cliente || f.prov || '—') : (f.prov || f.cliente || '—');
 
-                {f.source === 'email-ia' ? (
-                  <span className="text-[9px] font-black text-purple-600 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">🤖 LEÍDA POR IA</span>
-                ) : (
-                  <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">📦 CERRADA MANUAL</span>
-                )}
-                {f.reconciled ? (
-                  <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
-                    <LinkIcon className="w-2 h-2" /> BANCO OK
+          return (
+            <motion.div 
+              layout
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.15 } }}
+              key={f.id} 
+              className="bg-white p-4 md:p-5 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 hover:shadow-lg transition-all duration-300 group cursor-pointer"
+              onClick={() => onOpenDetail(f)}
+            >
+              <div className="flex-1">
+                {/* 🏷️ CHIPS DE ESTADO */}
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <span className="text-[10px] font-black text-slate-500 bg-slate-100 px-3 py-1 rounded-full uppercase tracking-tighter border border-slate-200">
+                    {f.date}
                   </span>
-                ) : (
-                  <span className="text-[9px] font-black text-rose-500 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">ESPERANDO BANCO</span>
-                )}
-              </div>
-              <p className="font-black text-slate-800 text-base">
-                {mode === 'socio' ? (f.cliente || f.prov || '—') : (f.prov || f.cliente || '—')}
-              </p>
-              <p className="text-xs text-slate-400 font-bold font-mono mt-0.5">Ref: {f.num}</p>
-            </div>
-            
-            <div className="flex items-center justify-between md:justify-end gap-6 md:w-auto w-full border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
-              <div className="text-left md:text-right">
-                <p className="font-black text-slate-900 text-xl">{Num.fmt(Math.abs(Num.parse(f.total)))}</p>
-              </div>
-              <div className="flex gap-2">
-                <button type="button"
-                  onClick={(e) => { e.stopPropagation(); onTogglePago(f.id); }}
-                  className={cn(
-                    "px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all shadow-sm flex items-center gap-1",
-                    f.paid ? 'bg-emerald-500 text-white hover:bg-emerald-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                  
+                  {unitConfig && (
+                    <span className={cn(
+                      "text-[9px] font-black px-2.5 py-1 rounded-full uppercase flex items-center gap-1 shadow-sm",
+                      unitConfig.bg, unitConfig.color
+                    )}>
+                      <unitConfig.icon className="w-3 h-3" /> {unitConfig.name.split(' ')[0]}
+                    </span>
                   )}
-                >
-                  {f.paid ? <><CheckCircle2 className="w-3 h-3"/> CASH OK</> : <><Clock className="w-3 h-3"/> PENDIENTE</>}
-                </button>
-                <button type="button"
-                  onClick={(e) => { e.stopPropagation(); onDelete(f.id); }}
-                  className="w-9 h-9 flex items-center justify-center bg-white border border-slate-200 text-slate-400 rounded-xl hover:bg-rose-500 hover:border-rose-500 hover:text-white transition shadow-sm"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+
+                  {f.source === 'email-ia' ? (
+                    <span className="text-[9px] font-black text-purple-600 bg-purple-50 px-2.5 py-1 rounded-full border border-purple-200">🤖 IA</span>
+                  ) : (
+                    <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200">📦 MANUAL</span>
+                  )}
+                  
+                  {f.reconciled ? (
+                    <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 flex items-center gap-1 shadow-sm">
+                      <LinkIcon className="w-3 h-3" /> BANCO OK
+                    </span>
+                  ) : (
+                    <span className="text-[9px] font-black text-rose-500 bg-rose-50 px-2.5 py-1 rounded-full border border-rose-200 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" /> PENDIENTE BANCO
+                    </span>
+                  )}
+                </div>
+
+                {/* 🏢 TITULAR Y REF */}
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-slate-50 rounded-xl hidden md:block">
+                    {mode === 'socio' ? <User className="w-5 h-5 text-slate-400" /> : <Building2 className="w-5 h-5 text-slate-400" />}
+                  </div>
+                  <div>
+                    <p className="font-black text-slate-800 text-lg leading-none">{titular}</p>
+                    <p className="text-[10px] text-slate-400 font-bold font-mono mt-1 uppercase tracking-widest">REF: {f.num || 'S/N'}</p>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        );
-      })}
+              
+              {/* 💰 ACCIONES Y TOTAL */}
+              <div className="flex items-center justify-between md:justify-end gap-6 md:w-auto w-full border-t md:border-t-0 pt-4 md:pt-0 border-slate-100">
+                <div className="text-left md:text-right">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Total</p>
+                  <p className="font-black text-slate-900 text-2xl tracking-tighter leading-none">{Num.fmt(Math.abs(Num.parse(f.total)))}</p>
+                </div>
+                
+                <div className="flex gap-2">
+                  <button 
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onTogglePago(f.id); }}
+                    className={cn(
+                      "px-4 py-3 rounded-2xl text-[10px] font-black uppercase transition-all shadow-sm flex items-center gap-1.5 active:scale-95",
+                      f.paid 
+                        ? 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-emerald-500/20' 
+                        : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                    )}
+                  >
+                    {f.paid ? <><CheckCircle2 className="w-4 h-4"/> PAGADA</> : <><Clock className="w-4 h-4"/> PENDIENTE</>}
+                  </button>
+                  
+                  <button 
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onDelete(f.id); }}
+                    className="w-12 h-12 flex items-center justify-center bg-white border border-slate-200 text-slate-400 rounded-2xl hover:bg-rose-500 hover:border-rose-500 hover:text-white transition-all shadow-sm active:scale-95"
+                    title="Eliminar registro"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          );
+        })}
+      </AnimatePresence>
     </div>
   );
-};
+});
