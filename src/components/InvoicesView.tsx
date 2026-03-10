@@ -4,14 +4,14 @@ import {
   Building2, ShoppingBag, ListPlus, Users, Hotel, Layers, X, 
   XCircle, LineChart as LineChartIcon, FileSpreadsheet, Mic, Square, UploadCloud, FileDown, Smartphone, Camera, Loader2, Mail, CheckCircle2, Link as LinkIcon, Inbox
 } from 'lucide-react';
-import { AppData, Factura, Albaran, Socio } from '../types';
-import { Num, ArumeEngine, DateUtil } from '../services/engine';
-import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import { GoogleGenAI } from "@google/genai";
+import { AppData, Factura, Albaran, Socio } from '../types';
+import { Num, DateUtil } from '../services/engine';
+import { cn } from '../lib/utils';
 
-// 🚀 HIJOS VISUALES (Asegúrate de tenerlos en tu proyecto)
+// 🚀 COMPONENTES HIJOS (Asegúrate de que existan en tu carpeta components)
 import { InvoicesList } from './InvoicesList';
 import { InvoiceDetailModal } from './InvoiceDetailModal';
 
@@ -119,7 +119,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
-  // 📧 SIMULACIÓN DE BANDEJA DE ENTRADA (Mails)
+  // 📧 SIMULACIÓN DE BANDEJA DE CORREO (Mails)
   const [emailInbox, setEmailInbox] = useState<EmailDraft[]>([
     { id: 'm1', from: 'ventas@makro.es', subject: 'Factura F-2026/012', date: DateUtil.today(), hasAttachment: true, status: 'new' },
     { id: 'm2', from: 'admin@gadisa.com', subject: 'Albarán y Factura Semanal', date: DateUtil.today(), hasAttachment: true, status: 'new' }
@@ -326,7 +326,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     await onSave({ ...safeData, facturas: facturasSeguras.filter(f => f.id !== id) });
   };
 
-  // 📦 Agrupación manual de albaranes optimizada
+  // 📦 AGRUPACIÓN MANUAL OPTIMIZADA (Lo que fallaba antes en el Render)
   const pendingGroups = useMemo(() => {
     const byMonth: Record<string, { name: string; groups: Record<string, any> }> = {};
     const q = superNorm(deferredSearch);
@@ -408,6 +408,17 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   };
 
   /* =======================================================
+   * 📤 HANDLE DOWNLOAD FILE (Protegido y Funcional)
+   * ======================================================= */
+  const handleDownloadFile = (f: FacturaExtended) => {
+    if (!f?.file_base64) return alert('El PDF original no está disponible.');
+    const a = document.createElement('a');
+    a.href = f.file_base64;
+    a.download = `${superNorm(f.prov||'factura')}_${f.num||'SN'}.pdf`;
+    a.click();
+  };
+
+  /* =======================================================
    * 🎨 RENDER DE UI
    * ======================================================= */
   return (
@@ -450,12 +461,17 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
       {/* 🚀 TOOLBAR STICKY (Filtros e Inputs) */}
       <div className="sticky top-2 z-40">
-        <div className="bg-white/95 backdrop-blur-md px-4 py-3 rounded-[2rem] shadow-md border border-slate-200">
+        <div className={cn("bg-white/95 backdrop-blur-md px-4 py-3 rounded-[2rem] shadow-md border border-slate-200")}>
           <div className="flex flex-col xl:flex-row items-center justify-between gap-3">
             
+            {/* TABS DE VISTA */}
             <div className="flex items-center bg-slate-100 p-1.5 rounded-2xl w-full xl:w-auto overflow-x-auto no-scrollbar">
-              <button onClick={() => setActiveTab('pend')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition whitespace-nowrap", activeTab === 'pend' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>📦 Albaranes sin cerrar</button>
-              <button onClick={() => setActiveTab('hist')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition whitespace-nowrap", activeTab === 'hist' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>💰 Facturas contabilizadas</button>
+              <button onClick={() => setActiveTab('pend')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition whitespace-nowrap", activeTab === 'pend' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
+                📦 Albaranes sin cerrar
+              </button>
+              <button onClick={() => setActiveTab('hist')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition whitespace-nowrap", activeTab === 'hist' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
+                💰 Facturas (Histórico)
+              </button>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
@@ -488,11 +504,11 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         </div>
       </div>
 
-      {/* 🚀 LAYOUT GRID (Inbox Lateral Derecho Desktop) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 relative z-10">
+      {/* 🚀 LAYOUT GRID (Inbox IA Derecha / Contenido Izquierda) */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 relative z-10">
         
         {/* ZONA IZQUIERDA: Listas Principales */}
-        <section className="lg:col-span-8 space-y-4">
+        <section className="xl:col-span-8 space-y-4">
           {activeTab === 'pend' ? (
             pendingGroups.length > 0 ? (
               pendingGroups.map(([mk, dataGroup]) => (
@@ -532,7 +548,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         </section>
 
         {/* ZONA DERECHA: Inbox Múltiple (Email + IA) */}
-        <aside className="lg:col-span-4 space-y-6">
+        <aside className="xl:col-span-4 space-y-6">
           <div className="sticky top-24 space-y-6">
             
             {/* INBOX CORREO (Simulación Visual PRO) */}
@@ -559,10 +575,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
               </div>
             )}
 
-            {/* INBOX IA (Conciliador) */}
+            {/* INBOX IA (Conciliador 3-Way Matching) */}
             {draftsIA.length > 0 ? (
-              <div className="bg-slate-50 p-5 rounded-[2rem] border border-indigo-100 shadow-inner">
-                <h4 className="text-sm font-black text-slate-800 mb-1 flex items-center gap-2"><Sparkles className="w-4 h-4 text-indigo-500"/> Borradores IA ({draftsIA.length})</h4>
+              <div className="bg-indigo-50/50 p-5 rounded-[2rem] border border-indigo-100 shadow-inner">
+                <h4 className="text-sm font-black text-slate-800 mb-1 flex items-center gap-2"><Sparkles className="w-4 h-4 text-indigo-500"/> Borradores 3-WAY MATCH ({draftsIA.length})</h4>
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Conciliación con Albaranes</p>
                 <div className="mt-4 space-y-3 max-h-[50vh] overflow-y-auto custom-scrollbar pr-1">
                   {draftsIA.map(d => (
@@ -681,7 +697,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           businessUnits={BUSINESS_UNITS} 
           mode={mode} 
           onClose={() => setSelectedInvoice(null)} 
-          onDownloadFile={() => alert("Función de descarga de PDF en desarrollo.")} 
+          onDownloadFile={handleDownloadFile as any} 
         />
       )}
     </div>
