@@ -1,8 +1,8 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback, useDeferredValue } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useDeferredValue, useCallback } from 'react';
 import { 
   Search, Plus, Download, Package, AlertTriangle, Check, 
   Building2, ShoppingBag, ListPlus, Users, Hotel, Layers, 
-  XCircle, LineChart as LineChartIcon, FileSpreadsheet, Mic, Square, UploadCloud, FileDown, Smartphone
+  XCircle, LineChart as LineChartIcon, FileSpreadsheet, Mic, Square, UploadCloud, FileDown, Smartphone, Camera, Loader2
 } from 'lucide-react';
 import { AppData, Albaran, Socio } from '../types';
 import { Num, ArumeEngine, DateUtil } from '../services/engine';
@@ -11,7 +11,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import { GoogleGenAI } from "@google/genai";
 
-// 🚀 HIJOS VISUALES (Debes tenerlos en tu carpeta components)
+// 🚀 HIJOS VISUALES
 import { AlbaranesList } from './AlbaranesList';
 import { AlbaranEditModal } from './AlbaranEditModal';
 import PriceInspector from './PriceInspector';
@@ -31,8 +31,10 @@ const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string
 ];
 
 /* =======================================================
- * 🛡️ UTILIDADES Y TOLERANCIAS DINÁMICAS (La idea de la Verdura)
+ * 🛡️ UTILIDADES, CONSTANTES Y TOLERANCIAS (Auditoría OK)
  * ======================================================= */
+const TOLERANCIA = 0.50; // 50 céntimos de redondeo
+
 export const superNorm = (s: string | undefined | null) => {
   if (!s || typeof s !== 'string') return 'desconocido';
   try { return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\b(s\.?l\.?|s\.?a\.?|s\.?l\.?u\.?|s\.?c\.?p\.?)\b/gi, '').replace(/[^a-z0-9]/g, '').trim(); } catch (e) { return 'desconocido'; }
@@ -40,31 +42,40 @@ export const superNorm = (s: string | undefined | null) => {
 
 const safeJSON = (str: string) => { try { const match = str.match(/\{[\s\S]*\}/); return match ? JSON.parse(match[0]) : {}; } catch { return {}; } };
 
-// 🧠 CEREBRO DE FLUCTUACIÓN: Define cuánto puede subir un precio sin saltar alerta roja
+const filterByQuery = (a: Albaran, q: string) => {
+  if (!q) return true;
+  const n = q.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const prov = (a.prov||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const num  = (a.num||'').toLowerCase();
+  const notes= (a.notes||'').toLowerCase();
+  const lines= (a.items||[]).some((it:any)=> (it.n||'').toLowerCase().includes(n));
+  return prov.includes(n) || num.includes(n) || notes.includes(n) || lines;
+};
+
+const looksLikeDuplicate = (prov: string, num: string, date: string, albaranes: Albaran[]) => 
+  albaranes.some(a => (a.prov||'').toUpperCase() === prov.toUpperCase() && (a.num||'S/N') === (num||'S/N') && (a.date||'').slice(0,10) === (date||'').slice(0,10));
+
+// 🧠 CEREBRO DE FLUCTUACIÓN
 const getDynamicThreshold = (itemName: string) => {
   const n = itemName.toLowerCase();
-  // Frescos y verduras fluctúan muchísimo por temporada
-  if (n.match(/tomate|lechuga|cebolla|patata|pimiento|verdura|fruta|limon|naranja/)) return 25; // 25% de tolerancia
-  // Pescados y mariscos fluctúan por lonja/temporada
-  if (n.match(/pescado|salmon|lubina|pulpo|calamar|gamba|langostino/)) return 15; // 15% de tolerancia
-  // Carnes y procesados son más estables
-  if (n.match(/carne|ternera|pollo|cerdo/)) return 8; // 8% de tolerancia
-  // Bebidas y secos no deberían subir casi nada sin aviso previo
-  if (n.match(/vino|cerveza|agua|refresco|cafe|azucar|harina/)) return 5; // 5% de tolerancia
-  return 10; // Default general
+  if (n.match(/tomate|lechuga|cebolla|patata|pimiento|verdura|fruta|limon|naranja/)) return 25; 
+  if (n.match(/pescado|salmon|lubina|pulpo|calamar|gamba|langostino/)) return 15; 
+  if (n.match(/carne|ternera|pollo|cerdo/)) return 8; 
+  if (n.match(/vino|cerveza|agua|refresco|cafe|azucar|harina/)) return 5; 
+  return 10; 
 };
 
 const normalizeUnitPrice = (q: number, u: string | undefined, unitPrice: number) => {
   if (!u) return Num.round2(unitPrice);
   switch (u) {
-    case "g":  return Num.round2(unitPrice * 1000); // €/kg
-    case "ml": return Num.round2(unitPrice * 1000); // €/l
+    case "g":  return Num.round2(unitPrice * 1000); 
+    case "ml": return Num.round2(unitPrice * 1000); 
     default:   return Num.round2(unitPrice);
   }
 };
 
 /* =======================================================
- * 🧠 SUPER MOTOR DE PARSEO V2 INTENGRADO
+ * 🧠 SUPER MOTOR DE PARSEO V2 (Descuentos y Unidades)
  * ======================================================= */
 function useAlbaranEnginePRO(text: string) {
   const analyzedItems = useMemo(() => {
@@ -160,12 +171,10 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const { analyzedItems, liveTotals } = useAlbaranEnginePRO(form.text);
 
   /* =======================================================
-   * 📲 TELEGRAM BOT INTEGRATION (Simulador de Webhook)
+   * 📲 TELEGRAM BOT INTEGRATION (Simulador)
    * ======================================================= */
   const handleTelegramSync = async () => {
     setIsSyncingTelegram(true);
-    // Simulación: En la vida real aquí harías un fetch a tu webhook de n8n o backend
-    // que devuelve las facturas procesadas de los mensajes de Telegram.
     setTimeout(() => {
       alert("📲 Sincronización con Telegram completada.\nNo se han encontrado nuevos albaranes enviados al Bot hoy.");
       setIsSyncingTelegram(false);
@@ -173,7 +182,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   };
 
   /* =======================================================
-   * 📅 FILTROS DE FECHA (M3 Horeca)
+   * 📅 FILTROS DE FECHA (Atajos UX)
    * ======================================================= */
   const inRange = (iso: string, from?: string, to?: string) => {
     if (!iso) return false; const d = iso.slice(0,10);
@@ -239,7 +248,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   };
 
   /* =======================================================
-   * 💾 GUARDADO CON PRICE INTELLIGENCE Y SEASONALITY
+   * 💾 GUARDADO CON PRICE INTELLIGENCE Y DUPLICADOS
    * ======================================================= */
   const handleQuickAdd = () => {
     const t = Num.parse(quickCalc.total);
@@ -257,7 +266,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     if (!previous || previous.unitPrice <= 0) return { isIncrease: false, pct: 0, previous: null, threshold: 0 };
     
     const pct = Num.round2(((latestPrice - previous.unitPrice) / previous.unitPrice) * 100);
-    const dynamicThreshold = getDynamicThreshold(itemN); // 🍅 Pescado/Verdura vs Carne/Bebida
+    const dynamicThreshold = getDynamicThreshold(itemN); 
     
     return { isIncrease: pct >= dynamicThreshold, pct, previous, threshold: dynamicThreshold }; 
   };
@@ -267,11 +276,14 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     if (!form.prov) return alert("⚠️ Introduce el nombre del proveedor.");
     if (analyzedItems.length === 0) return alert("⚠️ Añade al menos una línea.");
 
+    if (looksLikeDuplicate(form.prov, form.num||'S/N', form.date, albaranesSeguros)) {
+       if (!window.confirm("⚠️ Posible duplicado (mismo proveedor, nº y fecha). ¿Guardar igualmente?")) return;
+    }
+
     const newData = { ...safeData, albaranes: [...albaranesSeguros], priceHistory: [...(safeData.priceHistory || [])] };
     const robustId = `alb-${form.date.replace(/-/g,'')}-${Date.now().toString().slice(-6)}-${form.unitId}`;
     let alerts: string[] = [];
 
-    // Analizador de Fluctuación de Precios (Nivel Chef Ejecutivo)
     for (const it of analyzedItems as any[]) {
       const provN = form.prov.trim().toUpperCase();
       const itemN = it.n.trim().toUpperCase();
@@ -317,7 +329,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   };
 
   /* =======================================================
-   * 📤 EXPORTACIÓN EXCEL 3 HOJAS PRO
+   * 📤 EXPORTACIÓN EXCEL 3 HOJAS PRO (Formateado Gestoría)
    * ======================================================= */
   const filteredForList = useMemo(() => {
     return albaranesSeguros.filter(a => (selectedUnit==='ALL' ? true : a.unitId === selectedUnit)).filter(a => (!dateFrom && !dateTo) ? true : inRange(a.date||'', dateFrom, dateTo)).filter(a => !deferredSearch || filterByQuery(a, deferredSearch));
@@ -366,6 +378,19 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     XLSX.writeFile(wb, `Albaranes_${dateFrom || 'ALL'}.xlsx`);
   };
 
+  /* =======================================================
+   * ⌨️ ATAJOS DE TECLADO RÁPIDOS
+   * ======================================================= */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const active = document.activeElement as HTMLElement;
+      const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+      if (!isTyping && e.key === '/') { e.preventDefault(); document.querySelector<HTMLInputElement>('input[placeholder^="Buscar"]')?.focus(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   return (
     <div className="space-y-6 pb-24 max-w-[1600px] mx-auto animate-fade-in relative">
 
@@ -387,7 +412,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
           <p className="text-xs text-indigo-500 font-bold uppercase tracking-widest mt-1">Con Inteligencia de Precios</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {/* BOTÓN TELEGRAM SYNC */}
           <button onClick={handleTelegramSync} disabled={isSyncingTelegram} className="px-5 py-3 rounded-2xl font-black text-xs uppercase bg-[#229ED9] text-white shadow-md hover:bg-[#1E8CC0] transition flex items-center gap-2">
             {isSyncingTelegram ? <Loader2 className="w-4 h-4 animate-spin"/> : <Smartphone className="w-4 h-4"/>} Telegram Sync
           </button>
@@ -430,7 +454,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
               <input value={searchQ} onChange={(e) => setSearchQ(e.target.value)} type="text" placeholder="Buscar prov, producto, ref..." className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:ring-2 ring-indigo-500/20 transition" />
             </div>
             
-            {/* CONTADOR DE LISTA RÁPIDA (Recomendación Copilot) */}
+            {/* CONTADOR DE LISTA RÁPIDA */}
             <div className="hidden lg:flex flex-col items-end text-[10px] text-slate-500 font-bold px-2 border-l border-slate-200 pl-3">
               <span>{filteredForList.length} albaranes filtrados</span>
               <span className="text-sm text-slate-900 font-black tracking-tighter">{Num.fmt(sumFiltered)}</span>
@@ -440,7 +464,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         </div>
       </div>
 
-      {/* 🧩 LAYOUT DE DOS COLUMNAS (Formulario / Inspector | Lista) */}
+      {/* 🧩 LAYOUT DE DOS COLUMNAS */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 relative z-10">
         
         {/* 📝 COLUMNA IZQUIERDA: Formulario o Inspector */}
@@ -463,7 +487,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                 <div className="flex justify-between items-center mb-5">
                   <h3 className="text-sm font-black text-slate-800 flex items-center gap-2"><ListPlus className="w-5 h-5 text-indigo-500" /> Nuevo Albarán</h3>
                   
-                  {/* BOTÓN OCR PDF DIRECTO */}
                   <div className="flex items-center gap-2">
                     <input type="file" ref={fileInputRef} className="hidden" accept="application/pdf, image/*" onChange={(e) => { if (e.target.files && e.target.files[0]) { processLocalFile(e.target.files[0]); e.target.value = ''; } }} />
                     <button onClick={() => fileInputRef.current?.click()} className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 transition" title="Autorellenar con Foto/PDF"><Camera className="w-4 h-4"/></button>
@@ -488,7 +511,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                   </div>
                 </div>
 
-                {/* Calculadora Rápida */}
                 <div className="flex items-center gap-1 mb-3 bg-indigo-50/50 p-2 rounded-xl border border-indigo-100">
                   <input type="text" value={quickCalc.name} onChange={(e) => setQuickCalc({ ...quickCalc, name: e.target.value })} placeholder="Producto rápido..." className="w-1/2 p-2 bg-white rounded-lg text-xs font-bold outline-none" />
                   <input type="number" value={quickCalc.total} onChange={(e) => setQuickCalc({ ...quickCalc, total: e.target.value })} placeholder="Total €" className="w-1/4 p-2 bg-white rounded-lg text-xs font-bold outline-none text-right" />
@@ -501,11 +523,11 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-500 mb-3">
-                  <div className="bg-white border border-slate-200 p-2.5 rounded-xl text-center">
+                  <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-center">
                     <div className="font-black text-slate-700">Base (10%) · IVA (10%)</div>
                     <div>{Num.fmt(liveTotals.split.base10)} · {Num.fmt(liveTotals.split.iva10)}</div>
                   </div>
-                  <div className="bg-white border border-slate-200 p-2.5 rounded-xl text-center">
+                  <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-center">
                     <div className="font-black text-slate-700">Base (21%) · IVA (21%)</div>
                     <div>{Num.fmt(liveTotals.split.base21)} · {Num.fmt(liveTotals.split.iva21)}</div>
                   </div>
@@ -527,7 +549,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
           </AnimatePresence>
         </aside>
 
-        {/* 📚 COLUMNA DERECHA: Lista de Albaranes Aislada (Rendimiento) */}
+        {/* 📚 COLUMNA DERECHA: Lista de Albaranes */}
         <section className="lg:col-span-8">
           <AlbaranesList 
             albaranes={filteredForList} 
