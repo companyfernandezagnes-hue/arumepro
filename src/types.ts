@@ -46,6 +46,15 @@ export interface User {
   role: 'admin' | 'staff';
 }
 
+// 🚀 NUEVA INTERFAZ: Socios de la empresa
+export interface Socio {
+  id: string;
+  n: string;
+  email?: string;
+  active?: boolean;
+  rol?: string; 
+}
+
 export interface KardexEntry {
   n: string;
   id: string;
@@ -91,6 +100,8 @@ export interface Factura {
   num?: string;
   date: string;
   paid: boolean;
+  fecha_pago?: string; // 🚀 Añadido para el control de pagos
+  file_base64?: string; // 🚀 Añadido para guardar el PDF original
   prov: string;
   cliente?: string;
   total: string | number;
@@ -101,7 +112,7 @@ export interface Factura {
   reconciled?: boolean;
   albaranIds?: string;
   albaranIdsArr?: string[];
-  status?: 'draft' | 'approved' | 'rejected';
+  status?: 'draft' | 'approved' | 'rejected' | 'paid';
   source?: 'email-ia' | 'manual-group' | 'direct' | 'manual';
   unidad_negocio?: BusinessUnit; // 🚀 Facturación B2B (Hoteles)
 }
@@ -197,9 +208,9 @@ export interface CierreMensual {
 // 🚀 NUEVA INTERFAZ: Liquidación de Socios (El 20% y 10%)
 export interface PartnerSettlement {
   id: string;
-  date: string;       // Fecha en la que se hizo el cálculo
-  month: number;      // Mes liquidado
-  year: number;       // Año liquidado
+  date: string;        // Fecha en la que se hizo el cálculo
+  month: number;       // Mes liquidado
+  year: number;        // Año liquidado
   unitId: BusinessUnit; // Qué bloque se está liquidando (Ej: DLV)
   totalIncome: number;
   totalExpenses: number;
@@ -219,6 +230,7 @@ export interface AppData {
   config: AppConfig;
   banco: BankMovement[];
   users: User[];
+  socios?: Socio[]; // 🚀 Añadida la tabla real de Socios
   kardex: KardexEntry[];
   cierres: Cierre[];
   facturas: Factura[];
@@ -231,7 +243,7 @@ export interface AppData {
   platos: Plato[];
   ventas_menu: VentaMenu[];
   cierres_mensuales: CierreMensual[];
-  liquidaciones: PartnerSettlement[]; // 🚀 Añadido al Root State
+  liquidaciones: PartnerSettlement[]; 
   diario: any[];
   priceHistory: Record<string, number[]>;
   sales_history: any[];
