@@ -2,16 +2,17 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   FileText, Search, ChevronLeft, ChevronRight, Zap, Users, Building2, Package, CheckCircle2, Clock, Trash2, AlertCircle, Link as LinkIcon, Mail, ArrowRight, X, RefreshCw, Download, Bell, CheckSquare, Hotel, ShoppingBag, Layers, UploadCloud, FileDown, FileArchive
 } from 'lucide-react';
-// ✅ FIX 1: Cambiado a framer-motion (Suele romper la pantalla si no está bien)
+
+// ✅ LIBRERÍAS ACTIVADAS (Asegúrate de haber puesto "framer-motion" en el package.json)
 import { motion, AnimatePresence } from 'framer-motion'; 
 import * as XLSX from 'xlsx';
+import { GoogleGenAI } from "@google/genai";
+
 import { AppData, Factura, Albaran } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
 import { proxyFetch } from '../services/api';
 import { NotificationService } from '../services/notifications';
-import { GoogleGenAI } from "@google/genai";
-
 // 🚀 TIPOS B2B
 export type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
 
