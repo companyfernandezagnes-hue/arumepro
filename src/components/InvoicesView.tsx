@@ -62,8 +62,15 @@ export const superNorm = (s: string | undefined | null) => {
 
 const safeJSON = (str: string) => { try { const match = str.match(/\{[\s\S]*\}/); return match ? JSON.parse(match[0]) : {}; } catch { return {}; } };
 
-// Helper D&D (Auditoría Copilot)
-const hasFiles = (e: React.DragEvent | DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+// Helper D&D PRO (Comprueba que sean Ficheros reales y no textos arrastrados)
+const hasRealFiles = (e: React.DragEvent | DragEvent) => {
+  const items = e.dataTransfer?.items;
+  if (!items || items.length === 0) return false;
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].kind === 'file') return true;
+  }
+  return false;
+};
 
 async function sha256File(file: File) {
   const buf = await file.arrayBuffer();
@@ -110,6 +117,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const dragCounter = useRef(0);
+  const [dragHeartbeat, setDragHeartbeat] = useState(0);
 
   const [selectedGroup, setSelectedGroup] = useState<{ label: string; ids: string[], unitId: BusinessUnit } | null>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<FacturaExtended | null>(null);
@@ -126,33 +134,51 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   ]);
 
   /* =======================================================
-   * 🛡️ DRAG & DROP INMORTAL Y NO BLOQUEANTE (Fix Copilot)
+   * 🛡️ DRAG & DROP WATCHDOG (Cero Pantallas Azules)
    * ======================================================= */
+  
+  // Failsafe global
   useEffect(() => {
-    // Escape o salida global de la ventana aborta el Drag visual
-    const endDrag = () => { dragCounter.current = 0; setIsDragging(false); };
+    const endDrag = () => { if (isDragging) { dragCounter.current = 0; setIsDragging(false); } };
     const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') endDrag(); };
     
     window.addEventListener('dragend', endDrag);
-    window.addEventListener('dragleave', endDrag);
+    window.addEventListener('mouseleave', endDrag); 
     window.addEventListener('keydown', onKeyDown);
     
     return () => { 
       window.removeEventListener('dragend', endDrag);
-      window.removeEventListener('dragleave', endDrag);
+      window.removeEventListener('mouseleave', endDrag);
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, []);
+  }, [isDragging]);
+
+  // Heartbeat (Latido) de Drag. Si se congela en modo "drag", se apaga solo a los 300ms
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (isDragging && Date.now() - dragHeartbeat > 300) {
+        setIsDragging(false); 
+        dragCounter.current = 0;
+      }
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [isDragging, dragHeartbeat]);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => { 
-    if (!hasFiles(e)) return; 
+    if (!hasRealFiles(e)) return; 
     e.preventDefault(); e.stopPropagation();
     dragCounter.current++; 
     if (!isDragging) setIsDragging(true); 
   }, [isDragging]);
 
+  const handleDragOver = useCallback((e: React.DragEvent) => { 
+    if (!hasRealFiles(e)) return; 
+    e.preventDefault(); 
+    setDragHeartbeat(Date.now()); // Emitimos el latido de vida
+  }, []);
+
   const handleDragLeave = useCallback((e: React.DragEvent) => { 
-    if (!hasFiles(e)) return; 
+    if (!hasRealFiles(e)) return; 
     e.preventDefault(); e.stopPropagation();
     dragCounter.current--; 
     if (dragCounter.current <= 0) { setIsDragging(false); dragCounter.current = 0; } 
@@ -172,7 +198,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     if (file.size > 15 * 1024 * 1024) return alert("El archivo supera los 15MB.");
     
     await processLocalFile(file); 
-  }, []); // Retiramos facturasSeguras de las dependencias para no recrear la funcion constantemente
+  }, []); 
 
   /* =======================================================
    * ⌨️ ATAJOS DE TECLADO RÁPIDOS
@@ -271,6 +297,49 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         alert(`⚠️ Rescate offline completado. Revisa los totales manualmente.`);
       } catch (fallbackErr) { alert("⚠️ Archivo corrupto o ilegible."); }
     } finally { setIsSyncing(false); }
+  };
+
+  /* =======================================================
+   * 🎙️ VOSK LOCAL
+   * ======================================================= */
+  const toggleRecording = async () => {
+    if (isRecording) { mediaRecorderRef.current?.stop(); setIsRecording(false); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      mediaRecorderRef.current = mr; audioChunksRef.current = [];
+      mr.ondataavailable = (e) => audioChunksRef.current.push(e.data);
+      mr.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        stream.getTracks().forEach(t => t.stop());
+        await processAudioWithVosk(audioBlob);
+      };
+      mr.start(); setIsRecording(true);
+      setTimeout(() => { if (mr.state === 'recording') toggleRecording(); }, 30000); 
+    } catch (err) { alert("⚠️ Necesitas dar permiso al micrófono."); }
+  };
+
+  const processAudioWithVosk = async (blob: Blob) => {
+    setIsSyncing(true);
+    try {
+      const formData = new FormData(); formData.append("file", blob, "factura.webm");
+      const voskRes = await fetch("http://localhost:2700/transcribe", { method: "POST", body: formData });
+      if (!voskRes.ok) throw new Error("Vosk no responde");
+      const voskData = await voskRes.json();
+      const txt = voskData.text || "";
+      
+      const matches = txt.match(/(\d+([.,]\d{2})?)/g);
+      const possibleTotal = matches ? parseFloat(matches[matches.length - 1].replace(',', '.')) : 0;
+
+      const nuevaFacturaVoz: FacturaExtended = {
+        id: 'draft-voice-' + Date.now(), tipo: 'compra', num: 'S/N', date: DateUtil.today(),
+        prov: `🎙️ Voz: ${txt.substring(0, 20)}...`, total: possibleTotal, base: Num.round2(possibleTotal / 1.10), tax: Num.round2(possibleTotal - (possibleTotal / 1.10)),
+        paid: false, reconciled: false, source: 'voice', status: 'draft', unidad_negocio: 'REST'
+      };
+
+      await onSave({ ...safeData, facturas: [nuevaFacturaVoz, ...facturasSeguras] });
+    } catch (e) { alert("⚠️ Error conectando con servidor VOSK local."); } 
+    finally { setIsSyncing(false); }
   };
 
   /* =======================================================
@@ -397,7 +466,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   };
 
   /* =======================================================
-   * 🎨 RENDERIZADO AISLADO (Protección contra crashes)
+   * 🎨 RENDERIZADO DE GRUPOS 
    * ======================================================= */
   const renderPendingGroups = () => {
     if (pendingGroups.length === 0) {
@@ -442,14 +511,14 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   return (
     <div 
       className="dropzone-area animate-fade-in space-y-6 pb-24 min-h-screen relative max-w-[1600px] mx-auto"
-      onDragEnter={handleDragEnter} onDragOver={(e) => e.preventDefault()} onDragLeave={handleDragLeave} onDrop={handleDrop}
+      onDragEnter={handleDragEnter} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
     >
       {/* OVERLAY DE DROP PROTEGIDO Y NO BLOQUEANTE */}
       <AnimatePresence>
         {isDragging && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] pointer-events-none">
+          <motion.div data-test-id="drop-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] pointer-events-none">
             <div className="absolute inset-0 bg-indigo-600/10 backdrop-blur-sm" />
-            <div className="absolute inset-4 md:inset-8 border-4 border-dashed border-indigo-400 rounded-[3rem] flex items-center justify-center bg-indigo-50/50">
+            <div className="absolute inset-4 md:inset-8 border-4 border-dashed border-indigo-400 rounded-[3rem] flex items-center justify-center bg-indigo-50/50 pointer-events-none">
               <div className="text-center bg-white p-8 rounded-3xl shadow-xl pointer-events-none">
                 <FileDown className="w-16 h-16 text-indigo-500 mx-auto mb-4 animate-bounce" />
                 <p className="text-3xl font-black text-indigo-900">Suelta tu Factura aquí</p>
@@ -480,9 +549,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
       {/* 🚀 TOOLBAR STICKY (Filtros e Inputs) */}
       <div className="sticky top-2 z-40">
-        <div className="bg-white/95 backdrop-blur-md px-4 py-3 rounded-[2rem] shadow-md border border-slate-200">
+        <div className={cn("bg-white/95 backdrop-blur-md px-4 py-3 rounded-[2rem] shadow-md border border-slate-200")}>
           <div className="flex flex-col xl:flex-row items-center justify-between gap-3">
             
+            {/* TABS DE VISTA */}
             <div className="flex items-center bg-slate-100 p-1.5 rounded-2xl w-full xl:w-auto overflow-x-auto no-scrollbar">
               <button onClick={() => setActiveTab('pend')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition whitespace-nowrap", activeTab === 'pend' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
                 📦 Albaranes sin cerrar
