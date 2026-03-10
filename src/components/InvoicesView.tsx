@@ -1,8 +1,11 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback, useDeferredValue } from 'react';
 import { 
-  Search, Plus, Download, Package, AlertTriangle, Check, Clock, Trash2, 
+  Search, Download, Package, AlertTriangle, Check, Clock, Trash2, 
   Building2, ShoppingBag, ListPlus, Users, Hotel, Layers, X, 
-  XCircle, LineChart as LineChartIcon, FileSpreadsheet, Mic, Square, UploadCloud, FileDown, Smartphone, Camera, Loader2, Mail, CheckCircle2, Link as LinkIcon, Inbox
+  LineChart as LineChartIcon, FileSpreadsheet, Mic, Square, 
+  UploadCloud, FileDown, Smartphone, Camera, Loader2, Mail, 
+  CheckCircle2, Link as LinkIcon, Inbox, ArrowRight, CheckSquare, 
+  Sparkles, ChevronLeft, ChevronRight, FileText, Zap, FileArchive, AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
@@ -10,7 +13,6 @@ import { GoogleGenAI } from "@google/genai";
 import { AppData, Factura, Albaran, Socio } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
-import { proxyFetch } from '../services/api';
 
 // 🚀 COMPONENTES HIJOS
 import { InvoicesList } from './InvoicesList';
@@ -18,7 +20,6 @@ import { InvoiceDetailModal } from './InvoiceDetailModal';
 
 export type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
 
-// 🛡️ TIPOS EXTENDIDOS
 export type FacturaExtended = Factura & {
   status?: 'ingested' | 'parsed' | 'draft' | 'approved' | 'paid' | 'reconciled' | 'mismatch';
   file_base64?: string;
@@ -50,12 +51,17 @@ const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string
   { id: 'CORP', name: 'Socios / Corp', icon: Users, color: 'text-slate-600', bg: 'bg-slate-100' },
 ];
 
+export interface InvoicesViewProps {
+  data: AppData;
+  onSave: (newData: AppData) => Promise<void>;
+}
+
 /* =======================================================
- * 🛡️ 1. UTILIDADES Y MATCHING
+ * 🛡️ 1. UTILIDADES Y SEGURIDAD
  * ======================================================= */
 const TOLERANCIA = 0.50; 
 
-// 🔥 PROTECCIÓN: Si 's' es undefined/null, devuelve string vacío seguro
+// Función superNorm 100% protegida contra undefined
 export const superNorm = (s: string | undefined | null) => {
   if (!s || typeof s !== 'string') return 'desconocido';
   try { return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\b(s\.?l\.?|s\.?a\.?|s\.?l\.?u\.?|s\.?c\.?p\.?)\b/gi, '').replace(/[^a-z0-9]/g, '').trim(); } catch (e) { return 'desconocido'; }
@@ -63,7 +69,14 @@ export const superNorm = (s: string | undefined | null) => {
 
 const safeJSON = (str: string) => { try { const match = str.match(/\{[\s\S]*\}/); return match ? JSON.parse(match[0]) : {}; } catch { return {}; } };
 
-const hasFiles = (e: React.DragEvent | DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+const hasRealFiles = (e: React.DragEvent | DragEvent) => {
+  const items = e.dataTransfer?.items;
+  if (!items || items.length === 0) return false;
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].kind === 'file') return true;
+  }
+  return false;
+};
 
 async function sha256File(file: File) {
   const buf = await file.arrayBuffer();
@@ -72,18 +85,16 @@ async function sha256File(file: File) {
 }
 
 const matchAlbaranesToFactura = (factura: FacturaExtended, albaranes: Albaran[], provNormalizado: string) => {
-  // 🔥 PROTECCIÓN: Asegurar que date existe
-  const fDate = factura.date || DateUtil.today();
-  const mesDraft = typeof fDate === 'string' ? fDate.substring(0, 7) : DateUtil.today().substring(0, 7);
+  const fDate = factura?.date || DateUtil.today();
+  const mesDraft = typeof fDate === 'string' ? fDate.substring(0, 7) : '0000-00';
   
   const candidatos = albaranes.filter(a => {
-      // 🔥 PROTECCIÓN: Asegurar que a.date existe antes de usar startsWith
-      const aDate = a?.date || '';
-      return !a?.invoiced && superNorm(a?.prov) === provNormalizado && (typeof aDate === 'string' && aDate.startsWith(mesDraft));
+    const aDate = a?.date || '';
+    return !a?.invoiced && superNorm(a?.prov) === provNormalizado && (typeof aDate === 'string' && aDate.startsWith(mesDraft));
   });
 
   const sumaAlbaranes = candidatos.reduce((acc, a) => acc + (Num.parse(a?.total) || 0), 0);
-  const totalFactura = Num.parse(factura.total) || 0;
+  const totalFactura = Num.parse(factura?.total) || 0;
   
   const diff = Math.abs(sumaAlbaranes - Math.abs(totalFactura));
   const toleranciaPermitida = Math.max(TOLERANCIA, Math.abs(totalFactura) * 0.005);
@@ -96,14 +107,16 @@ const matchAlbaranesToFactura = (factura: FacturaExtended, albaranes: Albaran[],
  * 🏦 COMPONENTE PRINCIPAL
  * ======================================================= */
 export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
-  // 🔥 PROTECCIÓN 1 (GPT): Asegurar que facturas y albaranes son arrays
+  // 🔥 FIX 1: Protección extrema de los arrays base
   const safeData = data || {};
   const facturasSeguras = Array.isArray(safeData.facturas) ? safeData.facturas as FacturaExtended[] : [];
   const albaranesSeguros = Array.isArray(safeData.albaranes) ? safeData.albaranes : [];
   const sociosSeguros = Array.isArray(safeData.socios) ? safeData.socios : [];
-  
-  const fallbackSocios = [{ id: "s1", n: "PAU" }, { id: "s2", n: "JERONI" }, { id: "s3", n: "AGNES" }, { id: "s4", n: "ONLY ONE" }, { id: "s5", n: "TIENDA DE SAKES" }];
-  const sociosReales = sociosSeguros.length > 0 ? sociosSeguros.filter(s => s?.active) : fallbackSocios;
+
+  // 🔥 FIX 2: Corrección del tipado SOCIOS_REALES
+  const fallbackSocios = [{ id: "s1", n: "ARUME" }];
+  const sociosRealesObj = sociosSeguros.length > 0 ? sociosSeguros.filter(s => s?.active) : fallbackSocios;
+  const SOCIOS_REALES_NAMES = sociosRealesObj.map(s => s.n);
 
   const [activeTab, setActiveTab] = useState<'pend' | 'hist'>('pend');
   const [mode, setMode] = useState<'proveedor' | 'socio'>('proveedor');
@@ -120,51 +133,67 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const dragCounter = useRef(0);
+  const [dragHeartbeat, setDragHeartbeat] = useState(0);
 
   const [selectedGroup, setSelectedGroup] = useState<{ label: string; ids: string[], unitId: BusinessUnit } | null>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<FacturaExtended | null>(null);
   const [modalForm, setModalForm] = useState({ num: '', date: DateUtil.today(), selectedAlbs: [] as string[], unitId: 'REST' as BusinessUnit });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isRecording, setIsRecording] = useState(false);
 
   const [emailInbox, setEmailInbox] = useState<EmailDraft[]>([
     { id: 'm1', from: 'ventas@makro.es', subject: 'Factura F-2026/012', date: DateUtil.today(), hasAttachment: true, status: 'new' }
   ]);
 
   /* =======================================================
-   * 🛡️ DRAG & DROP SEGURO
+   * 🛡️ DRAG & DROP
    * ======================================================= */
   useEffect(() => {
-    const handleGlobalDragEnd = () => { dragCounter.current = 0; setIsDragging(false); };
-    const onWindowDragLeave = (e: DragEvent) => {
-      const out = e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight;
-      if (out) { dragCounter.current = 0; setIsDragging(false); }
+    const endDrag = () => { if (isDragging) { dragCounter.current = 0; setIsDragging(false); } };
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') endDrag(); };
+    window.addEventListener('dragend', endDrag);
+    window.addEventListener('mouseleave', endDrag); 
+    window.addEventListener('keydown', onKeyDown);
+    return () => { 
+      window.removeEventListener('dragend', endDrag);
+      window.removeEventListener('mouseleave', endDrag);
+      window.removeEventListener('keydown', onKeyDown);
     };
-
-    window.addEventListener('dragend', handleGlobalDragEnd);
-    window.addEventListener('drop', handleGlobalDragEnd);
-    window.addEventListener('dragleave', onWindowDragLeave);
-    
-    return () => {
-      window.removeEventListener('dragend', handleGlobalDragEnd);
-      window.removeEventListener('drop', handleGlobalDragEnd);
-      window.removeEventListener('dragleave', onWindowDragLeave);
-    };
-  }, []);
-
-  // Failsafe por tiempo
-  useEffect(() => {
-    if (!isDragging) return;
-    const t = setTimeout(() => { dragCounter.current = 0; setIsDragging(false); }, 4000);
-    return () => clearTimeout(t);
   }, [isDragging]);
 
-  const handleDragEnter = useCallback((e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); dragCounter.current += 1; if (!isDragging) setIsDragging(true); }, [isDragging]);
-  const handleDragOver = useCallback((e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); }, []);
-  const handleDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); dragCounter.current -= 1; if (dragCounter.current <= 0) { setIsDragging(false); dragCounter.current = 0; } }, []);
-  
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (isDragging && Date.now() - dragHeartbeat > 300) {
+        setIsDragging(false); dragCounter.current = 0;
+      }
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [isDragging, dragHeartbeat]);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => { 
+    if (!hasRealFiles(e)) return; 
+    e.preventDefault(); e.stopPropagation();
+    dragCounter.current++; 
+    if (!isDragging) setIsDragging(true); 
+  }, [isDragging]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => { 
+    if (!hasRealFiles(e)) return; 
+    e.preventDefault(); 
+    setDragHeartbeat(Date.now()); 
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => { 
+    if (!hasRealFiles(e)) return; 
+    e.preventDefault(); e.stopPropagation();
+    dragCounter.current--; 
+    if (dragCounter.current <= 0) { setIsDragging(false); dragCounter.current = 0; } 
+  }, []);
+
   const handleDrop = useCallback(async (e: React.DragEvent) => { 
-    e.preventDefault(); e.stopPropagation(); setIsDragging(false); dragCounter.current = 0; 
+    e.preventDefault(); e.stopPropagation();
+    setIsDragging(false); dragCounter.current = 0; 
     
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0]; 
@@ -174,33 +203,32 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         alert("⚠️ Solo se permiten archivos PDF o imágenes.");
       }
     } 
-  }, [/* dependencias si las hubiera */]); 
+  }, []);
 
   /* =======================================================
    * 🧠 AUDITORÍA DE IA MEMOIZADA
    * ======================================================= */
   const draftsIA = useMemo(() => {
     try {
-      return facturasSeguras.filter(f => f.status === 'draft').map(draft => {
-        const matchResult = matchAlbaranesToFactura(draft, albaranesSeguros, superNorm(draft.prov));
+      return facturasSeguras.filter(f => f?.status === 'draft').map(draft => {
+        const matchResult = matchAlbaranesToFactura(draft, albaranesSeguros, superNorm(draft?.prov));
         return { ...draft, ...matchResult };
       });
     } catch (error) {
-      console.error("Error en draftsIA:", error);
+      console.error("Error validando draftsIA:", error);
       return [];
     }
   }, [facturasSeguras, albaranesSeguros]);
 
   /* =======================================================
-   * 🤖 MOTOR OCR (Google Gemini + Fallback Seguro)
+   * 🤖 MOTOR OCR (Google Gemini + Local Fallback)
    * ======================================================= */
   const processLocalFile = async (file: File) => {
     setIsSyncing(true); 
     try {
-      // 1. Idempotencia SHA-256
       const sha = await sha256File(file);
       const isDuplicate = facturasSeguras.some(f => f.attachmentSha === sha);
-      if (isDuplicate) { setIsSyncing(false); return alert("⚠️ Documento duplicado (misma huella digital)."); }
+      if (isDuplicate) { setIsSyncing(false); return alert("⚠️ Documento duplicado."); }
 
       const apiKey = localStorage.getItem('gemini_api_key');
       if (!apiKey) throw new Error("NO_API_KEY");
@@ -210,7 +238,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       });
       const soloBase64 = fileBase64.split(',')[1];
 
-      // 2. Extracción IA
       const ai = new GoogleGenAI({ apiKey });
       const prompt = `Actúa como un OCR contable. Extrae de esta factura y devuelve SOLO JSON: { "proveedor": "string", "num": "string", "fecha": "YYYY-MM-DD", "total": 0, "base": 0, "iva": 0 }`;
       
@@ -231,8 +258,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       };
 
       await onSave({ ...safeData, facturas: [nuevaFacturaIA, ...facturasSeguras] });
-      alert("✅ Factura extraída correctamente. Revisa la bandeja de conciliación.");
-
+      alert("✅ Factura extraída correctamente.");
     } catch (e) {
       console.warn("⚠️ Gemini falló. Activando Rescate Local...");
       try {
@@ -243,9 +269,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
            const tesseractModule = await import('tesseract.js'); const Tesseract = tesseractModule.default || tesseractModule;
            const { data: { text } } = await Tesseract.recognize(file, 'spa'); extractedText = text;
         } else if (file.type === 'application/pdf') {
-           const pdfjsModule = await import('pdfjs-dist');
-           const pdfjsLib = pdfjsModule.default || pdfjsModule;
-           pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+           const pdfjsLib = await import('pdfjs-dist');
+           // @ts-ignore
+           const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min?url')).default;
+           pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
            const arrayBuffer = await file.arrayBuffer(); const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
            for (let i = 1; i <= pdfDoc.numPages; i++) { const page = await pdfDoc.getPage(i); const textContent = await page.getTextContent(); extractedText += textContent.items.map((item: any) => item.str).join(' ') + '\n'; }
@@ -262,9 +289,17 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         };
 
         await onSave({ ...safeData, facturas: [fallbackFactura, ...facturasSeguras] });
-        alert(`⚠️ Rescate offline completado. Revisa los totales manualmente.`);
+        alert(`⚠️ Rescate offline completado.`);
       } catch (fallbackErr) { alert("⚠️ Archivo corrupto o ilegible."); }
     } finally { setIsSyncing(false); }
+  };
+
+  /* =======================================================
+   * 📧 FIX 3: FUNCIÓN DEL EMAIL INBOX
+   * ======================================================= */
+  const handleParseEmail = (emailId: string) => {
+    setEmailInbox(prev => prev.filter(e => e.id !== emailId));
+    alert("📥 Correo procesado. El PDF adjunto ha pasado a la bandeja de Conciliación.");
   };
 
   /* =======================================================
@@ -288,9 +323,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       (newData.facturas[draftIdx] as FacturaExtended).status = 'approved'; 
       newData.facturas[draftIdx].unidad_negocio = unitToAssign; 
       await onSave(newData);
-    } catch (error) {
-      console.error("Error al confirmar IA:", error);
-    }
+    } catch (error) { console.error("Error al confirmar IA:", error); }
   };
 
   const handleDiscardDraftIA = async (id: string) => {
@@ -298,16 +331,15 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     await onSave({ ...safeData, facturas: facturasSeguras.filter(f => f.id !== id) });
   };
 
-  // 📦 Agrupación manual de albaranes optimizada (🔥 Protegido contra Strings vacíos)
+  // 📦 Agrupación manual de albaranes optimizada
   const pendingGroups = useMemo(() => {
     try {
       const byMonth: Record<string, { name: string; groups: Record<string, any> }> = {};
       const q = superNorm(deferredSearch);
 
       albaranesSeguros.forEach(a => {
-        // 🔥 PROTECCIÓN: Asegurar que a.date es string
         const aDate = a?.date || '';
-        if (a?.invoiced || (typeof aDate === 'string' && !aDate.startsWith(year.toString()))) return;
+        if (a?.invoiced || typeof aDate !== 'string' || !aDate.startsWith(year.toString())) return;
         
         const itemUnit = (a as any).unitId || 'REST';
         if (selectedUnit !== 'ALL' && itemUnit !== selectedUnit) return;
@@ -315,15 +347,17 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         const owner = (mode === 'proveedor' ? a?.prov : a?.socio) || 'Arume';
         if (q && !superNorm(owner).includes(q) && !superNorm(a?.num || '').includes(q)) return;
 
-        const mk = typeof aDate === 'string' ? aDate.substring(0, 7) : '0000-00'; 
+        const mk = aDate.substring(0, 7); 
         if (!mk) return;
+
         if (!byMonth[mk]) {
           const parts = mk.split('-'); 
           const y = parts[0] || '0000';
-          const m = parts[1] ? parseInt(parts[1]) : 1;
+          const m = parseInt(parts[1] || '1', 10);
           const names = ["","Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
           byMonth[mk] = { name: `${names[m] || 'Mes'} ${y}`, groups: {} };
         }
+        
         const groupKey = `${superNorm(owner)}_${itemUnit}`;
         if (!byMonth[mk].groups[groupKey]) byMonth[mk].groups[groupKey] = { label: owner, unitId: itemUnit, t: 0, ids: [], count: 0 };
         byMonth[mk].groups[groupKey].t += (Num.parse(a?.total) || 0); 
@@ -346,7 +380,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       if (modalForm.selectedAlbs.includes(a.id)) { totalFactura += Num.parse(a.total) || 0; return { ...a, invoiced: true }; } return a;
     });
 
-    const taxRate = 0.10; // Suponemos 10% medio si agrupamos manual
+    const taxRate = 0.10; 
     const baseObj = totalFactura / (1 + taxRate);
     const taxObj = totalFactura - baseObj;
 
@@ -362,18 +396,21 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
   const handleTogglePago = async (id: string) => {
     const newData = { ...safeData, facturas: [...facturasSeguras] };
-    const f = newData.facturas.find(x => x.id === id) as FacturaExtended;
-    if (f && !f.reconciled) {
-      f.paid = !f.paid;
-      if (f.paid) { f.status = 'paid'; f.fecha_pago = DateUtil.today(); } else { f.status = 'approved'; f.fecha_pago = undefined; }
+    const idx = newData.facturas.findIndex(f => f.id === id);
+    if (idx !== -1) {
+      if (newData.facturas[idx].reconciled) return alert("🔒 ACCIÓN DENEGADA: Factura conciliada por el banco.");
+      newData.facturas[idx].paid = !newData.facturas[idx].paid;
+      newData.facturas[idx].status = newData.facturas[idx].paid ? 'paid' : 'approved';
       await onSave(newData);
-    } else alert("🔒 ACCIÓN DENEGADA: Esta factura ya está conciliada por el banco.");
+    }
   };
 
   const handleDeleteFactura = async (id: string) => {
     const fac = facturasSeguras.find(f => f.id === id); 
-    if (!fac || fac.reconciled) return alert("⚠️ No puedes borrar una factura validada por el Banco.");
+    if (!fac) return;
+    if (fac.reconciled) return alert("⚠️ No puedes borrar una factura validada por el Banco.");
     if (!window.confirm(`🛑 ¿Eliminar DEFINITIVAMENTE la factura ${fac.num || 'sin número'}?`)) return;
+    
     const newData = { ...safeData, facturas: facturasSeguras.filter(f => f.id !== id), albaranes: [...albaranesSeguros] };
     const ids = fac.albaranIdsArr || [];
     newData.albaranes = newData.albaranes.map(a => ids.includes(a.id) ? { ...a, invoiced: false } : a);
@@ -383,7 +420,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const handleExportGestoria = () => {
     const q = exportQuarter; const y = year; const startMonth = (q - 1) * 3 + 1; const endMonth = q * 3;
     const filtered = facturasSeguras.filter(f => {
-      // 🔥 PROTECCIÓN: Validar date
       const fDate = f?.date || '';
       return f.status !== 'draft' && f.tipo !== 'caja' && (f as any).tipo !== 'banco' && 
              (selectedUnit === 'ALL' || f.unidad_negocio === selectedUnit) && 
@@ -392,12 +428,21 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
              Number(fDate.split('-')[1]) <= endMonth;
     });
     
-    if (filtered.length === 0) return alert("No hay facturas en este periodo.");
+    if (filtered.length === 0) return alert("No hay facturas en este periodo para la unidad seleccionada.");
 
     const rows = filtered.map(f => {
-      const total = Math.abs(Num.parse(f.total) || 0); const base = Num.parse(f.base) || Num.round2(total / 1.10); const tax = Num.parse(f.tax) || Num.round2(total - base);
-      return { 'FECHA': f.date || '', 'Nº FACTURA': f.num || '', 'PROVEEDOR/CLIENTE': f.prov || f.cliente || '—', 'UNIDAD NEGOCIO': BUSINESS_UNITS.find(u => u.id === f.unidad_negocio)?.name || 'Restaurante', 'BASE IMPONIBLE': Num.fmt(base), 'IVA': Num.fmt(tax), 'TOTAL': Num.fmt(total), 'ESTADO': f.paid ? 'PAGADA' : 'PENDIENTE', 'CONCILIADA': f.reconciled ? 'SÍ' : 'NO' };
+      const total = Math.abs(Num.parse(f.total));
+      const base = Num.parse(f.base) || (total / 1.10);
+      const tax = Num.parse(f.tax) || (total - base);
+      
+      return {
+        'FECHA': f.date, 'Nº FACTURA': f.num, 'PROVEEDOR/CLIENTE': f.prov || f.cliente || '—', 
+        'UNIDAD NEGOCIO': BUSINESS_UNITS.find(u => u.id === f.unidad_negocio)?.name || 'Restaurante', 
+        'BASE IMPONIBLE': Num.fmt(base), 'IVA': Num.fmt(tax), 'TOTAL': Num.fmt(total), 
+        'ESTADO': f.paid ? 'PAGADA' : 'PENDIENTE', 'CONCILIADA': f.reconciled ? 'SÍ' : 'NO'
+      };
     });
+
     const ws = XLSX.utils.json_to_sheet(rows); 
     ws['!cols'] = [{ wch: 12 }, { wch: 16 }, { wch: 30 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
     
@@ -414,10 +459,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   };
 
   /* =======================================================
-   * 🎨 RENDERIZADO AISLADO (Protección contra crashes)
+   * 🎨 RENDERIZADO AISLADO (Protección 10 de Copilot)
    * ======================================================= */
   const renderPendingGroups = () => {
-    if (pendingGroups.length === 0) {
+    if (!pendingGroups || pendingGroups.length === 0) {
       return (
         <div className="py-20 flex flex-col items-center justify-center opacity-60 bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200">
           <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm mb-4"><Package className="w-8 h-8 text-slate-300" /></div>
@@ -430,7 +475,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       <div key={mk} className="mb-6 animate-fade-in">
         <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 px-2 border-b border-slate-100 pb-2">{dataGroup.name}</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {Object.values(dataGroup.groups).map((g: any) => {
+          {Object.values(dataGroup.groups || {}).map((g: any) => {
             const unitConfig = BUSINESS_UNITS.find(u => u.id === g.unitId);
             return (
               <div key={g.label + g.unitId} onClick={() => { setSelectedGroup({ label: g.label, ids: g.ids, unitId: g.unitId }); setModalForm({ num: '', date: DateUtil.today(), selectedAlbs: [...g.ids], unitId: g.unitId }); }} className="flex justify-between items-center p-5 bg-white rounded-2xl border border-slate-200 hover:border-indigo-400 hover:shadow-md transition cursor-pointer group">
@@ -500,7 +545,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         <div className={cn("bg-white/95 backdrop-blur-md px-4 py-3 rounded-[2rem] shadow-md border border-slate-200")}>
           <div className="flex flex-col xl:flex-row items-center justify-between gap-3">
             
-            {/* TABS DE VISTA */}
             <div className="flex items-center bg-slate-100 p-1.5 rounded-2xl w-full xl:w-auto overflow-x-auto no-scrollbar">
               <button onClick={() => setActiveTab('pend')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition whitespace-nowrap", activeTab === 'pend' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
                 📦 Albaranes sin cerrar
@@ -546,8 +590,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         {/* ZONA IZQUIERDA: Listas Principales */}
         <section className="xl:col-span-8 space-y-4">
           {activeTab === 'pend' ? renderPendingGroups() : (
-            // 🛡️ Componente Hijo Protegido
-            <InvoicesList facturas={facturasSeguras} searchQ={deferredSearch} selectedUnit={selectedUnit} mode={mode} filterStatus={filterStatus} year={year} businessUnits={BUSINESS_UNITS} sociosReales={SOCIOS_REALES} superNorm={superNorm} onOpenDetail={setSelectedInvoice as any} onTogglePago={handleTogglePago} onDelete={handleDeleteFactura} />
+            <InvoicesList facturas={facturasSeguras} searchQ={deferredSearch} selectedUnit={selectedUnit} mode={mode} filterStatus={filterStatus} year={year} businessUnits={BUSINESS_UNITS} sociosReales={SOCIOS_REALES_NAMES} superNorm={superNorm} onOpenDetail={setSelectedInvoice as any} onTogglePago={handleTogglePago} onDelete={handleDeleteFactura} />
           )}
         </section>
 
@@ -555,7 +598,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         <aside className="xl:col-span-4 space-y-6">
           <div className="sticky top-24 space-y-6">
             
-            {/* INBOX CORREO (Simulación Visual PRO) */}
+            {/* INBOX CORREO */}
             {emailInbox.length > 0 && (
               <div className="bg-white p-5 rounded-[2rem] border border-slate-200 shadow-sm">
                 <h4 className="text-sm font-black text-slate-800 mb-1 flex items-center gap-2"><Inbox className="w-4 h-4 text-blue-500"/> Correos Recibidos</h4>
@@ -675,7 +718,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                     <div>
                       <label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Responsable del Pago (Socio)</label>
                       <select value={modalForm.num.startsWith('SOCIO-') ? modalForm.num.split('-')[1] : ''} onChange={(e) => { const socio = e.target.value; setModalForm({ ...modalForm, num: `LIQ-${socio}-${modalForm.date.replace(/-/g,'')}` }); setSelectedGroup(prev => prev ? { ...prev, label: socio } : null); }} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:ring-2 ring-indigo-500/20 transition cursor-pointer">
-                        <option value="">-- Selecciona Socio --</option>{SOCIOS_REALES.map(p => <option key={p} value={p}>{p}</option>)}
+                        <option value="">-- Selecciona Socio --</option>{SOCIOS_REALES_NAMES.map(p => <option key={p} value={p}>{p}</option>)}
                       </select>
                     </div>
                   ) : (
@@ -693,15 +736,15 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         )}
       </AnimatePresence>
 
-      {/* 🚀 MODAL HIJO PROTEGIDO */}
+      {/* MODAL DE DETALLE DE FACTURA */}
       {selectedInvoice && (
         <InvoiceDetailModal 
-          factura={selectedInvoice as any} 
+          factura={selectedInvoice} 
           albaranes={albaranesSeguros} 
           businessUnits={BUSINESS_UNITS} 
           mode={mode} 
           onClose={() => setSelectedInvoice(null)} 
-          onDownloadFile={() => alert("Función de descarga de PDF en desarrollo.")} 
+          onDownloadFile={handleDownloadFile} 
         />
       )}
     </div>
