@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef, useDeferredValue, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback, useDeferredValue } from 'react';
 import { 
   Search, Plus, Download, Package, AlertTriangle, Check, 
   Building2, ShoppingBag, ListPlus, Users, Hotel, Layers, 
@@ -10,11 +10,11 @@ import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import { GoogleGenAI } from "@google/genai";
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend } from 'recharts';
 
-// 🚀 HIJOS VISUALES
+// 🚀 HIJOS VISUALES (Debes tenerlos en tu carpeta components)
 import { AlbaranesList } from './AlbaranesList';
 import { AlbaranEditModal } from './AlbaranEditModal';
-import PriceInspector from './PriceInspector';
 
 interface AlbaranesViewProps {
   data: AppData;
@@ -31,9 +31,9 @@ const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string
 ];
 
 /* =======================================================
- * 🛡️ UTILIDADES, CONSTANTES Y TOLERANCIAS (Auditoría OK)
+ * 🛡️ 1. UTILIDADES Y CONSTANTES INTEGRADAS
  * ======================================================= */
-const TOLERANCIA = 0.50; // 50 céntimos de redondeo
+export const TOLERANCIA = 0.50; // Tolerancia de 50 céntimos por redondeos
 
 export const superNorm = (s: string | undefined | null) => {
   if (!s || typeof s !== 'string') return 'desconocido';
@@ -44,18 +44,18 @@ const safeJSON = (str: string) => { try { const match = str.match(/\{[\s\S]*\}/)
 
 const filterByQuery = (a: Albaran, q: string) => {
   if (!q) return true;
-  const n = q.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  const prov = (a.prov||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const n = superNorm(q);
+  const prov = superNorm(a.prov);
   const num  = (a.num||'').toLowerCase();
   const notes= (a.notes||'').toLowerCase();
-  const lines= (a.items||[]).some((it:any)=> (it.n||'').toLowerCase().includes(n));
+  const lines= (a.items||[]).some((it:any)=> superNorm(it.n).includes(n));
   return prov.includes(n) || num.includes(n) || notes.includes(n) || lines;
 };
 
 const looksLikeDuplicate = (prov: string, num: string, date: string, albaranes: Albaran[]) => 
-  albaranes.some(a => (a.prov||'').toUpperCase() === prov.toUpperCase() && (a.num||'S/N') === (num||'S/N') && (a.date||'').slice(0,10) === (date||'').slice(0,10));
+  albaranes.some(a => superNorm(a.prov) === superNorm(prov) && (a.num||'S/N') === (num||'S/N') && (a.date||'').slice(0,10) === (date||'').slice(0,10));
 
-// 🧠 CEREBRO DE FLUCTUACIÓN
+// 🧠 CEREBRO DE FLUCTUACIÓN DINÁMICA
 const getDynamicThreshold = (itemName: string) => {
   const n = itemName.toLowerCase();
   if (n.match(/tomate|lechuga|cebolla|patata|pimiento|verdura|fruta|limon|naranja/)) return 25; 
@@ -68,14 +68,14 @@ const getDynamicThreshold = (itemName: string) => {
 const normalizeUnitPrice = (q: number, u: string | undefined, unitPrice: number) => {
   if (!u) return Num.round2(unitPrice);
   switch (u) {
-    case "g":  return Num.round2(unitPrice * 1000); 
-    case "ml": return Num.round2(unitPrice * 1000); 
+    case "g":  return Num.round2(unitPrice * 1000); // €/kg
+    case "ml": return Num.round2(unitPrice * 1000); // €/l
     default:   return Num.round2(unitPrice);
   }
 };
 
 /* =======================================================
- * 🧠 SUPER MOTOR DE PARSEO V2 (Descuentos y Unidades)
+ * 🧠 2. MOTOR DE PARSEO V2 INTEGRADO
  * ======================================================= */
 function useAlbaranEnginePRO(text: string) {
   const analyzedItems = useMemo(() => {
@@ -139,7 +139,138 @@ function useAlbaranEnginePRO(text: string) {
 }
 
 /* =======================================================
- * 🏦 COMPONENTE PRINCIPAL
+ * 📈 3. PRICE INSPECTOR (Incrustado para evitar errores de Build)
+ * ======================================================= */
+function smaN(values: number[], n=30) {
+  const out: number[] = [];
+  let acc = 0;
+  for (let i=0;i<values.length;i++){
+    acc += values[i];
+    if (i>=n) acc -= values[i-n];
+    out.push(i>=n-1 ? Num.round2(acc/n) : NaN);
+  }
+  return out;
+}
+
+function usePriceSeries({ history, albaranes, prov, item }: any) {
+  return useMemo(() => {
+    if (!prov || !item) return { series: [], avgAll: 0, avg30: 0 };
+    
+    const H = (history||[]).filter((h:any) => h.prov===prov && h.item===item);
+    let fallback: any[] = [];
+    
+    if (!H.length && (albaranes||[]).length){
+      for (const a of (albaranes||[])){
+        if ((a.prov||'').toUpperCase() !== prov) continue;
+        for (const it of (a.items||[])) {
+          const n = (it.n||'').toUpperCase();
+          if (!n.includes(item)) continue; 
+          fallback.push({
+            id: `rebuild-${prov}-${n}-${a.date}`, prov, item: n,
+            unitPrice: normalizeUnitPrice(it.q, it.u as any, it.unitPrice),
+            date: a.date
+          });
+        }
+      }
+    }
+
+    const rows = (H.length ? H : fallback)
+      .filter(r => r.unitPrice>0 && r.date)
+      .sort((a,b)=> a.date.localeCompare(b.date));
+
+    const series = rows.map(r => ({ date: r.date, price: r.unitPrice }));
+    if (!series.length) return { series: [], avgAll: 0, avg30: 0 };
+
+    const prices = series.map(s => s.price);
+    const avgAll = Num.round2(prices.reduce((a,x)=>a+x,0)/prices.length);
+    const sma30 = smaN(prices, 30);
+    const avg30 = Num.round2(sma30.filter(x=>!Number.isNaN(x)).slice(-30).reduce((a,x,i,arr)=>a+x/(arr.length||1),0)||0);
+
+    const withMetrics = series.map((s, i) => {
+      const prev = i>0 ? series[i-1].price : s.price;
+      const deltaPct = prev>0 ? Num.round2(((s.price - prev)/prev)*100) : 0;
+      return { ...s, sma30: sma30[i], deltaPct };
+    });
+
+    return { series: withMetrics, avgAll, avg30 };
+  }, [history, albaranes, prov, item]);
+}
+
+function PriceEvolutionChart({ data, unitLabel = "€/ud", upThreshold = 10 }: any) {
+  const domain = useMemo(()=>{
+    if (!data.length) return [0, 1];
+    const vals = data.map((d:any)=>d.price).filter((v:any)=>Number.isFinite(v));
+    const min = Math.min(...vals), max = Math.max(...vals);
+    return [Math.max(0, Math.floor(min*0.95*100)/100), Math.ceil(max*1.05*100)/100];
+  }, [data]);
+
+  return (
+    <div className="bg-white rounded-[2rem] border border-slate-100 p-5 shadow-sm mt-4">
+      <div className="flex items-center justify-between mb-4">
+        <h4 className="text-sm font-black text-slate-800">Evolución del precio</h4>
+        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{unitLabel}</span>
+      </div>
+      <div className="h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+            <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} tickMargin={10} axisLine={false} tickLine={false} />
+            <YAxis domain={domain as any} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v)=>Num.round2(v).toString()} />
+            <RechartsTooltip 
+              contentStyle={{ borderRadius: 16, border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 'bold', fontSize: 12 }}
+              formatter={(val:any, name:any) => name==='price' ? [`${Num.round2(val)} ${unitLabel}`, 'Precio'] : name==='sma30' ? [`${Num.round2(val)} ${unitLabel}`, 'Media 30d'] : [val, name]}
+            />
+            <Legend wrapperStyle={{ fontSize: 10, fontWeight: 'bold', paddingTop: 10 }} />
+            <Line type="monotone" dataKey="price" name="Precio" stroke="#4f46e5" strokeWidth={3} activeDot={{ r: 6, fill: '#4f46e5', stroke: '#fff', strokeWidth: 2 }} isAnimationActive={false} dot={(props:any)=>{
+               const { cx, cy, payload } = props;
+               const up = (payload?.deltaPct ?? 0) >= upThreshold;
+               return <circle cx={cx} cy={cy} r={up ? 4 : 0} fill={up ? "#f43f5e" : "transparent"} stroke={up ? "#fff" : "transparent"} strokeWidth={2} key={`dot-${cx}-${cy}`} />;
+            }} />
+            <Line type="monotone" dataKey="sma30" name="Media Móvil" stroke="#cbd5e1" strokeWidth={2} strokeDasharray="4 4" dot={false} isAnimationActive={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function PriceInspector({ priceHistory, albaranesLite, proveedores, suggestionsByProv, defaultProv, defaultItem }: any) {
+  const [prov, setProv] = useState((defaultProv||'').toUpperCase());
+  const [item, setItem] = useState((defaultItem||'').toUpperCase());
+  const { series, avgAll } = usePriceSeries({ history: priceHistory, albaranes: albaranesLite, prov, item });
+  const topItems = (suggestionsByProv?.[prov] || []).slice(0, 10);
+
+  return (
+    <div className="bg-slate-50 p-6 rounded-[2.5rem] border border-slate-100 shadow-inner">
+      <h3 className="text-sm font-black text-slate-800 mb-4 flex items-center gap-2"><LineChartIcon className="w-5 h-5 text-indigo-500" /> Inspector de Precios</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label className="text-[10px] font-black text-slate-400 uppercase ml-2">Proveedor</label>
+          <input list="prov-list" value={prov} onChange={(e)=>setProv(e.target.value.toUpperCase())} className="mt-1 w-full p-3 bg-white rounded-xl text-sm font-bold border border-slate-200 outline-none focus:border-indigo-500 shadow-sm" placeholder="Ej: MAKRO"/>
+          <datalist id="prov-list">{proveedores.map((p:string)=> <option key={p} value={p} />)}</datalist>
+        </div>
+        <div>
+          <label className="text-[10px] font-black text-slate-400 uppercase ml-2">Producto</label>
+          <input list="item-list" value={item} onChange={(e)=>setItem(e.target.value.toUpperCase())} className="mt-1 w-full p-3 bg-white rounded-xl text-sm font-bold border border-slate-200 outline-none focus:border-indigo-500 shadow-sm" placeholder="Ej: SALMÓN"/>
+          <datalist id="item-list">{topItems.map((i:string) => <option key={i} value={i} />)}</datalist>
+        </div>
+      </div>
+      
+      {series.length > 1 ? (
+        <PriceEvolutionChart data={series} unitLabel="€" />
+      ) : (
+        <div className="bg-white rounded-[2rem] border border-slate-100 p-8 text-center mt-4 shadow-sm">
+          <span className="text-3xl mb-2 block opacity-50">📉</span>
+          <p className="text-slate-500 font-bold text-sm">Faltan datos</p>
+          <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-widest">Selecciona proveedor y producto con +2 compras.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* =======================================================
+ * 🏦 4. COMPONENTE PRINCIPAL (VISTA)
  * ======================================================= */
 export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const safeData = data || { albaranes: [], socios: [] };
@@ -171,7 +302,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const { analyzedItems, liveTotals } = useAlbaranEnginePRO(form.text);
 
   /* =======================================================
-   * 📲 TELEGRAM BOT INTEGRATION (Simulador)
+   * 📲 TELEGRAM BOT INTEGRATION
    * ======================================================= */
   const handleTelegramSync = async () => {
     setIsSyncingTelegram(true);
@@ -182,7 +313,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   };
 
   /* =======================================================
-   * 📅 FILTROS DE FECHA (Atajos UX)
+   * 📅 FILTROS DE FECHA
    * ======================================================= */
   const inRange = (iso: string, from?: string, to?: string) => {
     if (!iso) return false; const d = iso.slice(0,10);
@@ -412,6 +543,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
           <p className="text-xs text-indigo-500 font-bold uppercase tracking-widest mt-1">Con Inteligencia de Precios</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {/* BOTÓN TELEGRAM SYNC */}
           <button onClick={handleTelegramSync} disabled={isSyncingTelegram} className="px-5 py-3 rounded-2xl font-black text-xs uppercase bg-[#229ED9] text-white shadow-md hover:bg-[#1E8CC0] transition flex items-center gap-2">
             {isSyncingTelegram ? <Loader2 className="w-4 h-4 animate-spin"/> : <Smartphone className="w-4 h-4"/>} Telegram Sync
           </button>
@@ -464,7 +596,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         </div>
       </div>
 
-      {/* 🧩 LAYOUT DE DOS COLUMNAS */}
+      {/* 🧩 LAYOUT DE DOS COLUMNAS (Formulario / Inspector | Lista) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 relative z-10">
         
         {/* 📝 COLUMNA IZQUIERDA: Formulario o Inspector */}
@@ -487,6 +619,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                 <div className="flex justify-between items-center mb-5">
                   <h3 className="text-sm font-black text-slate-800 flex items-center gap-2"><ListPlus className="w-5 h-5 text-indigo-500" /> Nuevo Albarán</h3>
                   
+                  {/* BOTÓN OCR PDF DIRECTO */}
                   <div className="flex items-center gap-2">
                     <input type="file" ref={fileInputRef} className="hidden" accept="application/pdf, image/*" onChange={(e) => { if (e.target.files && e.target.files[0]) { processLocalFile(e.target.files[0]); e.target.value = ''; } }} />
                     <button onClick={() => fileInputRef.current?.click()} className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 transition" title="Autorellenar con Foto/PDF"><Camera className="w-4 h-4"/></button>
@@ -511,6 +644,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                   </div>
                 </div>
 
+                {/* Calculadora Rápida */}
                 <div className="flex items-center gap-1 mb-3 bg-indigo-50/50 p-2 rounded-xl border border-indigo-100">
                   <input type="text" value={quickCalc.name} onChange={(e) => setQuickCalc({ ...quickCalc, name: e.target.value })} placeholder="Producto rápido..." className="w-1/2 p-2 bg-white rounded-lg text-xs font-bold outline-none" />
                   <input type="number" value={quickCalc.total} onChange={(e) => setQuickCalc({ ...quickCalc, total: e.target.value })} placeholder="Total €" className="w-1/4 p-2 bg-white rounded-lg text-xs font-bold outline-none text-right" />
@@ -549,7 +683,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
           </AnimatePresence>
         </aside>
 
-        {/* 📚 COLUMNA DERECHA: Lista de Albaranes */}
+        {/* 📚 COLUMNA DERECHA: Lista de Albaranes Aislada (Rendimiento) */}
         <section className="lg:col-span-8">
           <AlbaranesList 
             albaranes={filteredForList} 
