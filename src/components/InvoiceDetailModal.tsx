@@ -1,17 +1,19 @@
 import React from 'react';
 import { FileText, FileArchive, Package, Zap, X } from 'lucide-react';
-import { Factura, Albaran } from '../types';
+// 🛡️ CORRECCIÓN: Importamos FacturaExtended desde la vista principal
+import { FacturaExtended, BusinessUnit } from './InvoicesView'; 
+import { Albaran } from '../types';
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
-import { BusinessUnit } from '../views/InvoicesView';
 
+// 🛡️ CORRECCIÓN: Actualizamos la interfaz para usar FacturaExtended
 interface InvoiceDetailModalProps {
-  factura: Factura;
+  factura: FacturaExtended;
   albaranes: Albaran[];
   businessUnits: any[];
   mode: 'proveedor' | 'socio';
   onClose: () => void;
-  onDownloadFile: (factura: Factura) => void;
+  onDownloadFile: (factura: FacturaExtended) => void; // Actualizado aquí también
 }
 
 export const InvoiceDetailModal = ({ factura, albaranes, businessUnits, mode, onClose, onDownloadFile }: InvoiceDetailModalProps) => {
