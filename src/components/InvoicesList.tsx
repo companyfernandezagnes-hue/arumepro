@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { FileText, CheckCircle2, Clock, Trash2, Link as LinkIcon, AlertCircle, Building2, User } from 'lucide-react';
+import { FileText, CheckCircle2, Clock, Trash2, Link as LinkIcon, AlertCircle, Building2, User, Sparkles, Package } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 // 🛡️ Mantenemos el tipado estricto
 import { FacturaExtended, BusinessUnit } from './InvoicesView'; 
@@ -22,9 +22,7 @@ interface InvoicesListProps {
 }
 
 /* =======================================================
- * 🧠 HOOK DE FILTRADO ALTO RENDIMIENTO (Sugerencia Auditoría)
- * Aisla la lógica matemática del render visual. Pre-calcula
- * las variables pesadas (como normalizaciones) fuera del bucle.
+ * 🧠 HOOK DE FILTRADO ALTO RENDIMIENTO (Protegido Copilot)
  * ======================================================= */
 function useInvoicesFilters(
   facturas: FacturaExtended[], 
@@ -38,25 +36,32 @@ function useInvoicesFilters(
 ) {
   return useMemo(() => {
     try {
-      // 🚀 OPTIMIZACIÓN: Pre-calculamos constantes fuera del bucle .filter()
-      const yearStr = year.toString();
       const searchN = searchQ ? superNorm(searchQ) : '';
       const normalizedSocios = sociosReales.map(s => superNorm(s));
 
       return facturas.filter(f => {
-        // 1. Descartar borradores y nulos rápidamente
+        // 1. Siempre descartar cosas rotas o borradores IA
         if (!f || f.status === 'draft') return false;
-        if (!(f.date || '').startsWith(yearStr)) return false;
-        if (selectedUnit !== 'ALL' && f.unidad_negocio !== selectedUnit) return false;
+
+        // 2. Filtro de Año Seguro (Evita que desaparezcan facturas por fallos de string)
+        if (f.date) {
+          const y = new Date(f.date).getFullYear();
+          if (year && y !== year) return false;
+        }
+
+        // 3. Filtro Unidad Seguro (Asume 'REST' si no tiene unidad)
+        if (selectedUnit !== 'ALL' && (f.unidad_negocio || 'REST') !== selectedUnit) return false;
         
-        // 2. JAMÁS mostrar cajas o bancos
+        // 4. JAMÁS mostrar cajas o bancos (Evitar basura en la lista)
         if (f.tipo === 'caja' || (f as any).tipo === 'banco') return false;
 
-        // 3. Evaluar Proveedor vs Socio (Optimizado)
+        // 5. Evaluar Proveedor vs Socio (Optimizado y Seguro)
         const normCliente = superNorm(f.cliente);
         const normProv = superNorm(f.prov);
         const esSocioPorNombre = normalizedSocios.some(socio => normCliente.includes(socio) || normProv.includes(socio));
-        const isCompra = f.tipo === 'compra';
+        
+        // Si no tiene tipo, asumimos que es compra por defecto para no ocultarla
+        const isCompra = f.tipo ? f.tipo === 'compra' : true;
 
         if (mode === 'proveedor') {
           if (!isCompra || esSocioPorNombre) return false; 
@@ -64,12 +69,12 @@ function useInvoicesFilters(
           if (!esSocioPorNombre) return false;
         }
 
-        // 4. Estados de pago
+        // 6. Estados de pago y conciliación
         if (filterStatus === 'pending' && f.paid) return false;
         if (filterStatus === 'paid' && !f.paid) return false;
         if (filterStatus === 'reconciled' && !f.reconciled) return false;
 
-        // 5. Búsqueda por texto (Super rápida porque searchN ya está calculado)
+        // 7. Búsqueda por texto 
         if (searchN) {
           if (!normProv.includes(searchN) && !normCliente.includes(searchN) && !superNorm(f.num || '').includes(searchN)) return false;
         }
@@ -77,7 +82,7 @@ function useInvoicesFilters(
         return true;
       }).sort((a, b) => new Date(b?.date || 0).getTime() - new Date(a?.date || 0).getTime());
     } catch (e) {
-      console.error("Error en historyList:", e);
+      console.error("Error en historyList (Filtros rotos):", e);
       return [];
     }
   }, [facturas, year, filterStatus, searchQ, selectedUnit, mode, sociosReales, superNorm]);
@@ -86,7 +91,6 @@ function useInvoicesFilters(
 /* =======================================================
  * 🎨 COMPONENTE UI: LISTA DE FACTURAS
  * ======================================================= */
-// 🚀 React.memo previene re-renders si escribimos en otros inputs de la vista principal
 export const InvoicesList = React.memo(({
   facturas, searchQ, selectedUnit, mode, filterStatus, year, businessUnits, sociosReales, superNorm, onOpenDetail, onTogglePago, onDelete
 }: InvoicesListProps) => {
@@ -110,10 +114,9 @@ export const InvoicesList = React.memo(({
 
   return (
     <div className="space-y-3">
-      {/* 🚀 ANIMATE PRESENCE: Transiciones suaves al borrar o filtrar */}
       <AnimatePresence mode="popLayout">
         {historyList.map(f => {
-          const unitConfig = businessUnits.find(u => u.id === f.unidad_negocio);
+          const unitConfig = businessUnits.find(u => u.id === (f.unidad_negocio || 'REST'));
           const titular = mode === 'socio' ? (f.cliente || f.prov || '—') : (f.prov || f.cliente || '—');
 
           return (
@@ -142,10 +145,10 @@ export const InvoicesList = React.memo(({
                     </span>
                   )}
 
-                  {f.source === 'email-ia' ? (
-                    <span className="text-[9px] font-black text-purple-600 bg-purple-50 px-2.5 py-1 rounded-full border border-purple-200">🤖 IA</span>
+                  {f.source === 'email-ia' || f.source === 'dropzone' ? (
+                    <span className="text-[9px] font-black text-purple-600 bg-purple-50 px-2.5 py-1 rounded-full border border-purple-200 flex items-center gap-1"><Sparkles className="w-3 h-3"/> IA</span>
                   ) : (
-                    <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200">📦 MANUAL</span>
+                    <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200 flex items-center gap-1"><Package className="w-3 h-3"/> MANUAL</span>
                   )}
                   
                   {f.reconciled ? (
