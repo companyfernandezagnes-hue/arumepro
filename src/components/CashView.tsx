@@ -4,28 +4,36 @@ import {
   Trash2, CheckCircle2, Clock, AlertTriangle, RefreshCw, Image as ImageIcon, 
   Scan, Building2, ShoppingBag, Layers, SplitSquareHorizontal, Mic, Square, Plus, Download, XCircle
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { AppData, Cierre, Factura } from '../types';
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
 import { GoogleGenAI } from "@google/genai";
 
+// 🚀 IMPORTAMOS LA LISTA SUPER RÁPIDA
+import { CashHistoryList } from '../components/CashHistoryList';
+
+// Fallback de animaciones
+let motion: any = { div: 'div' };
+let AnimatePresence: any = React.Fragment;
+try {
+  const fm = require('motion/react');
+  motion = fm.motion;
+  AnimatePresence = fm.AnimatePresence;
+} catch(e) {}
+
 export type CashBusinessUnit = 'REST' | 'SHOP';
 
-const CASH_UNITS: { id: CashBusinessUnit; name: string; icon: any; color: string; bg: string }[] = [
+export const CASH_UNITS: { id: CashBusinessUnit; name: string; icon: any; color: string; bg: string }[] = [
   { id: 'REST', name: 'Restaurante', icon: Building2, color: 'text-indigo-600', bg: 'bg-indigo-50' },
   { id: 'SHOP', name: 'Tienda Sake', icon: ShoppingBag, color: 'text-emerald-600', bg: 'bg-emerald-50' }
 ];
 
-/* =======================================================
- * 🛡️ CONFIGURACIÓN DE COMISIONES (¡MODIFICA ESTO LUEGO!)
- * ======================================================= */
 const COMISIONES = {
-  glovo: 0.0,       
+  glovo: 0.0,        
   uber: 0.0,        
   apperStreet: 0.0, 
-  madisa: 0.0       
+  madisa: 0.0        
 };
 
 interface CashViewProps {
@@ -33,64 +41,37 @@ interface CashViewProps {
   onSave: (newData: AppData) => Promise<void>;
 }
 
-const asNum = (v: any, d = 0) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : d;
-};
-
+const asNum = (v: any, d = 0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
 const normalizeDate = (s?: string) => {
-  const v = String(s ?? '').trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
-  const m = v.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  return m ? `${m[3]}-${m[2]}-${m[1]}` : new Date().toLocaleDateString('sv-SE'); 
+  const v = String(s ?? '').trim(); if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  const m = v.match(/^(\d{2})-(\d{2})-(\d{4})$/); return m ? `${m[3]}-${m[2]}-${m[1]}` : new Date().toLocaleDateString('sv-SE'); 
 };
 
 const extractJSON = (rawText: string) => {
   try {
     if (!rawText) throw new Error("Respuesta vacía");
     const clean = rawText.replace(/(?:json)?/gi, '').replace(/\uFEFF/g, '').replace(/```/g, '').trim();
-    const start = clean.indexOf('{');
-    const end = clean.lastIndexOf('}');
+    const start = clean.indexOf('{'); const end = clean.lastIndexOf('}');
     if (start === -1 || end === -1 || end <= start) throw new Error("No se detectó JSON");
     return JSON.parse(clean.substring(start, end + 1));
-  } catch (err) {
-    return {};
-  }
-};
-
-const cleanMime = (t: string) => {
-  const base = (t || '').split(';')[0].trim().toLowerCase();
-  const ok = ['audio/webm', 'audio/ogg', 'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/mp4'];
-  return ok.includes(base) ? base : 'audio/webm';
+  } catch (err) { return {}; }
 };
 
 const compressImageToBase64 = async (file: File | Blob): Promise<string> => {
-  const MAX_W = 1200, MAX_H = 1200;
-  const Q1 = 0.72, Q2 = 0.6;
-  const MAX_BYTES = 2.5 * 1024 * 1024;
-  const bmp = await createImageBitmap(file);
-  let { width: w, height: h } = bmp;
-  const r = Math.min(MAX_W / w, MAX_H / h, 1);
-  w = Math.round(w * r); h = Math.round(h * r);
-  const cvs = document.createElement('canvas');
-  cvs.width = w; cvs.height = h;
+  const MAX_W = 1200, MAX_H = 1200; const Q1 = 0.72, Q2 = 0.6; const MAX_BYTES = 2.5 * 1024 * 1024;
+  const bmp = await createImageBitmap(file); let { width: w, height: h } = bmp;
+  const r = Math.min(MAX_W / w, MAX_H / h, 1); w = Math.round(w * r); h = Math.round(h * r);
+  const cvs = document.createElement('canvas'); cvs.width = w; cvs.height = h;
   cvs.getContext('2d', { alpha: false })!.drawImage(bmp, 0, 0, w, h);
   const toB64 = (q: number) => new Promise<string>(res => {
-    cvs.toBlob(b => {
-      const fr = new FileReader();
-      fr.onload = () => res((fr.result as string).split(',')[1]);
-      fr.readAsDataURL(b as Blob);
-    }, 'image/jpeg', q);
+    cvs.toBlob(b => { const fr = new FileReader(); fr.onload = () => res((fr.result as string).split(',')[1]); fr.readAsDataURL(b as Blob); }, 'image/jpeg', q);
   });
-  let b64 = await toB64(Q1);
-  if (Math.floor(b64.length * 3 / 4) > MAX_BYTES) b64 = await toB64(Q2);
-  return b64;
+  let b64 = await toB64(Q1); if (Math.floor(b64.length * 3 / 4) > MAX_BYTES) b64 = await toB64(Q2); return b64;
 };
 
 function upsertFactura(list: any[], item: any, key: string = 'num') {
   const idx = list.findIndex(x => x[key] === item[key]);
-  if (idx >= 0) list[idx] = { ...list[idx], ...item };
-  else list.push(item);
+  if (idx >= 0) list[idx] = { ...list[idx], ...item }; else list.push(item);
 }
 
 export const CashView = ({ data, onSave }: CashViewProps) => {
@@ -103,9 +84,8 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   const [exportQuarter, setExportQuarter] = useState(Math.floor(new Date().getMonth() / 3) + 1);
   const [exportYear, setExportYear] = useState(new Date().getFullYear());
 
-  // 🎙️ Estados Grabación Principal y Fallback Nativo
   const [isRecording, setIsRecording] = useState(false);
-  const [liveTranscript, setLiveTranscript] = useState(''); // 🚀 NUEVO: Para ver lo que hablas
+  const [liveTranscript, setLiveTranscript] = useState('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const nativeTranscriptRef = useRef<string>('');
@@ -122,16 +102,11 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   const [depositoBanco, setDepositoBanco] = useState<string>(''); 
   const [gastosCaja, setGastosCaja] = useState<{ concepto: string; importe: string; iva: 4|10|21; unidad: CashBusinessUnit }[]>([]);
 
-  // ==========================================
-  // 🧠 CÁLCULOS NETOS
-  // ==========================================
   const totalTarjetas = useMemo(() => Num.parse(form.tpv1) + Num.parse(form.tpv2) + Num.parse(form.amex), [form.tpv1, form.tpv2, form.amex]);
   const appsBrutas = useMemo(() => Num.parse(form.glovo) + Num.parse(form.uber) + Num.parse(form.madisa) + Num.parse(form.apperStreet), [form.glovo, form.uber, form.madisa, form.apperStreet]);
   const appsNetas = useMemo(() => {
-    const g = Num.parse(form.glovo) * (1 - COMISIONES.glovo);
-    const u = Num.parse(form.uber) * (1 - COMISIONES.uber);
-    const m = Num.parse(form.madisa) * (1 - COMISIONES.madisa);
-    const a = Num.parse(form.apperStreet) * (1 - COMISIONES.apperStreet);
+    const g = Num.parse(form.glovo) * (1 - COMISIONES.glovo); const u = Num.parse(form.uber) * (1 - COMISIONES.uber);
+    const m = Num.parse(form.madisa) * (1 - COMISIONES.madisa); const a = Num.parse(form.apperStreet) * (1 - COMISIONES.apperStreet);
     return Num.round2(g + u + m + a);
   }, [form.glovo, form.uber, form.madisa, form.apperStreet]);
 
@@ -140,8 +115,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   const totalRestauranteNeto = useMemo(() => (Num.parse(form.efectivo) + totalTarjetas + appsNetas) - totalTienda, [form.efectivo, totalTarjetas, appsNetas, totalTienda]);
 
   const descuadreVivo = useMemo(() => {
-    const cajaF = Num.parse(form.cajaFisica);
-    const efec = Num.parse(form.efectivo);
+    const cajaF = Num.parse(form.cajaFisica); const efec = Num.parse(form.efectivo);
     if (form.cajaFisica === '' || form.efectivo === '') return null;
     return Num.round2(cajaF - (efec + fondoCaja));
   }, [form.cajaFisica, form.efectivo, fondoCaja]);
@@ -162,18 +136,13 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   }, [data.cierres, currentFilterDate, selectedUnit]);
 
   const handleMonthChange = (offset: number) => {
-    let [y, m] = currentFilterDate.split('-').map(Number);
-    m += offset;
-    if (m === 0) { m = 12; y--; }
-    if (m === 13) { m = 1; y++; }
+    let [y, m] = currentFilterDate.split('-').map(Number); m += offset;
+    if (m === 0) { m = 12; y--; } if (m === 13) { m = 1; y++; }
     setCurrentFilterDate(`${y}-${String(m).padStart(2, '0')}`);
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, slot: 'img1' | 'img2') => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = '';
-    await processImageWithAI(file, slot);
+    const file = e.target.files?.[0]; if (!file) return; e.target.value = ''; await processImageWithAI(file, slot);
   };
 
   const processImageWithAI = async (file: File | Blob, slot: 'img1' | 'img2' = 'img1') => {
@@ -181,178 +150,73 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     if (!apiKey) return alert("⚠️ No tienes la clave de IA conectada.");
     setScanStatus('loading');
     try {
-      const objUrl = URL.createObjectURL(file);
-      setImages(prev => ({ ...prev, [slot]: objUrl }));
-      const base64Data = await compressImageToBase64(file);
-      const ai = new GoogleGenAI({ apiKey });
-      const prompt = `Analiza este ticket de cierre de caja. Devuelve SOLO JSON con:
-      {"fecha":"YYYY-MM-DD", "efectivo":0, "tpv1":0, "tpv2":0, "amex":0, "glovo":0, "uber":0, "sobre_cash":0, "gastos":0, "venta_tienda":0, "notas":""}`;
+      const objUrl = URL.createObjectURL(file); setImages(prev => ({ ...prev, [slot]: objUrl }));
+      const base64Data = await compressImageToBase64(file); const ai = new GoogleGenAI({ apiKey });
+      const prompt = `Analiza este ticket de cierre de caja. Devuelve SOLO JSON con: {"fecha":"YYYY-MM-DD", "efectivo":0, "tpv1":0, "tpv2":0, "amex":0, "glovo":0, "uber":0, "sobre_cash":0, "gastos":0, "venta_tienda":0, "notas":""}`;
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: base64Data, mimeType: "image/jpeg" } }] }],
-        config: { responseMimeType: "application/json", temperature: 0.1 }
+        model: "gemini-2.5-flash", contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: base64Data, mimeType: "image/jpeg" } }] }], config: { responseMimeType: "application/json", temperature: 0.1 }
       });
-      const rawJson = extractJSON(response.text || "");
-      actualizarFormConIA(rawJson, "Imagen");
-      setScanStatus('success');
-    } catch (error: any) {
-      setScanStatus('error');
-      alert(`⚠️ Problema procesando la imagen.`);
-    } finally {
-      setTimeout(() => setScanStatus('idle'), 4000);
-    }
+      const rawJson = extractJSON(response.text || ""); actualizarFormConIA(rawJson, "Imagen"); setScanStatus('success');
+    } catch (error: any) { setScanStatus('error'); alert(`⚠️ Problema procesando la imagen.`); } finally { setTimeout(() => setScanStatus('idle'), 4000); }
   };
 
-  // ==========================================
-  // 🎙️ GRABACIÓN PARALELA (TEXTO EN VIVO)
-  // ==========================================
   const toggleRecording = async () => {
     if (isRecording) {
-      mediaRecorderRef.current?.stop();
-      if (speechRecRef.current) {
-        try { speechRecRef.current.stop(); } catch(e){}
-      }
-      
+      mediaRecorderRef.current?.stop(); if (speechRecRef.current) { try { speechRecRef.current.stop(); } catch(e){} }
       const textoHablado = nativeTranscriptRef.current.trim();
-      if (textoHablado) {
-        setForm(prev => ({
-          ...prev,
-          notas: (prev.notas ? prev.notas + "\n" : "") + "🎤 " + textoHablado
-        }));
-      }
+      if (textoHablado) { setForm(prev => ({ ...prev, notas: (prev.notas ? prev.notas + "\n" : "") + "🎤 " + textoHablado })); }
       return;
     }
-
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      
-      nativeTranscriptRef.current = '';
-      setLiveTranscript('');
-
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true }); nativeTranscriptRef.current = ''; setLiveTranscript('');
       try {
         const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
         if (SpeechRecognition) {
-          const recognition = new SpeechRecognition();
-          recognition.lang = 'es-ES';
-          recognition.continuous = true;
-          recognition.interimResults = true; 
-          
+          const recognition = new SpeechRecognition(); recognition.lang = 'es-ES'; recognition.continuous = true; recognition.interimResults = true; 
           recognition.onresult = (event: any) => {
-            let text = '';
-            for (let i = 0; i < event.results.length; ++i) {
-              text += event.results[i][0].transcript + ' ';
-            }
-            nativeTranscriptRef.current = text;
-            setLiveTranscript(text); 
+            let text = ''; for (let i = 0; i < event.results.length; ++i) { text += event.results[i][0].transcript + ' '; }
+            nativeTranscriptRef.current = text; setLiveTranscript(text); 
           };
-          
-          speechRecRef.current = recognition;
-          recognition.start();
+          speechRecRef.current = recognition; recognition.start();
         }
-      } catch (speechErr) {
-        console.warn("⚠️ El dictado nativo no es compatible con este navegador.");
-      }
+      } catch (speechErr) { console.warn("⚠️ El dictado nativo no es compatible con este navegador."); }
 
-      const supports = (type: string) => MediaRecorder.isTypeSupported(type);
-      let mimePref = '';
-      if (supports('audio/webm;codecs=opus')) mimePref = 'audio/webm;codecs=opus';
-      else if (supports('audio/mp4')) mimePref = 'audio/mp4'; 
-      else if (supports('audio/webm')) mimePref = 'audio/webm';
-
+      const supports = (type: string) => MediaRecorder.isTypeSupported(type); let mimePref = '';
+      if (supports('audio/webm;codecs=opus')) mimePref = 'audio/webm;codecs=opus'; else if (supports('audio/mp4')) mimePref = 'audio/mp4'; else if (supports('audio/webm')) mimePref = 'audio/webm';
       const options = mimePref ? { mimeType: mimePref, audioBitsPerSecond: 24_000 } : undefined;
-      const mr = new MediaRecorder(stream, options);
-      
-      mediaRecorderRef.current = mr;
-      audioChunksRef.current = [];
-
+      const mr = new MediaRecorder(stream, options); mediaRecorderRef.current = mr; audioChunksRef.current = [];
       mr.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
-      mr.onstop = async () => {
-        const finalMime = mr.mimeType || 'audio/webm';
-        const audioBlob = new Blob(audioChunksRef.current, { type: finalMime });
-        stream.getTracks().forEach(t => t.stop());
-        setIsRecording(false);
-        await processAudioWithAI(audioBlob, finalMime);
-      };
-
-      mr.start();
-      setIsRecording(true);
-      setTimeout(() => { if (mr.state === 'recording') toggleRecording(); }, 60000); 
-      
-    } catch (err: any) {
-      alert(`⚠️ No podemos acceder al micro. Comprueba el candado de la barra de direcciones de tu navegador.`);
-    }
+      mr.onstop = async () => { const finalMime = mr.mimeType || 'audio/webm'; const audioBlob = new Blob(audioChunksRef.current, { type: finalMime }); stream.getTracks().forEach(t => t.stop()); setIsRecording(false); await processAudioWithAI(audioBlob, finalMime); };
+      mr.start(); setIsRecording(true); setTimeout(() => { if (mr.state === 'recording') toggleRecording(); }, 60000); 
+    } catch (err: any) { alert(`⚠️ No podemos acceder al micro. Comprueba el candado de la barra de direcciones de tu navegador.`); }
   };
 
   const processAudioWithAI = async (audioBlob: Blob, mimeType: string) => {
-    const apiKey = sessionStorage.getItem('gemini_api_key') || localStorage.getItem('gemini_api_key');
-    setScanStatus('loading');
-    
+    const apiKey = sessionStorage.getItem('gemini_api_key') || localStorage.getItem('gemini_api_key'); setScanStatus('loading');
     try {
       if (!apiKey) throw new Error("No API Key");
-
-      const base64Audio = await new Promise<string>((resolve) => {
-        const fr = new FileReader();
-        fr.onload = () => resolve((fr.result as string).split(',')[1]);
-        fr.readAsDataURL(audioBlob);
-      });
-
+      const base64Audio = await new Promise<string>((resolve) => { const fr = new FileReader(); fr.onload = () => resolve((fr.result as string).split(',')[1]); fr.readAsDataURL(audioBlob); });
       const ai = new GoogleGenAI({ apiKey });
-      const prompt = `Transcribe y extrae los datos de caja. Devuelve SOLO JSON con:
-      { "efectivo":0, "tpv1":0, "tpv2":0, "amex":0, "glovo":0, "uber":0, "apperStreet":0, "sobre_cash":0, "gastos":0, "venta_tienda":0, "notas":"" }`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: base64Audio, mimeType } }] }],
-        config: { responseMimeType: "application/json", temperature: 0.1 }
-      });
-
-      const rawJson = extractJSON(response.text || "");
-      actualizarFormConIA(rawJson, "IA");
-      setScanStatus('success');
-
-    } catch (error: any) {
-      setScanStatus('error');
-      alert("⚠️ Gemini no pudo procesar los números, pero tienes tu texto guardado en las notas.");
-    } finally {
-      setTimeout(() => setScanStatus('idle'), 4000);
-    }
+      const prompt = `Transcribe y extrae los datos de caja. Devuelve SOLO JSON con: { "efectivo":0, "tpv1":0, "tpv2":0, "amex":0, "glovo":0, "uber":0, "apperStreet":0, "sobre_cash":0, "gastos":0, "venta_tienda":0, "notas":"" }`;
+      const response = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: base64Audio, mimeType } }] }], config: { responseMimeType: "application/json", temperature: 0.1 } });
+      const rawJson = extractJSON(response.text || ""); actualizarFormConIA(rawJson, "IA"); setScanStatus('success');
+    } catch (error: any) { setScanStatus('error'); alert("⚠️ Gemini no pudo procesar los números, pero tienes tu texto guardado en las notas."); } finally { setTimeout(() => setScanStatus('idle'), 4000); }
   };
 
   const actualizarFormConIA = (rawJson: any, origen: string = "IA") => {
     setForm(prev => ({
-      ...prev,
-      date: rawJson.fecha ? normalizeDate(rawJson.fecha) : prev.date,
-      efectivo: String(asNum(rawJson.efectivo) || prev.efectivo),
-      tpv1: String(asNum(rawJson.tpv1) || prev.tpv1),
-      tpv2: String(asNum(rawJson.tpv2) || prev.tpv2),
-      amex: String(asNum(rawJson.amex) || prev.amex),
-      glovo: String(asNum(rawJson.glovo) || prev.glovo),
-      uber: String(asNum(rawJson.uber) || prev.uber),
-      apperStreet: String(asNum(rawJson.apperStreet) || prev.apperStreet),
-      tienda: String(asNum(rawJson.venta_tienda) || prev.tienda),
+      ...prev, date: rawJson.fecha ? normalizeDate(rawJson.fecha) : prev.date,
+      efectivo: String(asNum(rawJson.efectivo) || prev.efectivo), tpv1: String(asNum(rawJson.tpv1) || prev.tpv1),
+      tpv2: String(asNum(rawJson.tpv2) || prev.tpv2), amex: String(asNum(rawJson.amex) || prev.amex),
+      glovo: String(asNum(rawJson.glovo) || prev.glovo), uber: String(asNum(rawJson.uber) || prev.uber),
+      apperStreet: String(asNum(rawJson.apperStreet) || prev.apperStreet), tienda: String(asNum(rawJson.venta_tienda) || prev.tienda),
       cajaFisica: asNum(rawJson.sobre_cash) > 0 ? (asNum(rawJson.sobre_cash) + fondoCaja).toFixed(2) : prev.cajaFisica,
       notas: prev.notas + (rawJson.gastos ? `\n[Gastos IA]: ${rawJson.gastos}€` : "")
     }));
   };
 
-  useEffect(() => {
-    const handlePaste = (e: ClipboardEvent) => {
-      if (scanStatus === 'loading') return;
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf("image") !== -1) {
-          const blob = items[i].getAsFile();
-          if (blob) { processImageWithAI(blob, !images.img1 ? 'img1' : 'img2'); break; }
-        }
-      }
-    };
-    window.addEventListener('paste', handlePaste);
-    return () => window.removeEventListener('paste', handlePaste);
-  }, [images, scanStatus]);
-
   // ==========================================
-  // 💾 GUARDADO 
+  // 💾 GUARDADO (CON EL TIPO 'CAJA' PARA EL ERP)
   // ==========================================
   const handleSaveCierre = async () => {
     if (isSaving) return;
@@ -370,6 +234,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
       if (!newData.facturas) newData.facturas = [];
       if (!newData.banco) newData.banco = [];
 
+      // 🚀 FIX ERP: GASTOS PAGADOS CON EFECTIVO DE CAJA -> tipo: 'caja'
       if (gastosCaja.length > 0) {
         gastosCaja.forEach((g, idx) => {
           const imp = Num.parse(g.importe);
@@ -379,6 +244,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
 
           newData.facturas.unshift({
             id: `gc-${Date.now()}-${idx}`,
+            tipo: 'caja', // <--- ESTO ES LO QUE ARREGLA TU ERP
             num, date: fechaSeleccionada, prov: g.concepto.toUpperCase(),
             cliente: "GASTO CAJA", total: imp, base, tax, 
             paid: true, reconciled: true, unidad_negocio: g.unidad
@@ -395,17 +261,14 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         });
       }
 
+      // 🚀 FIX ERP: TICKET Z DIARIO -> tipo: 'caja'
       const cierreRestId = `ZR-${fechaSeleccionada.replace(/-/g, '')}`;
       const infoTarjetas = `[Tarjetas -> TPV1: ${form.tpv1||0}€ | TPV2: ${form.tpv2||0}€ | AMEX: ${form.amex||0}€]`;
 
       const cierreRest: Cierre = {
-        id: cierreRestId, date: fechaSeleccionada, 
-        totalVenta: totalRestauranteNeto, 
-        efectivo: Num.parse(form.efectivo), 
-        tarjeta: totalTarjetas, 
-        apps: appsNetas, 
-        descuadre: descuadreFinal, 
-        notas: `${infoTarjetas} [Bruto Ticket Apps: ${appsBrutas.toFixed(2)}€]\n${form.notas}`.trim(), 
+        id: cierreRestId, date: fechaSeleccionada, totalVenta: totalRestauranteNeto, 
+        efectivo: Num.parse(form.efectivo), tarjeta: totalTarjetas, apps: appsNetas, 
+        descuadre: descuadreFinal, notas: `${infoTarjetas} [Bruto Ticket Apps: ${appsBrutas.toFixed(2)}€]\n${form.notas}`.trim(), 
         conciliado_banco: false, unitId: 'REST'
       };
       upsertFactura(newData.cierres, cierreRest, 'id');
@@ -413,8 +276,10 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
       const fIdxRest = newData.facturas.findIndex((f: any) => f.num === cierreRestId);
       const baseR = Num.round2(totalRestauranteNeto / 1.10);
       const taxR  = Num.round2(totalRestauranteNeto - baseR);
+      
       upsertFactura(newData.facturas, {
         id: fIdxRest >= 0 ? newData.facturas[fIdxRest].id : `f-zr-${Date.now()}`,
+        tipo: 'caja', // <--- ESTO ES LO QUE ARREGLA TU ERP
         num: cierreRestId, date: fechaSeleccionada, prov: "Z DIARIO", cliente: "Z DIARIO",
         total: totalRestauranteNeto, base: baseR, tax: taxR,
         paid: fIdxRest >= 0 ? newData.facturas[fIdxRest].paid : false,
@@ -422,6 +287,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         unidad_negocio: 'REST'
       }, 'num');
 
+      // 🚀 FIX ERP: Z DIARIO TIENDA SAKE -> tipo: 'caja'
       if (totalTienda > 0) {
         const cierreShopId = `ZS-${fechaSeleccionada.replace(/-/g, '')}`;
         const cierreShop: Cierre = {
@@ -434,8 +300,10 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         const fIdxShop = newData.facturas.findIndex((f: any) => f.num === cierreShopId);
         const baseS = Num.round2(totalTienda / 1.21);
         const taxS  = Num.round2(totalTienda - baseS);
+        
         upsertFactura(newData.facturas, {
           id: fIdxShop >= 0 ? newData.facturas[fIdxShop].id : `f-zs-${Date.now()}`,
+          tipo: 'caja', // <--- ESTO ES LO QUE ARREGLA TU ERP
           num: cierreShopId, date: fechaSeleccionada, prov: "Z DIARIO", cliente: "Z DIARIO",
           total: Num.round2(totalTienda), base: baseS, tax: taxS,
           paid: fIdxShop >= 0 ? newData.facturas[fIdxShop].paid : false,
@@ -446,7 +314,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
 
       await onSave(newData);
 
-      setForm({ date: new Date().toLocaleDateString('sv-SE'), efectivo: '', tpv1: '', tpv2: '', amex: '', glovo: '', uber: '', madisa: '', apperStreet: '', cajaFisica: '', tienda: '', notas: '' });
+      setForm({ date: DateUtil.today(), efectivo: '', tpv1: '', tpv2: '', amex: '', glovo: '', uber: '', madisa: '', apperStreet: '', cajaFisica: '', tienda: '', notas: '' });
       setImages({ img1: null, img2: null });
       setGastosCaja([]);
       setDepositoBanco('');
@@ -464,7 +332,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   };
 
   const handleDeleteCierre = async (id: string) => {
-    if (!confirm("¿Borrar este cierre?")) return;
+    if (!window.confirm("¿Borrar este cierre?")) return;
     const newData = { ...data };
     const c = newData.cierres.find((x: any) => x.id === id);
     if (c) {
@@ -474,15 +342,8 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     }
   };
 
-  // ==========================================
-  // 📥 EXPORTAR EXCEL GESTORÍA
-  // ==========================================
   const handleExportGestoria = () => {
-    const q = exportQuarter;
-    const y = exportYear;
-    const startMonth = (q - 1) * 3 + 1;
-    const endMonth = q * 3;
-    
+    const q = exportQuarter; const y = exportYear; const startMonth = (q - 1) * 3 + 1; const endMonth = q * 3;
     const filtered = (data.cierres || []).filter(c => {
       if (selectedUnit !== 'ALL' && c.unitId !== selectedUnit) return false;
       const [cYear, cMonth] = c.date.split('-').map(Number);
@@ -509,8 +370,8 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     setIsExportModalOpen(false);
   };
 
-  const [year, month] = currentFilterDate.split('-');
-  const nombreMes = new Date(Number(year), Number(month) - 1).toLocaleString('es-ES', { month: 'long', year: 'numeric' }).toUpperCase();
+  const [yearStr, monthStr] = currentFilterDate.split('-');
+  const nombreMes = new Date(Number(yearStr), Number(monthStr) - 1).toLocaleString('es-ES', { month: 'long', year: 'numeric' }).toUpperCase();
 
   return (
     <div className={cn("animate-fade-in space-y-6 pb-24", scanStatus === 'loading' && "transition-none")}>
@@ -531,7 +392,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         </div>
       )}
 
-      {/* Header y Selector de Bloques (CON BOTÓN DE EXPORTAR) */}
+      {/* Header y Selector de Bloques */}
       <header className="flex flex-col md:flex-row justify-between items-center bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 gap-4">
         <div>
           <h2 className="text-xl font-black text-slate-800 tracking-tight">Control de Caja Unificada</h2>
@@ -742,48 +603,31 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         </div>
       </div>
 
-      {/* Historial */}
+      {/* 🚀 HISTORIAL MEJORADO (LLAMA AL NUEVO COMPONENTE DE RENDIMIENTO) */}
       <div className="space-y-4 mt-12">
-        <div className="flex justify-between items-center px-6"><h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Historial de Cierres</h3></div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {kpis.cierresMes.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((c: any) => {
-            const unitConfig = CASH_UNITS.find(u => u.id === (c.unitId || 'REST'));
-            const fZ = data.facturas?.find((f: any) => f.num === c.id); 
-            return (
-              <div key={c.id} className={cn("bg-white p-5 rounded-[2rem] border shadow-sm flex justify-between items-center group relative hover:shadow-md transition", fZ?.reconciled ? 'border-emerald-200' : 'border-slate-100')}>
-                <div>
-                  <div className="flex items-center gap-2 mb-2 flex-wrap">
-                    <p className="text-[10px] font-black text-slate-700 uppercase tracking-widest bg-slate-100 px-2 py-1 rounded-lg w-fit">{c.date}</p>
-                    {unitConfig && <span className={cn("text-[8px] font-black px-2 py-1 rounded uppercase flex items-center gap-1", unitConfig.bg, unitConfig.color)}><unitConfig.icon className="w-3 h-3" /> {unitConfig.name}</span>}
-                  </div>
-                  {c.unitId === 'REST' && <div className="flex flex-wrap gap-2 text-[10px] text-slate-500 font-bold mt-2"><span>💵 Ef: {Num.parse(c.efectivo).toFixed(0)}€</span><span>💳 Tj: {Num.parse(c.tarjeta).toFixed(0)}€</span></div>}
-                  {c.descuadre !== 0 && c.unitId === 'REST' && <p className={cn("text-[9px] font-black uppercase mt-1", c.descuadre > 0 ? "text-emerald-500" : "text-rose-500")}>Descuadre: {c.descuadre > 0 ? '+' : ''}{c.descuadre.toFixed(2)}€</p>}
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="text-xl font-black text-slate-900">{Num.parse(c.totalVenta).toFixed(2)}€</p>
-                  <button onClick={() => handleDeleteCierre(c.id)} className="text-[8px] text-rose-400 font-bold uppercase hover:text-rose-600 opacity-0 group-hover:opacity-100 transition mt-2 flex items-center gap-1 ml-auto"><Trash2 className="w-3 h-3" /> Borrar</button>
-                </div>
-              </div>
-            );
-          })}
+        <div className="flex justify-between items-center px-6">
+          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Historial de Cierres</h3>
         </div>
+        
+        <CashHistoryList 
+          cierresMes={kpis.cierresMes} 
+          cashUnits={CASH_UNITS} 
+          facturas={data.facturas || []} 
+          onDelete={handleDeleteCierre} 
+        />
       </div>
 
-      {/* 🚀 MODAL DE EXPORTACIÓN GESTORÍA */}
+      {/* MODAL DE EXPORTACIÓN GESTORÍA */}
       <AnimatePresence>
         {isExportModalOpen && (
           <motion.div 
             key="export-modal"
-            initial={{ opacity: 0 }} 
-            animate={{ opacity: 1 }} 
-            exit={{ opacity: 0 }}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-[100] flex justify-center items-center p-4"
           >
             <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" onClick={() => setIsExportModalOpen(false)} />
             <motion.div 
-              initial={{ scale: 0.95, y: 20 }} 
-              animate={{ scale: 1, y: 0 }} 
-              exit={{ scale: 0.95, y: 20 }}
+              initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
               className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl relative z-10"
             >
               <h3 className="text-xl font-black text-slate-800 mb-2">Exportar Cierres Z</h3>
