@@ -3,7 +3,7 @@ import {
   FileText, Search, ChevronLeft, ChevronRight, Zap, Users, Building2, Package, CheckCircle2, Clock, Trash2, AlertCircle, Link as LinkIcon, Mail, ArrowRight, X, RefreshCw, Download, Bell, CheckSquare, Hotel, ShoppingBag, Layers, UploadCloud, FileDown, FileArchive
 } from 'lucide-react';
 // ✅ FIX 1: Cambiado a framer-motion (Suele romper la pantalla si no está bien)
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion'; 
 import * as XLSX from 'xlsx';
 import { AppData, Factura, Albaran } from '../types';
 import { Num, DateUtil } from '../services/engine';
