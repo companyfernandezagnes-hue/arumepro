@@ -4,15 +4,14 @@ import {
   TrendingUp, TrendingDown, ChevronLeft, ChevronRight, 
   Building2, Hotel, ShoppingBag, Users, Brain,
   BarChart3, Landmark, Target, FolderOpen, CheckCircle2,
-  Sparkles, FileSpreadsheet, Loader2, AlertTriangle
+  Sparkles, FileSpreadsheet, Loader2, AlertTriangle, X
 } from 'lucide-react';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import * as XLSX from 'xlsx';
 import { AppData } from '../types';
-import { Num } from '../services/engine';
+import { ArumeEngine, Num } from '../services/engine';
 import { cn } from '../lib/utils';
 import { GoogleGenAI } from "@google/genai";
-import { useWorkerEngine } from '../hooks/useWorkerEngine';
 
 export type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
 type TabType = 'resultados' | 'fiscal' | 'kpis' | 'carpeta';
@@ -51,16 +50,27 @@ export const ReportsView = ({ data }: { data: AppData }) => {
   const year = currentDate.getFullYear();
 
   /* =======================================================
-   * 🚀 WEBWORKER INTEGRATION (Adiós cuelgues de UI)
+   * 🚀 CÁLCULO ASÍNCRONO NO BLOQUEANTE (Anti-Crash y Anti-Lag)
    * ======================================================= */
-  const { data: stats, loading: loadingStats, err, run } = useWorkerEngine<{data: AppData, month:number, year:number}, any>(
-    new URL('../workers/profit.worker.ts', import.meta.url)
-  );
+  const [stats, setStats] = useState<any>(null);
+  const [loadingStats, setLoadingStats] = useState(true);
 
   useEffect(() => {
-    // Disparamos el Worker en la sombra cada vez que cambia el mes
-    run({ data, month: month + 1, year });
-  }, [data, month, year]); // Dependencias del disparo
+    setLoadingStats(true);
+    // Este pequeño retraso permite que React pinte el Loader antes de bloquear la CPU
+    const timer = setTimeout(() => {
+      try {
+        const computedStats = ArumeEngine.getProfit(data, month + 1, year);
+        setStats(computedStats);
+      } catch (error) {
+        console.error("Error al calcular P&L:", error);
+      } finally {
+        setLoadingStats(false);
+      }
+    }, 50);
+
+    return () => clearTimeout(timer);
+  }, [data, month, year]);
 
   /* =======================================================
    * 🏛️ CÁLCULOS FISCALES PRO (IVA Desglosado 10/21)
@@ -72,7 +82,6 @@ export const ReportsView = ({ data }: { data: AppData }) => {
     (data.albaranes || [])
       .filter(a => { const d = new Date(a.date); return d.getMonth() === month && d.getFullYear() === year; })
       .forEach(a => {
-        // Auditoría Copilot: Usar las líneas si es posible
         if (a.items && a.items.length > 0) {
           a.items.forEach(i => {
             const iRate = Num.parse(i.rate) || 10;
@@ -83,7 +92,7 @@ export const ReportsView = ({ data }: { data: AppData }) => {
         }
       });
     
-    // IVA REPERCUTIDO ESTIMADO POR PLATOS (M2 Horeca)
+    // IVA REPERCUTIDO ESTIMADO POR PLATOS
     let ivaRep10 = 0; let ivaRep21 = 0;
     const ventasDelMes = (data.ventas_menu || []).filter(v => {
       const d = new Date(v.date); return d.getMonth() === month && d.getFullYear() === year;
@@ -101,6 +110,7 @@ export const ReportsView = ({ data }: { data: AppData }) => {
         }
       });
     } else {
+      // Regla Pareto si no hay datos de TPV (80% comida, 20% bebida)
       ivaRep10 = (stats.ingresos.total * 0.80) - ((stats.ingresos.total * 0.80) / 1.10);
       ivaRep21 = (stats.ingresos.total * 0.20) - ((stats.ingresos.total * 0.20) / 1.21);
     }
@@ -113,15 +123,13 @@ export const ReportsView = ({ data }: { data: AppData }) => {
   }, [data, month, year, stats]);
 
   /* =======================================================
-   * 🎯 BREAK EVEN & BI (Fórmula M2 Horeca: Margen de Contribución)
+   * 🎯 BREAK EVEN & BI (Fórmula M2 Horeca)
    * ======================================================= */
   const biMetrics = useMemo(() => {
     if (!stats) return { breakEven: 0, isProfitable: false, margenContribucion: 0 };
-    // MC% = 1 - Costes Variables (Aproximados por FC y DC)
     const costeVariablePct = (stats.ratios.foodCost + stats.ratios.drinkCost) / 100;
     const margenContribucion = 1 - costeVariablePct; 
     
-    // PE = Fijos / MC%
     const breakEven = margenContribucion > 0 ? stats.gastos.estructura / margenContribucion : Infinity;
     const isProfitable = stats.ingresos.total >= breakEven;
 
@@ -142,7 +150,7 @@ export const ReportsView = ({ data }: { data: AppData }) => {
   })).filter(d => d.Ingresos > 0 || d.Gastos > 0) : [];
 
   /* =======================================================
-   * 🤖 DIRECTOR FINANCIERO IA (Integración con Gemini Backend-like)
+   * 🤖 DIRECTOR FINANCIERO IA
    * ======================================================= */
   const analyzeWithAI = async () => {
     if (!stats) return;
@@ -178,7 +186,7 @@ export const ReportsView = ({ data }: { data: AppData }) => {
       { Concepto: 'Costes Fijos (Estructura)', Valor: stats.gastos.estructura },
       { Concepto: 'BENEFICIO NETO', Valor: stats.neto },
     ]);
-    wsPL['!cols'] = [{ wch: 26 }, { wch: 16 }]; // Formateo de ancho de columna
+    wsPL['!cols'] = [{ wch: 26 }, { wch: 16 }]; 
     
     const wsFiscal = XLSX.utils.json_to_sheet([
       { Concepto: 'IVA Repercutido (10%)', Valor: Num.round2(fiscalData.desglose.rep10) },
@@ -215,22 +223,11 @@ export const ReportsView = ({ data }: { data: AppData }) => {
     return null;
   }, []);
 
-  // ESTADO DE CARGA O ERROR DEL WORKER
-  if (err) {
-    return (
-      <div className="bg-rose-50 border border-rose-200 text-rose-600 p-8 rounded-[3rem] text-center">
-        <AlertTriangle className="w-12 h-12 mx-auto mb-4" />
-        <h3 className="font-black text-xl mb-2">Error en el Motor Contable</h3>
-        <p className="text-sm">{err}</p>
-      </div>
-    );
-  }
-
   if (loadingStats || !stats) {
     return (
       <div className="flex flex-col items-center justify-center h-[50vh] text-indigo-500">
         <Loader2 className="w-12 h-12 animate-spin mb-4" />
-        <p className="font-black uppercase tracking-widest text-xs">Calculando Cuenta de Explotación...</p>
+        <p className="font-black uppercase tracking-widest text-xs">Compilando Datos Financieros...</p>
       </div>
     );
   }
@@ -243,7 +240,7 @@ export const ReportsView = ({ data }: { data: AppData }) => {
         <div>
           <h2 className="text-3xl font-black text-slate-800 tracking-tighter">Informes 360º</h2>
           <p className="text-xs text-indigo-500 font-bold uppercase tracking-widest mt-1 flex items-center gap-2">
-            <Sparkles className="w-4 h-4" /> Inteligencia de Negocio WebWorker
+            <Sparkles className="w-4 h-4" /> Inteligencia de Negocio
           </p>
         </div>
         
@@ -319,7 +316,6 @@ export const ReportsView = ({ data }: { data: AppData }) => {
               <div className="flex-1">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    {/* Auditoria Copilot: isAnimationActive={false} para max rendimiento en mobile */}
                     <Pie data={expenseChartData} cx="50%" cy="50%" innerRadius={80} outerRadius={110} paddingAngle={5} dataKey="value" isAnimationActive={false}>
                       {expenseChartData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
                     </Pie>
