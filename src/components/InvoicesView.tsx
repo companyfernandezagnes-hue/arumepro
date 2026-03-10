@@ -1,25 +1,27 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback, useDeferredValue } from 'react';
 import { 
-  FileText, Search, ChevronLeft, ChevronRight, Zap, Users, Building2, Package, CheckCircle2, Clock, Trash2, AlertCircle, Link as LinkIcon, Mail, ArrowRight, X, RefreshCw, Download, Bell, CheckSquare, Hotel, ShoppingBag, Layers, UploadCloud, FileDown, FileArchive, Mic, Square
+  Search, Plus, Download, Package, AlertTriangle, Check, Clock, Trash2, 
+  Building2, ShoppingBag, ListPlus, Users, Hotel, Layers, X, 
+  XCircle, LineChart as LineChartIcon, FileSpreadsheet, Mic, Square, UploadCloud, FileDown, Smartphone, Camera, Loader2, Mail, CheckCircle2, Link as LinkIcon, Inbox
 } from 'lucide-react';
+import { AppData, Factura, Albaran, Socio } from '../types';
+import { Num, ArumeEngine, DateUtil } from '../services/engine';
+import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
-import { AppData, Factura, Albaran, Socio } from '../types';
-import { Num, DateUtil } from '../services/engine';
-import { cn } from '../lib/utils';
-import { proxyFetch } from '../services/api';
-import { NotificationService } from '../services/notifications';
 import { GoogleGenAI } from "@google/genai";
 
-// 🚀 IMPORTAMOS COMPONENTES HIJOS
+// 🚀 HIJOS VISUALES (Asegúrate de tenerlos en tu proyecto)
 import { InvoicesList } from './InvoicesList';
 import { InvoiceDetailModal } from './InvoiceDetailModal';
 
 export type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
 
+// 🛡️ TIPOS EXTENDIDOS (Pipeline PRO)
 export type FacturaExtended = Factura & {
-  status?: 'draft' | 'approved' | 'paid';
+  status?: 'ingested' | 'parsed' | 'draft' | 'approved' | 'paid' | 'reconciled' | 'mismatch';
   file_base64?: string;
+  attachmentSha?: string; // 🔐 Huella digital para evitar duplicados
   albaranIdsArr?: string[];
   fecha_pago?: string;
   source?: string;
@@ -28,6 +30,17 @@ export type FacturaExtended = Factura & {
   sumaAlbaranes?: number;
   diferencia?: number;
   cuadraPerfecto?: boolean;
+  emailMeta?: any; 
+};
+
+// 📧 TIPO PARA BANDEJA DE CORREO
+type EmailDraft = {
+  id: string;
+  from: string;
+  subject: string;
+  date: string;
+  hasAttachment: boolean;
+  status: 'new' | 'parsed';
 };
 
 const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string; bg: string }[] = [
@@ -37,34 +50,45 @@ const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string
   { id: 'CORP', name: 'Socios / Corp', icon: Users, color: 'text-slate-600', bg: 'bg-slate-100' },
 ];
 
-interface InvoicesViewProps {
-  data: AppData;
-  onSave: (newData: AppData) => Promise<void>;
-}
+/* =======================================================
+ * 🛡️ 1. UTILIDADES, SEGURIDAD Y ALIAS DE PROVEEDOR
+ * ======================================================= */
+const TOLERANCIA = 0.50; 
 
-// 🛡️ UTILIDADES
 export const superNorm = (s: string | undefined | null) => {
   if (!s || typeof s !== 'string') return 'desconocido';
-  try {
-    return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\b(s\.?l\.?|s\.?a\.?|s\.?l\.?u\.?|s\.?c\.?p\.?)\b/gi, '').replace(/[^a-z0-9]/g, '').trim();
-  } catch (e) { return 'desconocido'; }
+  try { return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\b(s\.?l\.?|s\.?a\.?|s\.?l\.?u\.?|s\.?c\.?p\.?)\b/gi, '').replace(/[^a-z0-9]/g, '').trim(); } catch (e) { return 'desconocido'; }
 };
 
-const safeJSON = (str: string) => {
-  try {
-    const match = str.match(/\{[\s\S]*\}/);
-    return match ? JSON.parse(match[0]) : {};
-  } catch { return {}; }
+const safeJSON = (str: string) => { try { const match = str.match(/\{[\s\S]*\}/); return match ? JSON.parse(match[0]) : {}; } catch { return {}; } };
+
+// 🔐 SHA-256 Idempotencia (Evita subir la misma factura 2 veces)
+async function sha256File(file: File) {
+  const buf = await file.arrayBuffer();
+  const hash = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+// 🧠 3-WAY MATCHING ALGORITHM (Factura vs Albaranes)
+const matchAlbaranesToFactura = (factura: FacturaExtended, albaranes: Albaran[], provNormalizado: string) => {
+  const mesDraft = (factura.date || DateUtil.today()).substring(0, 7);
+  const candidatos = albaranes.filter(a => !a?.invoiced && superNorm(a?.prov) === provNormalizado && (a?.date || '').startsWith(mesDraft));
+  const sumaAlbaranes = candidatos.reduce((acc, a) => acc + (Num.parse(a?.total) || 0), 0);
+  const totalFactura = Num.parse(factura.total) || 0;
+  
+  // Tolerancia: Máximo entre 0.50€ absolutos o 0.5% del total (Lógica PRO)
+  const diff = Math.abs(sumaAlbaranes - Math.abs(totalFactura));
+  const toleranciaPermitida = Math.max(TOLERANCIA, Math.abs(totalFactura) * 0.005);
+  const cuadraPerfecto = diff <= toleranciaPermitida && candidatos.length > 0;
+
+  return { candidatos, sumaAlbaranes, diferencia: diff, cuadraPerfecto };
 };
 
-// 🎨 DESIGN TOKENS (Copilot Suggestion)
-const cardBase = "bg-white rounded-[2rem] border border-slate-100 shadow-sm";
-const chipBase = "px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest";
-const hTitle = "text-2xl md:text-3xl font-black text-slate-800 tracking-tight";
-const tLabel = "text-[10px] font-black text-slate-400 uppercase tracking-widest";
-
+/* =======================================================
+ * 🏦 COMPONENTE PRINCIPAL: INVOICES VIEW
+ * ======================================================= */
 export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
-  const safeData = data || {};
+  const safeData = data || { facturas: [], albaranes: [], socios: [] };
   const facturasSeguras = (Array.isArray(safeData.facturas) ? safeData.facturas : []) as FacturaExtended[];
   const albaranesSeguros = Array.isArray(safeData.albaranes) ? safeData.albaranes : [];
   const sociosSeguros = (Array.isArray(safeData.socios) ? safeData.socios : []) as Socio[];
@@ -74,13 +98,15 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [mode, setMode] = useState<'proveedor' | 'socio'>('proveedor');
   const [year, setYear] = useState(new Date().getFullYear());
   const [searchQ, setSearchQ] = useState('');
+  const deferredSearch = useDeferredValue(searchQ);
+  
   const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'paid' | 'reconciled'>('all');
   const [selectedUnit, setSelectedUnit] = useState<BusinessUnit | 'ALL'>('ALL');
   
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportQuarter, setExportQuarter] = useState(Math.floor(new Date().getMonth() / 3) + 1);
-  const [isSyncing, setIsSyncing] = useState(false);
   
+  const [isSyncing, setIsSyncing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const dragCounter = useRef(0);
 
@@ -93,14 +119,32 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
+  // 📧 SIMULACIÓN DE BANDEJA DE ENTRADA (Mails)
+  const [emailInbox, setEmailInbox] = useState<EmailDraft[]>([
+    { id: 'm1', from: 'ventas@makro.es', subject: 'Factura F-2026/012', date: DateUtil.today(), hasAttachment: true, status: 'new' },
+    { id: 'm2', from: 'admin@gadisa.com', subject: 'Albarán y Factura Semanal', date: DateUtil.today(), hasAttachment: true, status: 'new' }
+  ]);
+
   /* =======================================================
-   * 🛡️ DRAG & DROP BLINDADO (Sin bloquear el DOM entero)
+   * ⌨️ ATAJOS DE TECLADO Y EVENTOS
+   * ======================================================= */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const active = document.activeElement as HTMLElement;
+      const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+      if (!isTyping && e.key === '/') { e.preventDefault(); document.querySelector<HTMLInputElement>('input[placeholder^="Buscar"]')?.focus(); }
+      if (!isTyping && e.key.toLowerCase() === 'g') { e.preventDefault(); setActiveTab(t => t === 'pend' ? 'hist' : 'pend'); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  /* =======================================================
+   * 🛡️ DRAG & DROP INMORTAL
    * ======================================================= */
   useEffect(() => {
     const blockDefault = (e: DragEvent) => { 
-      if (!(e.target as HTMLElement)?.closest(".dropzone-area")) { 
-        e.preventDefault(); e.stopPropagation(); 
-      } 
+      if (!(e.target as HTMLElement)?.closest(".dropzone-area")) { e.preventDefault(); e.stopPropagation(); } 
     };
     const cancelDrag = () => { dragCounter.current = 0; setIsDragging(false); };
     
@@ -108,59 +152,45 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     window.addEventListener('drop', blockDefault); 
     window.addEventListener('mouseout', (e) => { if (!e.relatedTarget && !e.toElement) cancelDrag(); });
     
-    return () => { 
-      window.removeEventListener('dragover', blockDefault); 
-      window.removeEventListener('drop', blockDefault); 
-      window.removeEventListener('mouseout', cancelDrag); 
-    };
+    return () => { window.removeEventListener('dragover', blockDefault); window.removeEventListener('drop', blockDefault); window.removeEventListener('mouseout', cancelDrag); };
   }, []);
 
   const handleDragEnter = useCallback((e: React.DragEvent) => { e.preventDefault(); dragCounter.current++; if (!isDragging) setIsDragging(true); }, [isDragging]);
   const handleDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); dragCounter.current--; if (dragCounter.current <= 0) { setIsDragging(false); dragCounter.current = 0; } }, []);
-  const handleDrop = useCallback((e: React.DragEvent) => { 
+  const handleDrop = useCallback(async (e: React.DragEvent) => { 
     e.preventDefault(); dragCounter.current = 0; setIsDragging(false); 
     if (!e.dataTransfer?.files?.length) return;
-    if (e.dataTransfer.files.length > 1) return alert("⚠️ Solo sube 1 documento por importación.");
+    if (e.dataTransfer.files.length > 1) return alert("⚠️ Sube 1 solo documento por importación para garantizar la trazabilidad.");
     
     const file = e.dataTransfer.files[0]; 
-    if (!/^(application\/pdf|image\/)/.test(file.type)) return alert("⚠️ Solo PDF o imágenes.");
-    if (file.size > 15 * 1024 * 1024) return alert("⚠️ Archivo >15MB. Comprime antes de subir.");
+    if (!/^(application\/pdf|image\/)/.test(file.type)) return alert("⚠️ Solo PDFs o imágenes.");
+    if (file.size > 15 * 1024 * 1024) return alert("⚠️ El archivo supera los 15MB.");
     
     processLocalFile(file); 
-  }, []);
+  }, [facturasSeguras]);
 
   /* =======================================================
-   * 🧠 AUDITORÍA DE IA MEMOIZADA
+   * 🧠 AUDITORÍA DE IA MEMOIZADA (3-WAY MATCHING)
    * ======================================================= */
   const draftsIA = useMemo(() => {
-    try {
-      return facturasSeguras.filter(f => f.status === 'draft').map(draft => {
-        const draftDate = draft.date || DateUtil.today();
-        const mesDraft = draftDate.substring(0, 7);
-        const provDraftNormalizado = superNorm(draft.prov); 
-        
-        const albaranesCandidatos = albaranesSeguros.filter(a => 
-          !a?.invoiced && superNorm(a?.prov) === provDraftNormalizado && (a?.date || '').startsWith(mesDraft)
-        );
-
-        const sumaAlbaranes = albaranesCandidatos.reduce((acc, a) => acc + (Num.parse(a?.total) || 0), 0);
-        const totalDraft = Num.parse(draft.total) || 0;
-        const diferencia = Math.abs(sumaAlbaranes - Math.abs(totalDraft));
-        const cuadraPerfecto = diferencia < 0.05 && albaranesCandidatos.length > 0;
-
-        return { ...draft, candidatos: albaranesCandidatos, sumaAlbaranes, diferencia, cuadraPerfecto };
-      });
-    } catch (e) { return []; }
+    return facturasSeguras.filter(f => f.status === 'draft').map(draft => {
+      const matchResult = matchAlbaranesToFactura(draft, albaranesSeguros, superNorm(draft.prov));
+      return { ...draft, ...matchResult };
+    });
   }, [facturasSeguras, albaranesSeguros]);
 
   /* =======================================================
-   * 🤖 MOTOR DE LECTURA (Gemini -> Tesseract -> PDF.js)
+   * 🤖 MOTOR OCR (Google Gemini + Local Fallback)
    * ======================================================= */
   const processLocalFile = async (file: File) => {
-    const apiKey = localStorage.getItem('gemini_api_key');
     setIsSyncing(true); 
-
     try {
+      // 1. Idempotencia: Verificar Hash
+      const sha = await sha256File(file);
+      const isDuplicate = facturasSeguras.some(f => f.attachmentSha === sha);
+      if (isDuplicate) { setIsSyncing(false); return alert("⚠️ Este archivo ya ha sido procesado anteriormente (Huella Digital idéntica)."); }
+
+      const apiKey = localStorage.getItem('gemini_api_key');
       if (!apiKey) throw new Error("NO_API_KEY");
 
       const fileBase64 = await new Promise<string>((resolve, reject) => {
@@ -168,26 +198,30 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       });
       const soloBase64 = fileBase64.split(',')[1];
 
+      // 2. Extracción de IA
       const ai = new GoogleGenAI({ apiKey });
-      const prompt = `Analiza esta factura/albarán. Devuelve SOLO un JSON estricto: { "proveedor": "Nombre de la empresa", "num": "Número", "fecha": "YYYY-MM-DD", "total": 150.50, "base": 124.38, "iva": 26.12 }`;
-
+      const prompt = `Actúa como un OCR contable. Extrae de esta factura y devuelve SOLO JSON: { "proveedor": "string", "num": "string", "fecha": "YYYY-MM-DD", "total": 0, "base": 0, "iva": 0 }`;
+      
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash", contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: soloBase64, mimeType: file.type } }] }],
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: soloBase64, mimeType: file.type } }] }],
         config: { responseMimeType: "application/json", temperature: 0.1 }
       });
 
       const rawJson = safeJSON(response.text || "");
+
+      // 3. Crear Borrador
       const nuevaFacturaIA: FacturaExtended = {
         id: 'draft-local-' + Date.now(), tipo: 'compra', num: rawJson.num || 'S/N', date: rawJson.fecha || DateUtil.today(), prov: rawJson.proveedor || 'Proveedor Desconocido',
         total: Num.parse(rawJson.total || 0), base: Num.parse(rawJson.base || 0), tax: Num.parse(rawJson.iva || 0),
-        paid: false, reconciled: false, source: 'email-ia', status: 'draft', unidad_negocio: 'REST', file_base64: fileBase64 
+        paid: false, reconciled: false, source: 'dropzone', status: 'draft', unidad_negocio: 'REST', file_base64: fileBase64, attachmentSha: sha 
       };
 
       await onSave({ ...safeData, facturas: [nuevaFacturaIA, ...facturasSeguras] });
-      alert("✅ Factura procesada por IA. Búscala en el panel lateral de Auditoría.");
+      alert("✅ Factura extraída correctamente. Revisa la bandeja de conciliación.");
 
     } catch (e) {
-      console.warn("⚠️ Gemini falló. Activando Fallback Local...");
+      console.warn("⚠️ Gemini falló. Activando Rescate Local (Tesseract)...");
       try {
         let extractedText = ""; let possibleTotal = 0;
         const fileBase64 = await new Promise<string>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result as string); reader.readAsDataURL(file); });
@@ -195,24 +229,20 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         if (file.type.includes('image')) {
            const tesseractModule = await import('tesseract.js'); const Tesseract = tesseractModule.default || tesseractModule;
            const { data: { text } } = await Tesseract.recognize(file, 'spa'); extractedText = text;
-        } else if (file.type === 'application/pdf') {
-           const pdfjsModule = await import('pdfjs-dist'); const pdfjsLib = pdfjsModule.default || pdfjsModule;
-           pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
-           const arrayBuffer = await file.arrayBuffer(); const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-           for (let i = 1; i <= pdfDoc.numPages; i++) { const page = await pdfDoc.getPage(i); const textContent = await page.getTextContent(); extractedText += textContent.items.map((item: any) => item.str).join(' ') + '\n'; }
         } 
         
         const matches = extractedText.match(/(\d+([.,]\d{2}))/g);
         if (matches) { const nums = matches.map(m => parseFloat(m.replace(',', '.'))); const validNums = nums.filter(n => n < 50000); possibleTotal = validNums.length > 0 ? Math.max(...validNums) : 0; }
         
         const fallbackFactura: FacturaExtended = {
-          id: 'draft-fallback-' + Date.now(), tipo: 'compra', num: 'REVISAR MANUAL', date: DateUtil.today(), prov: file.type.includes('image') ? '📷 OCR Emergencia' : `📄 PDF Rescatado`,
+          id: 'draft-fallback-' + Date.now(), tipo: 'compra', num: 'REVISAR MANUAL', date: DateUtil.today(),
+          prov: file.type.includes('image') ? '📷 OCR Emergencia' : `📄 PDF Rescatado`,
           total: possibleTotal || 0, base: possibleTotal ? Num.round2(possibleTotal / 1.10) : 0, tax: possibleTotal ? Num.round2(possibleTotal - (possibleTotal / 1.10)) : 0,
-          paid: false, reconciled: false, source: 'email-ia', status: 'draft', unidad_negocio: 'REST', file_base64: fileBase64 
+          paid: false, reconciled: false, source: 'local-rescue', status: 'draft', unidad_negocio: 'REST', file_base64: fileBase64, attachmentSha: Date.now().toString() 
         };
 
         await onSave({ ...safeData, facturas: [fallbackFactura, ...facturasSeguras] });
-        alert(`⚠️ Leído con sistema de rescate offline. Revisa los totales manualmente.`);
+        alert(`⚠️ Rescate offline completado. Revisa los totales manualmente.`);
       } catch (fallbackErr) { alert("⚠️ Archivo corrupto o ilegible."); }
     } finally { setIsSyncing(false); }
   };
@@ -252,16 +282,25 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       const nuevaFacturaVoz: FacturaExtended = {
         id: 'draft-voice-' + Date.now(), tipo: 'compra', num: 'S/N', date: DateUtil.today(),
         prov: `🎙️ Voz: ${txt.substring(0, 20)}...`, total: possibleTotal, base: Num.round2(possibleTotal / 1.10), tax: Num.round2(possibleTotal - (possibleTotal / 1.10)),
-        paid: false, reconciled: false, source: 'email-ia', status: 'draft', unidad_negocio: 'REST'
+        paid: false, reconciled: false, source: 'voice', status: 'draft', unidad_negocio: 'REST'
       };
+
       await onSave({ ...safeData, facturas: [nuevaFacturaVoz, ...facturasSeguras] });
-      alert("✅ Factura dictada por voz guardada en borradores.");
     } catch (e) { alert("⚠️ Error conectando con servidor VOSK local."); } 
     finally { setIsSyncing(false); }
   };
 
   /* =======================================================
-   * ⚙️ LÓGICA DE NEGOCIO (Grupos, Pagos)
+   * 📧 SIMULADOR EMAIL PARSER
+   * ======================================================= */
+  const handleParseEmail = (emailId: string) => {
+    setEmailInbox(prev => prev.filter(e => e.id !== emailId));
+    alert("📥 Correo procesado. El PDF adjunto ha pasado a la bandeja de Conciliación.");
+    // En producción, esto llamaría a processLocalFile con el adjunto del email
+  };
+
+  /* =======================================================
+   * ⚙️ LÓGICA DE NEGOCIO (Grupos, Pagos, Exportación)
    * ======================================================= */
   const handleConfirmAuditoriaIA = async (draftId: string) => {
     const newData = { ...safeData, facturas: [...facturasSeguras], albaranes: [...albaranesSeguros] };
@@ -287,27 +326,18 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     await onSave({ ...safeData, facturas: facturasSeguras.filter(f => f.id !== id) });
   };
 
-  const handleExportGestoria = () => {
-    const q = exportQuarter; const y = year; const startMonth = (q - 1) * 3 + 1; const endMonth = q * 3;
-    const filtered = facturasSeguras.filter(f => f.status !== 'draft' && f.tipo !== 'caja' && (f as any).tipo !== 'banco' && (selectedUnit === 'ALL' || f.unidad_negocio === selectedUnit) && (f.date || '').startsWith(y.toString()) && Number((f.date || '').split('-')[1]) >= startMonth && Number((f.date || '').split('-')[1]) <= endMonth);
-    if (filtered.length === 0) return alert("No hay facturas en este periodo.");
-
-    const rows = filtered.map(f => {
-      const total = Math.abs(Num.parse(f.total) || 0); const base = Num.parse(f.base) || Num.round2(total / 1.10); const tax = Num.parse(f.tax) || Num.round2(total - base);
-      return { 'FECHA': f.date || '', 'Nº FACTURA': f.num || '', 'PROVEEDOR/CLIENTE': f.prov || f.cliente || '—', 'UNIDAD NEGOCIO': BUSINESS_UNITS.find(u => u.id === f.unidad_negocio)?.name || 'Restaurante', 'BASE IMPONIBLE': Num.fmt(base), 'IVA': Num.fmt(tax), 'TOTAL': Num.fmt(total), 'ESTADO': f.paid ? 'PAGADA' : 'PENDIENTE', 'CONCILIADA': f.reconciled ? 'SÍ' : 'NO' };
-    });
-    const ws = XLSX.utils.json_to_sheet(rows); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Facturas"); XLSX.writeFile(wb, `Gestoria_Arume_${y}_Q${q}_${selectedUnit}.xlsx`); setIsExportModalOpen(false);
-  };
-
+  // 📦 Agrupación manual de albaranes optimizada
   const pendingGroups = useMemo(() => {
     const byMonth: Record<string, { name: string; groups: Record<string, any> }> = {};
+    const q = superNorm(deferredSearch);
+
     albaranesSeguros.forEach(a => {
       if (a?.invoiced || !(a?.date || '').startsWith(year.toString())) return;
       const itemUnit = a.unitId || 'REST';
       if (selectedUnit !== 'ALL' && itemUnit !== selectedUnit) return;
+      
       const owner = (mode === 'proveedor' ? a?.prov : a?.socio) || 'Arume';
-      const searchNorm = superNorm(searchQ);
-      if (searchQ && !superNorm(owner).includes(searchNorm) && !superNorm(a?.num || '').includes(searchNorm)) return;
+      if (q && !superNorm(owner).includes(q) && !superNorm(a?.num || '').includes(q)) return;
 
       const mk = (a?.date || '').substring(0, 7); if (!mk) return;
       if (!byMonth[mk]) {
@@ -320,7 +350,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       byMonth[mk].groups[groupKey].t += (Num.parse(a?.total) || 0); byMonth[mk].groups[groupKey].count += 1; byMonth[mk].groups[groupKey].ids.push(a?.id);
     });
     return Object.entries(byMonth).sort((a, b) => b[0].localeCompare(a[0]));
-  }, [albaranesSeguros, year, mode, searchQ, selectedUnit]);
+  }, [albaranesSeguros, year, mode, deferredSearch, selectedUnit]);
 
   const handleConfirmManualInvoice = async () => {
     if (!modalForm.num.trim() || modalForm.selectedAlbs.length === 0) return;
@@ -361,98 +391,71 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     await onSave(newData);
   };
 
-  // RENDERIZADOS EXTRAÍDOS PARA LIMPIEZA VISUAL
-  const renderPendingGroups = () => (
-    pendingGroups.length > 0 ? (
-      pendingGroups.map(([mk, dataGroup]) => (
-        <div key={mk} className="mb-6 animate-fade-in">
-          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 px-2 border-b border-slate-100 pb-2">{dataGroup.name}</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {Object.values(dataGroup.groups).map((g: any) => {
-              const unitConfig = BUSINESS_UNITS.find(u => u.id === g.unitId);
-              return (
-                <div key={g.label + g.unitId} onClick={() => { setSelectedGroup({ label: g.label, ids: g.ids, unitId: g.unitId }); setModalForm({ num: '', date: DateUtil.today(), selectedAlbs: [...g.ids], unitId: g.unitId }); }} className="flex justify-between items-center p-4 bg-white rounded-2xl border border-slate-200 hover:border-indigo-400 hover:shadow-md transition cursor-pointer group">
-                  <div className="min-w-0">
-                    <p className="font-black text-slate-800 group-hover:text-indigo-600 transition truncate">{g.label}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      {unitConfig && <span className={cn("text-[9px] px-2 py-0.5 rounded-md uppercase tracking-wider font-black", unitConfig.bg, unitConfig.color)}>{unitConfig.name.split(' ')[0]}</span>}
-                      <span className="text-slate-400 font-bold text-[10px]">{g.count} Albaranes</span>
-                    </div>
-                  </div>
-                  <div className="text-right shrink-0 ml-4">
-                    <p className="font-black text-slate-900 text-lg">{Num.fmt(g.t)}</p>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      ))
-    ) : (
-      <div className="py-20 flex flex-col items-center justify-center opacity-60 bg-slate-50 rounded-[2rem] border-2 border-dashed border-slate-200">
-        <Package className="w-12 h-12 text-slate-300 mb-3" />
-        <p className="text-slate-500 font-black text-sm uppercase tracking-widest">No hay albaranes sueltos</p>
-      </div>
-    )
-  );
+  const handleExportGestoria = () => {
+    const q = exportQuarter; const y = year; const startMonth = (q - 1) * 3 + 1; const endMonth = q * 3;
+    const filtered = facturasSeguras.filter(f => f.status !== 'draft' && f.tipo !== 'caja' && (f as any).tipo !== 'banco' && (selectedUnit === 'ALL' || f.unidad_negocio === selectedUnit) && (f.date || '').startsWith(y.toString()) && Number((f.date || '').split('-')[1]) >= startMonth && Number((f.date || '').split('-')[1]) <= endMonth);
+    if (filtered.length === 0) return alert("No hay facturas en este periodo.");
 
+    const rows = filtered.map(f => {
+      const total = Math.abs(Num.parse(f.total) || 0); const base = Num.parse(f.base) || Num.round2(total / 1.10); const tax = Num.parse(f.tax) || Num.round2(total - base);
+      return { 'FECHA': f.date || '', 'Nº FACTURA': f.num || '', 'PROVEEDOR/CLIENTE': f.prov || f.cliente || '—', 'UNIDAD NEGOCIO': BUSINESS_UNITS.find(u => u.id === f.unidad_negocio)?.name || 'Restaurante', 'BASE IMPONIBLE': Num.fmt(base), 'IVA': Num.fmt(tax), 'TOTAL': Num.fmt(total), 'ESTADO': f.paid ? 'PAGADA' : 'PENDIENTE', 'CONCILIADA': f.reconciled ? 'SÍ' : 'NO' };
+    });
+    const ws = XLSX.utils.json_to_sheet(rows); 
+    ws['!cols'] = [{ wch: 12 }, { wch: 16 }, { wch: 30 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
+    
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Facturas"); 
+    XLSX.writeFile(wb, `Gestoria_Arume_${y}_Q${q}_${selectedUnit}.xlsx`); setIsExportModalOpen(false);
+  };
+
+  /* =======================================================
+   * 🎨 RENDER DE UI
+   * ======================================================= */
   return (
     <div 
-      className="dropzone-area animate-fade-in space-y-6 pb-24 max-w-[1400px] mx-auto"
+      className={cn("dropzone-area animate-fade-in space-y-6 pb-24 min-h-screen relative transition-colors duration-300 max-w-[1600px] mx-auto", isDragging && "bg-indigo-50/50")}
       onDragEnter={handleDragEnter} onDragOver={(e) => e.preventDefault()} onDragLeave={handleDragLeave} onDrop={handleDrop}
     >
-      {/* 🚀 OVERLAY DE DROP CALMADO Y SEGURO (Auditoría Copilot) */}
+      {/* 🚀 OVERLAY DE DROP PROTEGIDO */}
       <AnimatePresence>
         {isDragging && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] pointer-events-none">
-            <div className="absolute inset-0 bg-indigo-600/10 backdrop-blur-sm" />
-            <div className="absolute inset-4 md:inset-8 border-4 border-dashed border-indigo-400 rounded-[3rem] flex items-center justify-center bg-indigo-50/50">
-              <div className="text-center bg-white p-8 rounded-3xl shadow-xl">
-                <FileDown className="w-16 h-16 text-indigo-500 mx-auto mb-4 animate-bounce" />
-                <p className="text-3xl font-black text-indigo-900">Suelta tu factura aquí</p>
-                <p className="text-sm text-indigo-500 font-bold mt-2 uppercase tracking-widest">Solo PDF o Imágenes</p>
-              </div>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[9999] bg-indigo-600/90 backdrop-blur-sm border-[16px] border-dashed border-white/40 flex flex-col items-center justify-center pointer-events-auto transition-opacity duration-300">
+            <div className="pointer-events-none flex flex-col items-center justify-center">
+              <FileDown className="w-32 h-32 text-white mb-6 animate-bounce" />
+              <h2 className="text-5xl font-black text-white tracking-tighter drop-shadow-lg">¡Suelta tu Factura aquí!</h2>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
-
+      
       {/* 🚀 HEADER COMPACTO Y MODERNO */}
-      <header className={cn(cardBase, "p-6 md:p-8 relative z-10")}>
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
-          <div>
-            <h2 className={hTitle}>Facturas · INVØYS PRO</h2>
-            <p className={cn(tLabel, "mt-1")}>Inbox · Conciliación · Contabilización</p>
-          </div>
+      <header className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6 md:p-8 flex flex-col lg:flex-row justify-between gap-4">
+        <div>
+          <h2 className="text-2xl md:text-3xl font-black text-slate-800 tracking-tighter">Facturas · INVØYS PRO</h2>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Inbox · Conciliación · Export</p>
+        </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button onClick={toggleRecording} className={cn("px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 shadow-sm border", isRecording ? "bg-rose-500 text-white border-rose-600 animate-pulse" : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50")}>
-              {isRecording ? <Square className="w-4 h-4 fill-current"/> : <Mic className="w-4 h-4"/>} {isRecording ? "GRABANDO..." : "DICTAR"}
-            </button>
-            <input type="file" ref={fileInputRef} className="hidden" accept="application/pdf, image/*" onChange={(e) => { if (e.target.files && e.target.files[0]) { processLocalFile(e.target.files[0]); e.target.value = ''; } }} />
-            <button onClick={() => fileInputRef.current?.click()} className="px-5 py-2.5 rounded-xl text-xs font-black bg-indigo-600 text-white hover:bg-indigo-700 transition flex items-center gap-2 shadow-md">
-              <UploadCloud className="w-4 h-4" /> SUBIR PDF
-            </button>
-            <button onClick={() => setIsExportModalOpen(true)} className="px-4 py-2.5 rounded-xl text-xs font-black bg-emerald-600 text-white hover:bg-emerald-700 transition flex items-center gap-2 shadow-md">
-              <Download className="w-4 h-4" /> EXPORT
-            </button>
-          </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={toggleRecording} className={cn("px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 shadow-sm border", isRecording ? "bg-rose-500 text-white border-rose-600 animate-pulse" : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50")}>
+            {isRecording ? <Square className="w-4 h-4 fill-current"/> : <Mic className="w-4 h-4"/>} {isRecording ? "GRABANDO..." : "DICTAR"}
+          </button>
+          <input type="file" ref={fileInputRef} className="hidden" accept="application/pdf, image/*" onChange={(e) => { if (e.target.files && e.target.files[0]) { processLocalFile(e.target.files[0]); e.target.value = ''; } }} />
+          <button onClick={() => fileInputRef.current?.click()} className="px-5 py-2.5 rounded-xl text-xs font-black bg-indigo-600 text-white hover:bg-indigo-700 transition flex items-center gap-2 shadow-md">
+            <UploadCloud className="w-4 h-4" /> SUBIR PDF
+          </button>
+          <button onClick={() => setIsExportModalOpen(true)} className="px-4 py-2.5 rounded-xl text-xs font-black bg-emerald-600 text-white hover:bg-emerald-700 transition flex items-center gap-2 shadow-md">
+            <Download className="w-4 h-4" /> EXPORT
+          </button>
         </div>
       </header>
 
       {/* 🚀 TOOLBAR STICKY (Filtros e Inputs) */}
       <div className="sticky top-2 z-40">
-        <div className={cn(cardBase, "px-4 py-3 shadow-md backdrop-blur-md bg-white/90")}>
+        <div className="bg-white/95 backdrop-blur-md px-4 py-3 rounded-[2rem] shadow-md border border-slate-200">
           <div className="flex flex-col xl:flex-row items-center justify-between gap-3">
             
-            {/* TABS DE VISTA */}
             <div className="flex items-center bg-slate-100 p-1.5 rounded-2xl w-full xl:w-auto overflow-x-auto no-scrollbar">
-              <button onClick={() => setActiveTab('pend')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition whitespace-nowrap", activeTab === 'pend' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
-                📦 Albaranes sin cerrar
-              </button>
-              <button onClick={() => setActiveTab('hist')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition whitespace-nowrap", activeTab === 'hist' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
-                💰 Facturas (Histórico)
-              </button>
+              <button onClick={() => setActiveTab('pend')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition whitespace-nowrap", activeTab === 'pend' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>📦 Albaranes sin cerrar</button>
+              <button onClick={() => setActiveTab('hist')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition whitespace-nowrap", activeTab === 'hist' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>💰 Facturas contabilizadas</button>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
@@ -461,23 +464,23 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                 <button onClick={() => setMode('socio')} className={cn("px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition", mode === 'socio' ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700")}>Socio</button>
               </div>
 
-              <select value={selectedUnit} onChange={e => setSelectedUnit(e.target.value as any)} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[10px] font-black uppercase text-slate-600 outline-none">
-                <option value="ALL">Todas las uds</option>
+              <select value={selectedUnit} onChange={e => setSelectedUnit(e.target.value as any)} className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-black outline-none text-slate-700 shadow-sm">
+                <option value="ALL">Todas las unidades</option>
                 <option value="REST">Restaurante</option>
                 <option value="DLV">Catering</option>
                 <option value="SHOP">Tienda</option>
                 <option value="CORP">Socios/Corp</option>
               </select>
 
-              <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl">
-                <button className="px-3 py-1.5 text-indigo-600 hover:bg-indigo-50 rounded-l-xl transition" onClick={() => setYear(y => y - 1)}><ChevronLeft className="w-4 h-4"/></button>
-                <span className="px-2 text-xs font-black text-slate-700">{year}</span>
-                <button className="px-3 py-1.5 text-indigo-600 hover:bg-indigo-50 rounded-r-xl transition" onClick={() => setYear(y => y + 1)}><ChevronRight className="w-4 h-4"/></button>
+              <div className="flex items-center bg-white border border-slate-200 rounded-xl shadow-sm">
+                <button className="px-3 py-2 text-indigo-600 hover:bg-indigo-50 rounded-l-xl transition" onClick={() => setYear(y => y - 1)}><ChevronLeft className="w-4 h-4"/></button>
+                <span className="px-2 text-xs font-black">{year}</span>
+                <button className="px-3 py-2 text-indigo-600 hover:bg-indigo-50 rounded-r-xl transition" onClick={() => setYear(y => y + 1)}><ChevronRight className="w-4 h-4"/></button>
               </div>
 
-              <div className="relative flex-1 min-w-[200px]">
+              <div className="relative flex-1 md:w-72">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Buscar proveedor, ref..." className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold outline-none focus:ring-2 ring-indigo-500/20 transition focus:bg-white" />
+                <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Buscar proveedor, nº o ref OCR..." className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-bold outline-none focus:ring-2 ring-indigo-500/20 shadow-sm transition" />
               </div>
             </div>
 
@@ -485,24 +488,83 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         </div>
       </div>
 
-      {/* 🚀 LAYOUT GRID (Inbox IA a la derecha en Desktop) */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 relative z-10">
+      {/* 🚀 LAYOUT GRID (Inbox Lateral Derecho Desktop) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 relative z-10">
         
         {/* ZONA IZQUIERDA: Listas Principales */}
-        <section className="xl:col-span-8 space-y-4">
-          {activeTab === 'pend' ? renderPendingGroups() : (
-            <InvoicesList facturas={facturasSeguras} searchQ={searchQ} selectedUnit={selectedUnit} mode={mode} filterStatus={filterStatus} year={year} businessUnits={BUSINESS_UNITS} sociosReales={SOCIOS_REALES} superNorm={superNorm} onOpenDetail={setSelectedInvoice as any} onTogglePago={handleTogglePago} onDelete={handleDeleteFactura} />
+        <section className="lg:col-span-8 space-y-4">
+          {activeTab === 'pend' ? (
+            pendingGroups.length > 0 ? (
+              pendingGroups.map(([mk, dataGroup]) => (
+                <div key={mk} className="mb-6 animate-fade-in">
+                  <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 px-2 border-b border-slate-100 pb-2">{dataGroup.name}</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {Object.values(dataGroup.groups).map((g: any) => {
+                      const unitConfig = BUSINESS_UNITS.find(u => u.id === g.unitId);
+                      return (
+                        <div key={g.label + g.unitId} onClick={() => { setSelectedGroup({ label: g.label, ids: g.ids, unitId: g.unitId }); setModalForm({ num: '', date: DateUtil.today(), selectedAlbs: [...g.ids], unitId: g.unitId }); }} className="flex justify-between items-center p-5 bg-white rounded-2xl border border-slate-200 hover:border-indigo-400 hover:shadow-md transition cursor-pointer group">
+                          <div className="min-w-0">
+                            <p className="font-black text-slate-800 group-hover:text-indigo-600 transition flex items-center gap-2 truncate">{g.label}</p>
+                            <div className="flex items-center gap-2 mt-1.5">
+                              {unitConfig && <span className={cn("text-[8px] px-2 py-0.5 rounded-md uppercase tracking-wider font-black", unitConfig.bg, unitConfig.color)}>{unitConfig.name.split(' ')[0]}</span>}
+                              <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-md text-[9px] font-bold">{g.count} Albaranes</span>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0 ml-4">
+                            <p className="font-black text-slate-900 text-xl">{Num.fmt(g.t)}</p>
+                            <p className="text-[9px] font-black text-indigo-400 group-hover:underline mt-1 flex items-center justify-end gap-1">CERRAR MANUAL <ArrowRight className="w-3 h-3" /></p>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="py-20 flex flex-col items-center justify-center opacity-60 bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200">
+                <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm mb-4"><Package className="w-8 h-8 text-slate-300" /></div>
+                <p className="text-slate-500 font-black text-sm uppercase tracking-widest">No hay albaranes sueltos</p>
+              </div>
+            )
+          ) : (
+            <InvoicesList facturas={facturasSeguras} searchQ={deferredSearch} selectedUnit={selectedUnit} mode={mode} filterStatus={filterStatus} year={year} businessUnits={BUSINESS_UNITS} sociosReales={SOCIOS_REALES} superNorm={superNorm} onOpenDetail={setSelectedInvoice as any} onTogglePago={handleTogglePago} onDelete={handleDeleteFactura} />
           )}
         </section>
 
-        {/* ZONA DERECHA: Inbox de IA (Panel de Conciliación) */}
-        <aside className="xl:col-span-4">
-          <div className="sticky top-24 space-y-4">
+        {/* ZONA DERECHA: Inbox Múltiple (Email + IA) */}
+        <aside className="lg:col-span-4 space-y-6">
+          <div className="sticky top-24 space-y-6">
+            
+            {/* INBOX CORREO (Simulación Visual PRO) */}
+            {emailInbox.length > 0 && (
+              <div className="bg-white p-5 rounded-[2rem] border border-slate-200 shadow-sm">
+                <h4 className="text-sm font-black text-slate-800 mb-1 flex items-center gap-2"><Inbox className="w-4 h-4 text-blue-500"/> Correos Recibidos</h4>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Pendientes de escanear OCR</p>
+                <div className="mt-4 space-y-2">
+                  {emailInbox.map(mail => (
+                    <div key={mail.id} className="p-3 bg-slate-50 border border-slate-100 rounded-xl hover:border-blue-300 transition group">
+                      <div className="flex justify-between items-start">
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-slate-800 truncate">{mail.from}</p>
+                          <p className="text-[10px] text-slate-500 truncate mt-0.5">{mail.subject}</p>
+                        </div>
+                        <span className="text-[9px] font-black text-slate-400">{mail.date}</span>
+                      </div>
+                      <button onClick={() => handleParseEmail(mail.id)} className="w-full mt-3 bg-blue-50 text-blue-600 font-black text-[10px] uppercase py-2 rounded-lg hover:bg-blue-600 hover:text-white transition">
+                        Escanear PDF Adjunto
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* INBOX IA (Conciliador) */}
             {draftsIA.length > 0 ? (
-              <div className={cn(cardBase, "p-5 border-indigo-100 bg-indigo-50/30")}>
-                <h4 className="text-sm font-black text-slate-800 mb-1 flex items-center gap-2"><Sparkles className="w-4 h-4 text-indigo-500"/> Inbox IA ({draftsIA.length})</h4>
-                <p className={tLabel}>Conciliación Pendiente</p>
-                <div className="mt-4 space-y-3 max-h-[65vh] overflow-y-auto custom-scrollbar pr-1">
+              <div className="bg-slate-50 p-5 rounded-[2rem] border border-indigo-100 shadow-inner">
+                <h4 className="text-sm font-black text-slate-800 mb-1 flex items-center gap-2"><Sparkles className="w-4 h-4 text-indigo-500"/> Borradores IA ({draftsIA.length})</h4>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Conciliación con Albaranes</p>
+                <div className="mt-4 space-y-3 max-h-[50vh] overflow-y-auto custom-scrollbar pr-1">
                   {draftsIA.map(d => (
                     <div key={d.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm hover:border-indigo-300 transition group">
                       <div className="flex justify-between items-start mb-2">
@@ -515,9 +577,9 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                       <div className="flex justify-between items-end mt-2">
                         <span className="text-xl font-black text-slate-900">{Num.fmt(d.total)}</span>
                         {d.cuadraPerfecto ? (
-                          <span className={cn(chipBase, "bg-emerald-50 text-emerald-600 border border-emerald-100")}>Cuadra</span>
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-600 border border-emerald-100">Cuadra</span>
                         ) : (
-                          <span className={cn(chipBase, "bg-amber-50 text-amber-600 border border-amber-100")}>Dif {Num.fmt(d.diferencia)}</span>
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest bg-amber-50 text-amber-600 border border-amber-100">Dif {Num.fmt(d.diferencia)}</span>
                         )}
                       </div>
                       <button onClick={() => handleConfirmAuditoriaIA(d.id)} className="w-full mt-3 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase hover:bg-indigo-700 transition">
@@ -528,10 +590,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                 </div>
               </div>
             ) : (
-              <div className={cn(cardBase, "p-8 text-center bg-slate-50 opacity-60")}>
+              <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-8 text-center opacity-60">
                 <Mail className="w-8 h-8 mx-auto text-slate-300 mb-3" />
                 <p className="text-xs font-black text-slate-500 uppercase tracking-widest">Inbox Vacío</p>
-                <p className="text-[10px] text-slate-400 mt-2 font-medium">Sube una factura al Dropzone para que la IA la analice.</p>
+                <p className="text-[10px] text-slate-400 mt-2 font-medium">Sube una factura al Dropzone para que la IA la concilie con tus albaranes.</p>
               </div>
             )}
           </div>
@@ -619,7 +681,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           businessUnits={BUSINESS_UNITS} 
           mode={mode} 
           onClose={() => setSelectedInvoice(null)} 
-          onDownloadFile={handleDownloadFile as any} 
+          onDownloadFile={() => alert("Función de descarga de PDF en desarrollo.")} 
         />
       )}
     </div>
