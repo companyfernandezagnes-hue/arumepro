@@ -77,7 +77,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [exportQuarter, setExportQuarter] = useState(Math.floor(new Date().getMonth() / 3) + 1);
   
   const [isDragging, setIsDragging] = useState(false);
-  const dragDepth = useRef(0);
+  const dragCounter = useRef(0); // 🛡️ Contador para evitar parpadeos de D&D
 
   const [selectedGroup, setSelectedGroup] = useState<{ label: string; ids: string[], unitId: BusinessUnit } | null>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<FacturaExtended | null>(null);
@@ -91,36 +91,67 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const audioChunksRef = useRef<Blob[]>([]);
 
   /* =======================================================
-   * 🛡️ DRAG & DROP BLINDADO (Solución Fuga de Memoria)
+   * 🛡️ DRAG & DROP BLINDADO (Solución Fuga de Memoria y Parpadeos)
    * ======================================================= */
   useEffect(() => {
-    const handleGlobalDragEnd = () => { dragDepth.current = 0; setIsDragging(false); };
-    const onWindowDragLeave = (e: DragEvent) => { 
-      const out = e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight; 
-      if (out) { dragDepth.current = 0; setIsDragging(false); } 
+    const blockDefault = (e: DragEvent) => { 
+      // Solo previene el comportamiento por defecto si NO estamos arrastrando sobre nuestra zona habilitada
+      if (!(e.target as HTMLElement)?.closest(".dropzone-area")) { 
+        e.preventDefault(); 
+        e.stopPropagation(); 
+      } 
+    };
+
+    const cancelDrag = () => { 
+      dragCounter.current = 0; 
+      setIsDragging(false); 
     };
     
-    // Solo añadimos listeners al div contenedor, no a todo el window si es posible (aunque para D&D global window es necesario, hay que limpiarlos bien)
-    window.addEventListener('dragend', handleGlobalDragEnd); 
-    window.addEventListener('drop', handleGlobalDragEnd); 
-    window.addEventListener('dragleave', onWindowDragLeave);
+    window.addEventListener('dragover', blockDefault); 
+    window.addEventListener('drop', blockDefault); 
+    window.addEventListener('mouseout', (e) => { 
+      // Si el ratón sale de la ventana del navegador, cancelamos el drag
+      if (!e.relatedTarget && !e.toElement) cancelDrag(); 
+    });
     
     return () => { 
-      window.removeEventListener('dragend', handleGlobalDragEnd); 
-      window.removeEventListener('drop', handleGlobalDragEnd); 
-      window.removeEventListener('dragleave', onWindowDragLeave); 
+      window.removeEventListener('dragover', blockDefault); 
+      window.removeEventListener('drop', blockDefault); 
+      window.removeEventListener('mouseout', cancelDrag); 
     };
   }, []);
 
-  const handleDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => { e.preventDefault(); e.stopPropagation(); dragDepth.current += 1; if (e.dataTransfer.items && e.dataTransfer.items.length > 0) setIsDragging(true); }, []);
-  const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => { e.preventDefault(); e.stopPropagation(); }, []);
-  const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => { e.preventDefault(); e.stopPropagation(); dragDepth.current -= 1; if (dragDepth.current <= 0) { setIsDragging(false); dragDepth.current = 0; } }, []);
+  const handleDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => { 
+    e.preventDefault(); 
+    dragCounter.current++; 
+    if (!isDragging) setIsDragging(true); 
+  }, [isDragging]);
+
+  const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => { 
+    e.preventDefault(); 
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => { 
+    e.preventDefault(); 
+    dragCounter.current--; 
+    if (dragCounter.current <= 0) { 
+      setIsDragging(false); 
+      dragCounter.current = 0; 
+    } 
+  }, []);
+
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => { 
-    e.preventDefault(); e.stopPropagation(); setIsDragging(false); dragDepth.current = 0; 
+    e.preventDefault(); 
+    dragCounter.current = 0; 
+    setIsDragging(false); 
+    
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) { 
       const file = e.dataTransfer.files[0]; 
-      if (file.type === 'application/pdf' || file.type.startsWith('image/')) processLocalFile(file); 
-      else alert("⚠️ Solo PDF o Imágenes."); 
+      if (file.type === 'application/pdf' || file.type.startsWith('image/')) {
+        processLocalFile(file); 
+      } else {
+        alert("⚠️ Formato no soportado. Solo se permiten archivos PDF o imágenes (JPG, PNG)."); 
+      }
     } 
   }, []);
 
@@ -159,7 +190,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       if (!apiKey) throw new Error("NO_API_KEY");
 
       const fileBase64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader(); reader.onload = () => resolve(reader.result as string); reader.onerror = reject; reader.readAsDataURL(file);
+        const reader = new FileReader(); 
+        reader.onload = () => resolve(reader.result as string); 
+        reader.onerror = reject; 
+        reader.readAsDataURL(file);
       });
       const soloBase64 = fileBase64.split(',')[1];
 
@@ -186,7 +220,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         paid: false, reconciled: false, source: 'email-ia', status: 'draft', unidad_negocio: 'REST', file_base64: fileBase64 
       };
 
-      await onSave({ ...safeData, facturas: [...facturasSeguras, nuevaFacturaIA] });
+      await onSave({ ...safeData, facturas: [nuevaFacturaIA, ...facturasSeguras] });
       alert("✅ Factura procesada por IA. Búscala en los borradores.");
 
     } catch (e) {
@@ -215,14 +249,14 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           paid: false, reconciled: false, source: 'email-ia', status: 'draft', unidad_negocio: 'REST', file_base64: fileBase64 
         };
 
-        await onSave({ ...safeData, facturas: [...facturasSeguras, fallbackFactura] });
+        await onSave({ ...safeData, facturas: [fallbackFactura, ...facturasSeguras] });
         alert(`⚠️ Rescate completado con visor manual (El límite de IA se agotó).`);
       } catch (fallbackErr) { alert("⚠️ Archivo corrupto o ilegible."); }
     } finally { setIsSyncing(false); }
   };
 
   /* =======================================================
-   * 🎙️ NUEVO: INTEGRACIÓN VOSK LOCAL PARA FACTURAS
+   * 🎙️ INTEGRACIÓN VOSK LOCAL PARA FACTURAS
    * ======================================================= */
   const toggleRecording = async () => {
     if (isRecording) {
@@ -256,7 +290,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       const voskData = await voskRes.json();
       const txt = voskData.text || "";
       
-      // Inteligencia simple para capturar números del texto de Vosk
       const matches = txt.match(/(\d+([.,]\d{2})?)/g);
       const possibleTotal = matches ? parseFloat(matches[matches.length - 1].replace(',', '.')) : 0;
 
@@ -266,7 +299,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         paid: false, reconciled: false, source: 'email-ia', status: 'draft', unidad_negocio: 'REST'
       };
 
-      await onSave({ ...safeData, facturas: [...facturasSeguras, nuevaFacturaVoz] });
+      await onSave({ ...safeData, facturas: [nuevaFacturaVoz, ...facturasSeguras] });
       alert("✅ Factura dictada por voz guardada en borradores.");
     } catch (e) { alert("⚠️ Error conectando con servidor VOSK local."); } 
     finally { setIsSyncing(false); }
@@ -344,10 +377,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       if (modalForm.selectedAlbs.includes(a.id)) { totalFactura += Num.parse(a.total) || 0; return { ...a, invoiced: true }; } return a;
     });
 
-    newData.facturas.push({
+    newData.facturas.unshift({
       id: 'fac-' + Date.now(), tipo: mode === 'proveedor' ? 'compra' : 'venta', num: modalForm.num, date: modalForm.date,
       prov: mode === 'proveedor' ? (selectedGroup?.label || '') : 'Varios', cliente: mode === 'socio' ? (selectedGroup?.label || '') : 'Arume',
-      total: Num.round2(totalFactura), base: 0, tax: 0, albaranIdsArr: modalForm.selectedAlbs,
+      total: Num.round2(totalFactura), base: Num.round2(totalFactura/1.10), tax: Num.round2(totalFactura - (totalFactura/1.10)), albaranIdsArr: modalForm.selectedAlbs,
       paid: false, reconciled: false, source: 'manual-group', status: 'approved', unidad_negocio: modalForm.unitId || 'REST' 
     } as any);
 
@@ -375,65 +408,75 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   };
 
   return (
-    <div className={cn("animate-fade-in space-y-6 pb-24 min-h-screen relative transition-colors duration-300", isDragging && "bg-indigo-50/50")}
-      onDragEnter={handleDragEnter} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
+    <div 
+      className={cn("dropzone-area animate-fade-in space-y-6 pb-24 min-h-screen relative transition-colors duration-300", isDragging && "bg-indigo-50/50")}
+      onDragEnter={handleDragEnter} 
+      onDragOver={handleDragOver} 
+      onDragLeave={handleDragLeave} 
+      onDrop={handleDrop}
     >
+      {/* OVERLAY DE DROP PROTEGIDO */}
       <AnimatePresence>
         {isDragging && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[9999] bg-indigo-600/90 backdrop-blur-sm border-[16px] border-dashed border-white/40 flex flex-col items-center justify-center pointer-events-none transition-opacity duration-300">
-            <motion.div initial={{ scale: 0.8, y: 20 }} animate={{ scale: 1, y: 0 }} className="flex flex-col items-center justify-center">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[9999] bg-indigo-600/90 backdrop-blur-sm border-[16px] border-dashed border-white/40 flex flex-col items-center justify-center pointer-events-auto transition-opacity duration-300">
+            <div className="pointer-events-none flex flex-col items-center justify-center">
               <FileDown className="w-32 h-32 text-white mb-6 animate-bounce" />
-              <h2 className="text-5xl font-black text-white tracking-tighter drop-shadow-lg">¡Suelta tu PDF aquí!</h2>
-            </motion.div>
+              <h2 className="text-5xl font-black text-white tracking-tighter drop-shadow-lg">¡Suelta tu Factura aquí!</h2>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
 
       <AnimatePresence>
         {draftsIA.length > 0 && (
-          <motion.div key="ia-audit" initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="bg-slate-900 p-6 rounded-[2.5rem] shadow-2xl border border-slate-800 relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 via-indigo-500 to-emerald-500"></div>
-            <h3 className="text-white text-lg font-black flex items-center gap-2 mb-4">
-              <Mail className="w-5 h-5 text-purple-400 animate-bounce" /> Borradores y Auditoría <span className="bg-purple-600 text-xs px-2 py-0.5 rounded-full">{draftsIA.length}</span>
+          <motion.div key="ia-audit" initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="bg-slate-900 p-6 md:p-8 rounded-[2.5rem] shadow-2xl border border-slate-800 relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-purple-500 via-indigo-500 to-emerald-500"></div>
+            <h3 className="text-white text-lg font-black flex items-center gap-2 mb-6">
+              <Mail className="w-5 h-5 text-purple-400 animate-bounce" /> Inbox de Conciliación <span className="bg-purple-600 text-xs px-2.5 py-0.5 rounded-full">{draftsIA.length}</span>
             </h3>
             <div className="space-y-4">
               {draftsIA.map(d => (
                 <div key={d.id} className={cn("bg-slate-800/50 p-5 rounded-3xl border transition-colors", d.cuadraPerfecto ? 'border-emerald-500/50' : 'border-amber-500/50')}>
-                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                     <div className="flex-1">
-                      <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest mb-1">Leído en el Documento</p>
+                      <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest mb-1">Lectura OCR del Documento</p>
                       {d.prov.includes('Emergencia') || d.prov.includes('Voz') ? (
                         <h4 className="text-amber-400 font-black text-xl flex items-center gap-2"><AlertCircle className="w-5 h-5" /> {d.prov}</h4>
                       ) : (
                         <h4 className="text-white font-black text-xl">{d.prov}</h4>
                       )}
-                      <p className="text-slate-400 text-xs font-mono">Ref: {d.num} | Fecha: {d.date}</p>
-                      <p className="text-3xl font-black text-white mt-2">{Num.fmt(Math.abs(Num.parse(d.total)))}</p>
+                      <p className="text-slate-400 text-xs font-mono mt-1">Ref: {d.num} | Fecha: {d.date}</p>
+                      <p className="text-3xl font-black text-white mt-3">{Num.fmt(Math.abs(Num.parse(d.total)))}</p>
                     </div>
-                    <div className="flex-1 bg-slate-900 p-4 rounded-2xl w-full">
-                      <div className="flex justify-between items-center mb-2"><span className="text-[10px] text-slate-400 font-bold uppercase">Tus Albaranes ({d.candidatos.length})</span><span className="text-sm font-black text-white">{Num.fmt(d.sumaAlbaranes)}</span></div>
+                    
+                    <div className="flex-1 bg-slate-900/80 p-5 rounded-2xl w-full border border-slate-700/50">
+                      <div className="flex justify-between items-center mb-3">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Tus Albaranes del Mes ({d.candidatos.length})</span>
+                        <span className="text-sm font-black text-white">{Num.fmt(d.sumaAlbaranes)}</span>
+                      </div>
                       {d.candidatos.length > 0 ? (
-                        <div className="space-y-1 max-h-24 overflow-y-auto custom-scrollbar pr-2">
+                        <div className="space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-2">
                           {d.candidatos.map((c: any) => (
-                            <div key={c.id} className="flex justify-between text-[10px] text-slate-500 border-b border-slate-800 pb-1">
-                              <span>📅 {c.date} - {c.num}</span><span className="text-slate-300 font-bold">{Num.fmt(c.total)}</span>
+                            <div key={c.id} className="flex justify-between text-xs text-slate-400 border-b border-slate-800/50 pb-1.5">
+                              <span>📅 {c.date} - {c.num || 'S/N'}</span><span className="text-slate-200 font-bold">{Num.fmt(c.total)}</span>
                             </div>
                           ))}
                         </div>
                       ) : (
-                        <p className="text-rose-400 text-[10px] font-bold italic py-2">⚠️ No hay albaranes pendientes este mes para este proveedor.</p>
+                        <p className="text-rose-400 text-xs font-bold italic py-3 flex items-center gap-2"><AlertCircle className="w-4 h-4"/> No hay albaranes pendientes este mes para este proveedor.</p>
                       )}
                     </div>
                   </div>
-                  <div className="mt-4 pt-4 border-t border-slate-700 flex flex-wrap gap-2 items-center justify-between">
+                  
+                  <div className="mt-5 pt-5 border-t border-slate-700/50 flex flex-wrap gap-3 items-center justify-between">
                     <div>
-                      {d.cuadraPerfecto ? <span className="bg-emerald-500/20 text-emerald-400 text-xs font-black px-3 py-1 rounded-lg">✅ CUADRA PERFECTO</span> : <span className="bg-amber-500/20 text-amber-400 text-xs font-black px-3 py-1 rounded-lg">⚠️ DESCUADRE: {Num.fmt(d.diferencia)}</span>}
+                      {d.cuadraPerfecto ? <span className="bg-emerald-500/20 text-emerald-400 text-xs font-black px-4 py-1.5 rounded-lg border border-emerald-500/30">✅ CUADRA PERFECTO</span> : <span className="bg-amber-500/20 text-amber-400 text-xs font-black px-4 py-1.5 rounded-lg border border-amber-500/30">⚠️ DESCUADRE: {Num.fmt(d.diferencia)}</span>}
                     </div>
-                    <div className="flex gap-2">
-                      <button type="button" onClick={() => handleConfirmAuditoriaIA(d.id)} className={cn("text-white text-xs px-5 py-2.5 rounded-xl font-black shadow-lg transition active:scale-95", d.cuadraPerfecto ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-amber-500 hover:bg-amber-600')}>
-                        {d.cuadraPerfecto ? 'VINCULAR Y CERRAR MES' : 'CERRAR IGNORANDO DIFERENCIA'}
+                    <div className="flex gap-2 w-full md:w-auto">
+                      <button type="button" onClick={() => handleConfirmAuditoriaIA(d.id)} className={cn("flex-1 md:flex-none text-white text-xs px-6 py-3 rounded-xl font-black shadow-lg transition active:scale-95", d.cuadraPerfecto ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-amber-600 hover:bg-amber-700')}>
+                        {d.cuadraPerfecto ? 'CERRAR Y VINCULAR' : 'IGNORAR DESCUADRE Y CERRAR'}
                       </button>
-                      <button type="button" onClick={() => handleDiscardDraftIA(d.id)} className="bg-slate-700 hover:bg-rose-500 text-white text-xs p-2.5 rounded-xl font-black transition"><Trash2 className="w-4 h-4" /></button>
+                      <button type="button" onClick={() => handleDiscardDraftIA(d.id)} className="bg-slate-800 hover:bg-rose-500 text-white p-3 rounded-xl transition"><Trash2 className="w-4 h-4" /></button>
                     </div>
                   </div>
                 </div>
@@ -443,46 +486,46 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         )}
       </AnimatePresence>
 
-      <section className="p-6 bg-white rounded-[2.5rem] shadow-sm border border-slate-100 relative z-10">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-6">
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => setSelectedUnit('ALL')} className={cn("px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all border", selectedUnit === 'ALL' ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50")}><Layers className="w-3 h-3 inline-block mr-1" />Ver Todos</button>
+      <section className="p-6 md:p-8 bg-white rounded-[3rem] shadow-sm border border-slate-100 relative z-10">
+        <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-8">
+          <div className="flex flex-wrap gap-2 w-full md:w-auto">
+            <button type="button" onClick={() => setSelectedUnit('ALL')} className={cn("flex-1 md:flex-none px-5 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all border flex items-center justify-center gap-1.5", selectedUnit === 'ALL' ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50")}><Layers className="w-3.5 h-3.5" />Todas</button>
             {BUSINESS_UNITS.map(unit => (
-              <button type="button" key={unit.id} onClick={() => setSelectedUnit(unit.id)} className={cn("px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all border flex items-center gap-2", selectedUnit === unit.id ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50")}>
-                <unit.icon className="w-3 h-3" /> {unit.name}
+              <button type="button" key={unit.id} onClick={() => setSelectedUnit(unit.id)} className={cn("flex-1 md:flex-none px-5 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all border flex items-center justify-center gap-1.5", selectedUnit === unit.id ? `${unit.color.replace('text-', 'bg-')} text-white border-transparent shadow-md` : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50")}>
+                <unit.icon className="w-3.5 h-3.5" /> <span className="hidden sm:inline">{unit.name}</span>
               </button>
             ))}
           </div>
           
-          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
-            <button onClick={toggleRecording} className={cn("px-4 py-2 rounded-xl text-[10px] font-black flex items-center gap-2 shadow-sm transition-colors", isRecording ? "bg-rose-500 text-white" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50")} title="Dictar factura (Vosk Local)">
-               {isRecording ? <Square className="w-3 h-3"/> : <Mic className="w-3 h-3"/>}
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1 w-full md:w-auto">
+            <button onClick={toggleRecording} className={cn("px-4 py-2.5 rounded-xl text-[10px] font-black flex items-center gap-2 shadow-sm transition-colors whitespace-nowrap", isRecording ? "bg-rose-500 text-white animate-pulse" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50")} title="Dictar factura (Vosk Local)">
+               {isRecording ? <Square className="w-3.5 h-3.5"/> : <Mic className="w-3.5 h-3.5"/>} {isRecording ? "DICTANDO..." : "DICTAR"}
             </button>
             <input type="file" ref={fileInputRef} className="hidden" accept="application/pdf, image/*" onChange={(e) => { if (e.target.files && e.target.files[0]) { processLocalFile(e.target.files[0]); e.target.value = ''; } }} />
-            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isSyncing} className="bg-indigo-50 border border-indigo-100 text-indigo-600 px-4 py-2 rounded-xl text-[10px] font-black hover:bg-indigo-100 transition flex items-center gap-2" title="Sube PDF o Foto"><UploadCloud className="w-4 h-4" /> <span className="hidden md:inline">SUBIR ARCHIVO</span></button>
-            <button type="button" onClick={() => setIsExportModalOpen(true)} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-[10px] font-black hover:bg-emerald-700 transition flex items-center gap-2 shadow-sm"><Download className="w-4 h-4" /></button>
-            <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-full border border-slate-200">
-              <button type="button" onClick={() => setMode('proveedor')} className={cn("px-4 py-1.5 rounded-full text-[10px] font-black uppercase transition-all", mode === 'proveedor' ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-slate-600")}>Prov</button>
-              <button type="button" onClick={() => setMode('socio')} className={cn("px-4 py-1.5 rounded-full text-[10px] font-black uppercase transition-all", mode === 'socio' ? "bg-indigo-600 text-white shadow-md" : "text-slate-400 hover:text-slate-600")}>Socios</button>
+            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isSyncing} className="bg-indigo-50 border border-indigo-100 text-indigo-600 px-5 py-2.5 rounded-xl text-[10px] font-black hover:bg-indigo-100 transition flex items-center gap-2 whitespace-nowrap" title="Sube PDF o Foto"><UploadCloud className="w-4 h-4" /> SUBIR PDF</button>
+            <button type="button" onClick={() => setIsExportModalOpen(true)} className="bg-emerald-600 text-white px-4 py-2.5 rounded-xl text-[10px] font-black hover:bg-emerald-700 transition flex items-center gap-2 shadow-sm"><Download className="w-4 h-4" /></button>
+            <div className="flex items-center gap-1 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
+              <button type="button" onClick={() => setMode('proveedor')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all", mode === 'proveedor' ? "bg-white text-slate-800 shadow-sm" : "text-slate-400 hover:text-slate-600")}>Proveedores</button>
+              <button type="button" onClick={() => setMode('socio')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all", mode === 'socio' ? "bg-white text-slate-800 shadow-sm" : "text-slate-400 hover:text-slate-600")}>Liquidaciones</button>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-2xl mb-6">
-          <button type="button" onClick={() => setActiveTab('pend')} className={cn("flex-1 py-3 rounded-xl font-black text-xs transition", activeTab === 'pend' ? "bg-white shadow text-indigo-600" : "text-slate-400 hover:bg-slate-200")}>📦 ALBARANES SUELTOS</button>
-          <button type="button" onClick={() => setActiveTab('hist')} className={cn("flex-1 py-3 rounded-xl font-black text-xs transition", activeTab === 'hist' ? "bg-white shadow text-indigo-600" : "text-slate-400 hover:bg-slate-200")}>💰 FACTURAS CERRADAS</button>
+        <div className="flex items-center gap-2 p-1.5 bg-slate-100 rounded-[2rem] mb-6">
+          <button type="button" onClick={() => setActiveTab('pend')} className={cn("flex-1 py-3.5 rounded-2xl font-black text-xs transition", activeTab === 'pend' ? "bg-white shadow text-indigo-600" : "text-slate-400 hover:bg-slate-200")}>📦 ALBARANES SIN CERRAR</button>
+          <button type="button" onClick={() => setActiveTab('hist')} className={cn("flex-1 py-3.5 rounded-2xl font-black text-xs transition", activeTab === 'hist' ? "bg-white shadow text-indigo-600" : "text-slate-400 hover:bg-slate-200")}>💰 FACTURAS CONTABILIZADAS</button>
         </div>
 
         <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-6">
-          <div className="flex items-center gap-3 bg-white border px-3 py-1 rounded-2xl shadow-sm w-full md:w-auto justify-center">
-            <button type="button" onClick={() => setYear(year - 1)} className="text-indigo-600 font-bold p-1 hover:scale-110 transition"><ChevronLeft className="w-4 h-4" /></button>
-            <span className="text-sm font-black text-slate-700 w-10 text-center">{year}</span>
-            <button type="button" onClick={() => setYear(year + 1)} className="text-indigo-600 font-bold p-1 hover:scale-110 transition"><ChevronRight className="w-4 h-4" /></button>
+          <div className="flex items-center gap-4 bg-white border border-slate-200 px-4 py-2 rounded-2xl shadow-sm w-full md:w-auto justify-center">
+            <button type="button" onClick={() => setYear(year - 1)} className="text-indigo-600 hover:bg-indigo-50 p-1.5 rounded-lg transition"><ChevronLeft className="w-5 h-5" /></button>
+            <span className="text-base font-black text-slate-800 w-12 text-center">{year}</span>
+            <button type="button" onClick={() => setYear(year + 1)} className="text-indigo-600 hover:bg-indigo-50 p-1.5 rounded-lg transition"><ChevronRight className="w-5 h-5" /></button>
           </div>
           <div className="relative w-full md:w-96 flex gap-2">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input type="text" value={searchQ} onChange={(e) => setSearchQ(e.target.value)} placeholder="Buscar nombre o ref..." className="w-full p-2 pl-9 pr-4 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:border-indigo-400 transition" />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input type="text" value={searchQ} onChange={(e) => setSearchQ(e.target.value)} placeholder="Buscar nombre o referencia..." className="w-full py-3 pl-11 pr-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 outline-none focus:border-indigo-400 focus:bg-white transition" />
             </div>
           </div>
         </div>
@@ -495,7 +538,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
               { id: 'paid', label: '✔️ Pagadas Efectivo', color: 'text-emerald-600' },
               { id: 'reconciled', label: '🔗 Pagadas Banco', color: 'text-blue-600' }
             ].map(chip => (
-              <button type="button" key={chip.id} onClick={() => setFilterStatus(chip.id as any)} className={cn("px-3 py-1 rounded-full text-[10px] font-bold border transition-all", filterStatus === chip.id ? "bg-indigo-600 text-white border-indigo-600" : cn("bg-white border-slate-200 hover:bg-slate-50", chip.color))}>{chip.label}</button>
+              <button type="button" key={chip.id} onClick={() => setFilterStatus(chip.id as any)} className={cn("px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-wider border transition-all", filterStatus === chip.id ? "bg-slate-800 text-white border-slate-800 shadow-md" : cn("bg-white border-slate-200 hover:bg-slate-50", chip.color))}>{chip.label}</button>
             ))}
           </div>
         )}
@@ -505,22 +548,24 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
             pendingGroups.length > 0 ? (
               pendingGroups.map(([mk, dataGroup]) => (
                 <div key={mk} className="mb-8 animate-fade-in">
-                  <h3 className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-3 px-2 border-b border-indigo-100 pb-2">{dataGroup.name}</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 pl-2 border-b border-slate-100 pb-2">{dataGroup.name}</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                     {Object.values(dataGroup.groups).map((g: any) => {
                       const unitConfig = BUSINESS_UNITS.find(u => u.id === g.unitId);
                       return (
-                        <div key={g.label + g.unitId} onClick={() => handleOpenGroup(g.label, g.ids, g.unitId)} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-200 hover:border-indigo-400 hover:shadow-md transition cursor-pointer group">
-                          <div>
-                            <p className="font-black text-slate-800 group-hover:text-indigo-600 transition flex items-center gap-2">
+                        <div key={g.label + g.unitId} onClick={() => { setSelectedGroup({ label: g.label, ids: g.ids, unitId: g.unitId }); setModalForm({ num: '', date: DateUtil.today(), selectedAlbs: [...g.ids], unitId: g.unitId }); }} className="flex justify-between items-center p-5 bg-white rounded-3xl border border-slate-200 hover:border-indigo-400 hover:shadow-lg transition cursor-pointer group">
+                          <div className="min-w-0">
+                            <p className="font-black text-slate-800 group-hover:text-indigo-600 transition flex items-center gap-2 truncate">
                               {g.label}
-                              {unitConfig && <span className={cn("text-[8px] px-2 py-0.5 rounded-full uppercase tracking-wider", unitConfig.bg, unitConfig.color)}>{unitConfig.name.split(' ')[0]}</span>}
                             </p>
-                            <span className="inline-block mt-1 px-2 py-0.5 bg-slate-200 text-slate-600 rounded text-[9px] font-bold uppercase">{g.count} Albaranes</span>
+                            <div className="flex items-center gap-2 mt-1.5">
+                              {unitConfig && <span className={cn("text-[8px] px-2 py-0.5 rounded-md uppercase tracking-wider font-black", unitConfig.bg, unitConfig.color)}>{unitConfig.name.split(' ')[0]}</span>}
+                              <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-md text-[9px] font-bold">{g.count} Albaranes</span>
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <p className="font-black text-slate-900 text-lg">{Num.fmt(g.t)}</p>
-                            <p className="text-[9px] font-bold text-indigo-400 group-hover:underline mt-1 flex items-center gap-1 justify-end">CERRAR MANUAL <ArrowRight className="w-2 h-2" /></p>
+                          <div className="text-right shrink-0 ml-4">
+                            <p className="font-black text-slate-900 text-xl">{Num.fmt(g.t)}</p>
+                            <p className="text-[9px] font-black text-indigo-400 group-hover:underline mt-1 flex items-center justify-end gap-1">AGRUPAR <ArrowRight className="w-3 h-3" /></p>
                           </div>
                         </div>
                       )
@@ -529,13 +574,14 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                 </div>
               ))
             ) : (
-              <div className="py-20 flex flex-col items-center justify-center opacity-50 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
-                <Package className="w-12 h-12 mb-3 text-slate-300" />
-                <p className="text-slate-500 font-bold text-sm">No hay albaranes sueltos.</p>
+              <div className="py-24 flex flex-col items-center justify-center opacity-60 bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200">
+                <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm mb-4"><Package className="w-8 h-8 text-slate-300" /></div>
+                <p className="text-slate-500 font-black text-sm uppercase tracking-widest">No hay albaranes sueltos</p>
+                <p className="text-xs text-slate-400 mt-1">Todo está cerrado y facturado para estos filtros.</p>
               </div>
             )
           ) : (
-            // 🚀 COMPONENTE AISLADO RÁPIDO
+            // 🚀 COMPONENTE AISLADO DE HISTORIAL
             <InvoicesList 
               facturas={facturasSeguras} 
               searchQ={searchQ} 
@@ -554,7 +600,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         </div>
       </section>
 
-      {/* MODALES */}
+      {/* MODALES MANUALES */}
       <AnimatePresence>
         {isExportModalOpen && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex justify-center items-center p-4 bg-slate-900/80 backdrop-blur-sm">
@@ -578,55 +624,56 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
       <AnimatePresence>
         {selectedGroup && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex justify-center items-center p-4 bg-slate-900/80 backdrop-blur-sm">
-            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} className="bg-white w-full max-w-2xl rounded-[2.5rem] p-8 shadow-2xl relative z-10 flex flex-col max-h-[90vh]">
-              <button onClick={() => setSelectedGroup(null)} className="absolute top-6 right-6 text-slate-300 hover:text-slate-500 text-2xl transition">✕</button>
-              <div className="border-b border-slate-100 pb-4 mb-4 flex justify-between items-end">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[200] flex justify-center items-center p-4 bg-slate-900/80 backdrop-blur-sm">
+            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} className="bg-white w-full max-w-2xl rounded-[3rem] p-6 md:p-8 shadow-2xl relative z-10 flex flex-col max-h-[90vh]">
+              <button onClick={() => setSelectedGroup(null)} className="absolute top-6 right-6 p-2 bg-slate-100 rounded-full text-slate-500 hover:bg-rose-100 hover:text-rose-500 transition"><X className="w-5 h-5"/></button>
+              <div className="border-b border-slate-100 pb-6 mb-6 flex flex-col md:flex-row justify-between md:items-end gap-4 pr-12">
                 <div>
-                  <h3 className="text-2xl font-black text-slate-800">{selectedGroup.label}</h3>
-                  <div className="flex items-center gap-2 mt-1"><p className="text-xs font-bold text-indigo-500 uppercase tracking-widest">Cierre de mes manual</p></div>
+                  <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-1">Cierre Manual de Mes</p>
+                  <h3 className="text-2xl md:text-3xl font-black text-slate-800 leading-none">{selectedGroup.label}</h3>
                 </div>
-                <button onClick={handleToggleAllAlbs} className="flex items-center gap-1 text-[10px] font-black uppercase text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition"><CheckSquare className="w-3 h-3" />{modalForm.selectedAlbs.length === selectedGroup.ids.length ? 'Desmarcar Todos' : 'Marcar Todos'}</button>
+                <button onClick={() => { const allIds = selectedGroup.ids; setModalForm(p => ({...p, selectedAlbs: p.selectedAlbs.length === allIds.length ? [] : allIds })) }} className="flex items-center gap-2 text-[10px] font-black uppercase text-slate-600 bg-slate-100 px-4 py-2 rounded-xl hover:bg-slate-200 transition shrink-0"><CheckSquare className="w-4 h-4" />{modalForm.selectedAlbs.length === selectedGroup.ids.length ? 'Desmarcar Todos' : 'Marcar Todos'}</button>
               </div>
-              <div className="space-y-2 flex-1 overflow-y-auto pr-2 custom-scrollbar bg-slate-50 rounded-2xl p-4 border border-slate-100">
+              <div className="space-y-2 flex-1 overflow-y-auto pr-2 custom-scrollbar bg-slate-50/50 rounded-3xl p-4 border border-slate-100">
                 {(albaranesSeguros).filter(a => selectedGroup.ids.includes(a.id)).map(a => (
-                  <label key={a.id} className="flex justify-between items-center py-3 border-b border-slate-200 last:border-0 cursor-pointer hover:bg-white px-3 rounded-xl transition shadow-sm hover:shadow">
+                  <label key={a.id} className={cn("flex justify-between items-center p-4 rounded-2xl cursor-pointer transition-all border", modalForm.selectedAlbs.includes(a.id) ? "bg-white border-indigo-200 shadow-md" : "bg-transparent border-transparent hover:bg-white")}>
                     <div className="flex items-center gap-4">
-                      <div className="relative flex items-center justify-center"><input type="checkbox" checked={modalForm.selectedAlbs.includes(a.id)} onChange={(e) => { const newSelected = e.target.checked ? [...modalForm.selectedAlbs, a.id] : modalForm.selectedAlbs.filter(id => id !== a.id); setModalForm({ ...modalForm, selectedAlbs: newSelected }); }} className="w-5 h-5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 cursor-pointer" /></div>
-                      <div><p className="font-bold text-slate-700 text-sm">{a.date}</p><p className="text-[10px] font-mono text-slate-400 mt-0.5">Ref: {a.num || 'S/N'}</p></div>
+                      <div className="relative flex items-center justify-center"><input type="checkbox" checked={modalForm.selectedAlbs.includes(a.id)} onChange={(e) => { const newSelected = e.target.checked ? [...modalForm.selectedAlbs, a.id] : modalForm.selectedAlbs.filter(id => id !== a.id); setModalForm({ ...modalForm, selectedAlbs: newSelected }); }} className="w-5 h-5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 cursor-pointer accent-indigo-600" /></div>
+                      <div><p className="font-bold text-slate-800 text-sm">{a.date}</p><p className="text-[10px] font-mono text-slate-400 mt-0.5">Ref: {a.num || 'S/N'}</p></div>
                     </div>
-                    <p className="font-black text-slate-900">{Num.fmt(a.total)}</p>
+                    <p className="font-black text-slate-900 text-lg">{Num.fmt(a.total)}</p>
                   </label>
                 ))}
               </div>
               <div className="mt-6 space-y-4">
-                <div className="flex items-center justify-between bg-slate-900 p-5 rounded-2xl text-white shadow-lg">
-                  <div><span className="text-xs font-black uppercase tracking-widest text-slate-400 block mb-1">Total a Facturar</span><span className="text-[10px] text-indigo-400 font-bold">{modalForm.selectedAlbs.length} albaranes seleccionados</span></div>
-                  <span className="text-4xl font-black text-emerald-400 tracking-tighter">{Num.fmt(modalForm.selectedAlbs.reduce((acc, id) => { const alb = albaranesSeguros.find(a => a.id === id); return acc + (Num.parse(alb?.total) || 0); }, 0))}</span>
+                <div className="flex items-center justify-between bg-slate-900 p-6 rounded-[2rem] text-white shadow-xl">
+                  <div><span className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1">Total de la Factura</span><span className="text-xs text-indigo-400 font-bold bg-indigo-500/20 px-2 py-1 rounded-lg">{modalForm.selectedAlbs.length} albaranes</span></div>
+                  <span className="text-4xl md:text-5xl font-black text-emerald-400 tracking-tighter">{Num.fmt(modalForm.selectedAlbs.reduce((acc, id) => { const alb = albaranesSeguros.find(a => a.id === id); return acc + (Num.parse(alb?.total) || 0); }, 0))}</span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {mode === 'socio' ? (
                     <div>
-                      <label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Seleccionar Socio</label>
-                      <select value={modalForm.num.startsWith('SOCIO-') ? modalForm.num.split('-')[1] : ''} onChange={(e) => { const socio = e.target.value; setModalForm({ ...modalForm, num: `LIQ-${socio}-${modalForm.date.replace(/-/g,'')}` }); setSelectedGroup(prev => prev ? { ...prev, label: socio } : null); }} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:border-indigo-500 focus:bg-white transition">
+                      <label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Responsable del Pago (Socio)</label>
+                      <select value={modalForm.num.startsWith('SOCIO-') ? modalForm.num.split('-')[1] : ''} onChange={(e) => { const socio = e.target.value; setModalForm({ ...modalForm, num: `LIQ-${socio}-${modalForm.date.replace(/-/g,'')}` }); setSelectedGroup(prev => prev ? { ...prev, label: socio } : null); }} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:ring-2 ring-indigo-500/20 transition cursor-pointer">
                         <option value="">-- Selecciona Socio --</option>{SOCIOS_REALES.map(p => <option key={p} value={p}>{p}</option>)}
                       </select>
                     </div>
                   ) : (
                     <div>
-                      <label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Nº Factura Oficial</label>
-                      <input type="text" value={modalForm.num} onChange={(e) => setModalForm({ ...modalForm, num: e.target.value })} placeholder="Ej: F-2026/012" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:border-indigo-500 focus:bg-white transition" />
+                      <label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Nº Factura Oficial del Proveedor</label>
+                      <input type="text" value={modalForm.num} onChange={(e) => setModalForm({ ...modalForm, num: e.target.value })} placeholder="Ej: F-2026/012" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:ring-2 ring-indigo-500/20 transition" />
                     </div>
                   )}
-                  <div><label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Fecha de Emisión</label><input type="date" value={modalForm.date} onChange={(e) => setModalForm({ ...modalForm, date: e.target.value })} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:border-indigo-500 focus:bg-white transition cursor-pointer" /></div>
+                  <div><label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Fecha de Facturación</label><input type="date" value={modalForm.date} onChange={(e) => setModalForm({ ...modalForm, date: e.target.value })} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:ring-2 ring-indigo-500/20 transition cursor-pointer" /></div>
                 </div>
-                <button onClick={handleConfirmManualInvoice} disabled={modalForm.selectedAlbs.length === 0} className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black text-sm shadow-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition">GUARDAR FACTURA OFICIAL</button>
+                <button onClick={handleConfirmManualInvoice} disabled={modalForm.selectedAlbs.length === 0} className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black text-sm shadow-xl shadow-indigo-200 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition flex justify-center items-center gap-2">GUARDAR Y CERRAR ALBARANES <CheckCircle2 className="w-5 h-5"/></button>
               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
+      {/* MODAL DE DETALLE DE FACTURA */}
       {selectedInvoice && (
         <InvoiceDetailModal 
           factura={selectedInvoice} 
