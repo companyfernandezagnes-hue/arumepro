@@ -1,12 +1,12 @@
 import React, { useMemo } from 'react';
 import { FileText, CheckCircle2, Clock, Trash2, Link as LinkIcon, AlertCircle } from 'lucide-react';
-import { Factura } from '../types';
+// 🛡️ CORRECCIÓN: Importamos el tipo extendido desde InvoicesView para asegurar compatibilidad
+import { FacturaExtended, BusinessUnit } from './InvoicesView'; 
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
-import { BusinessUnit } from '../views/InvoicesView';
 
 interface InvoicesListProps {
-  facturas: Factura[];
+  facturas: FacturaExtended[];
   searchQ: string;
   selectedUnit: BusinessUnit | 'ALL';
   mode: 'proveedor' | 'socio';
@@ -15,7 +15,7 @@ interface InvoicesListProps {
   businessUnits: any[];
   sociosReales: string[];
   superNorm: (s: string | undefined | null) => string;
-  onOpenDetail: (factura: Factura) => void;
+  onOpenDetail: (factura: FacturaExtended) => void;
   onTogglePago: (id: string) => void;
   onDelete: (id: string) => void;
 }
@@ -32,17 +32,24 @@ export const InvoicesList = ({
         if (!(f.date || '').startsWith(year.toString())) return false;
         if (selectedUnit !== 'ALL' && f.unidad_negocio !== selectedUnit) return false;
         
-        // 🚀 FILTRO ERP ESTRICTO: Determinar tipo real
-        // Si es una factura antigua sin tipo, inferimos usando la lógica antigua como salvavidas
-        const esSocioAntiguo = f.cliente && f.cliente !== 'Arume' ? true : false;
-        const invoiceType = f.tipo || (esSocioAntiguo ? 'socio' : 'proveedor');
+        // 🚀 FILTRO ERP ESTRICTO: Lógica para separar Proveedores de Socios
+        const isCompra = f.tipo === 'compra';
+        const isVenta = f.tipo === 'venta';
+        const esSocioPorNombre = sociosReales.some(socio => 
+          superNorm(f.cliente).includes(superNorm(socio)) || superNorm(f.prov).includes(superNorm(socio))
+        );
 
         // 1. JAMÁS mostrar cajas o bancos en la lista de facturas
-        if (invoiceType === 'caja' || invoiceType === 'banco') return false;
+        if (f.tipo === 'caja' || (f as any).tipo === 'banco') return false;
 
         // 2. Filtrar por la pestaña activa (Proveedores vs Socios)
-        if (mode === 'proveedor' && invoiceType !== 'proveedor') return false;
-        if (mode === 'socio' && invoiceType !== 'socio') return false;
+        if (mode === 'proveedor') {
+          // Un proveedor es una 'compra' que NO es de un socio
+          if (!isCompra || esSocioPorNombre) return false; 
+        } else if (mode === 'socio') {
+          // Un socio es una factura donde el cliente o proveedor está en la lista SOCIOS_REALES
+          if (!esSocioPorNombre) return false;
+        }
 
         // 3. Filtrar por estado de pago
         if (filterStatus === 'pending' && f.paid) return false;
@@ -62,7 +69,7 @@ export const InvoicesList = ({
       console.error("Error en historyList:", e);
       return [];
     }
-  }, [facturas, year, filterStatus, searchQ, selectedUnit, mode, superNorm]); // Ya no dependemos de la lista hardcodeada de sociosReales para filtrar
+  }, [facturas, year, filterStatus, searchQ, selectedUnit, mode, superNorm, sociosReales]); 
 
   if (historyList.length === 0) {
     return (
