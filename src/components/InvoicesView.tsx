@@ -11,13 +11,12 @@ import { proxyFetch } from '../services/api';
 import { NotificationService } from '../services/notifications';
 import { GoogleGenAI } from "@google/genai";
 
-// 🚀 IMPORTAMOS LOS COMPONENTES AISLADOS
+// 🚀 IMPORTAMOS COMPONENTES HIJOS
 import { InvoicesList } from './InvoicesList';
 import { InvoiceDetailModal } from './InvoiceDetailModal';
 
 export type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
 
-// 🛡️ TIPADO EXTENDIDO
 export type FacturaExtended = Factura & {
   status?: 'draft' | 'approved' | 'paid';
   file_base64?: string;
@@ -43,7 +42,7 @@ interface InvoicesViewProps {
   onSave: (newData: AppData) => Promise<void>;
 }
 
-// 🛡️ UTILIDADES SEGURAS (Recomendación Copilot)
+// 🛡️ UTILIDADES
 export const superNorm = (s: string | undefined | null) => {
   if (!s || typeof s !== 'string') return 'desconocido';
   try {
@@ -57,6 +56,12 @@ const safeJSON = (str: string) => {
     return match ? JSON.parse(match[0]) : {};
   } catch { return {}; }
 };
+
+// 🎨 DESIGN TOKENS (Copilot Suggestion)
+const cardBase = "bg-white rounded-[2rem] border border-slate-100 shadow-sm";
+const chipBase = "px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest";
+const hTitle = "text-2xl md:text-3xl font-black text-slate-800 tracking-tight";
+const tLabel = "text-[10px] font-black text-slate-400 uppercase tracking-widest";
 
 export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const safeData = data || {};
@@ -72,47 +77,36 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'paid' | 'reconciled'>('all');
   const [selectedUnit, setSelectedUnit] = useState<BusinessUnit | 'ALL'>('ALL');
   
-  const [isSyncing, setIsSyncing] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportQuarter, setExportQuarter] = useState(Math.floor(new Date().getMonth() / 3) + 1);
+  const [isSyncing, setIsSyncing] = useState(false);
   
   const [isDragging, setIsDragging] = useState(false);
-  const dragCounter = useRef(0); // 🛡️ Contador para evitar parpadeos de D&D
+  const dragCounter = useRef(0);
 
   const [selectedGroup, setSelectedGroup] = useState<{ label: string; ids: string[], unitId: BusinessUnit } | null>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<FacturaExtended | null>(null);
   const [modalForm, setModalForm] = useState({ num: '', date: DateUtil.today(), selectedAlbs: [] as string[], unitId: 'REST' as BusinessUnit });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // 🎙️ ESTADOS VOSK
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
   /* =======================================================
-   * 🛡️ DRAG & DROP BLINDADO (Solución Fuga de Memoria y Parpadeos)
+   * 🛡️ DRAG & DROP BLINDADO (Sin bloquear el DOM entero)
    * ======================================================= */
   useEffect(() => {
     const blockDefault = (e: DragEvent) => { 
-      // Solo previene el comportamiento por defecto si NO estamos arrastrando sobre nuestra zona habilitada
       if (!(e.target as HTMLElement)?.closest(".dropzone-area")) { 
-        e.preventDefault(); 
-        e.stopPropagation(); 
+        e.preventDefault(); e.stopPropagation(); 
       } 
     };
-
-    const cancelDrag = () => { 
-      dragCounter.current = 0; 
-      setIsDragging(false); 
-    };
+    const cancelDrag = () => { dragCounter.current = 0; setIsDragging(false); };
     
     window.addEventListener('dragover', blockDefault); 
     window.addEventListener('drop', blockDefault); 
-    window.addEventListener('mouseout', (e) => { 
-      // Si el ratón sale de la ventana del navegador, cancelamos el drag
-      if (!e.relatedTarget && !e.toElement) cancelDrag(); 
-    });
+    window.addEventListener('mouseout', (e) => { if (!e.relatedTarget && !e.toElement) cancelDrag(); });
     
     return () => { 
       window.removeEventListener('dragover', blockDefault); 
@@ -121,38 +115,18 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     };
   }, []);
 
-  const handleDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => { 
-    e.preventDefault(); 
-    dragCounter.current++; 
-    if (!isDragging) setIsDragging(true); 
-  }, [isDragging]);
-
-  const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => { 
-    e.preventDefault(); 
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => { 
-    e.preventDefault(); 
-    dragCounter.current--; 
-    if (dragCounter.current <= 0) { 
-      setIsDragging(false); 
-      dragCounter.current = 0; 
-    } 
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => { 
-    e.preventDefault(); 
-    dragCounter.current = 0; 
-    setIsDragging(false); 
+  const handleDragEnter = useCallback((e: React.DragEvent) => { e.preventDefault(); dragCounter.current++; if (!isDragging) setIsDragging(true); }, [isDragging]);
+  const handleDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); dragCounter.current--; if (dragCounter.current <= 0) { setIsDragging(false); dragCounter.current = 0; } }, []);
+  const handleDrop = useCallback((e: React.DragEvent) => { 
+    e.preventDefault(); dragCounter.current = 0; setIsDragging(false); 
+    if (!e.dataTransfer?.files?.length) return;
+    if (e.dataTransfer.files.length > 1) return alert("⚠️ Solo sube 1 documento por importación.");
     
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) { 
-      const file = e.dataTransfer.files[0]; 
-      if (file.type === 'application/pdf' || file.type.startsWith('image/')) {
-        processLocalFile(file); 
-      } else {
-        alert("⚠️ Formato no soportado. Solo se permiten archivos PDF o imágenes (JPG, PNG)."); 
-      }
-    } 
+    const file = e.dataTransfer.files[0]; 
+    if (!/^(application\/pdf|image\/)/.test(file.type)) return alert("⚠️ Solo PDF o imágenes.");
+    if (file.size > 15 * 1024 * 1024) return alert("⚠️ Archivo >15MB. Comprime antes de subir.");
+    
+    processLocalFile(file); 
   }, []);
 
   /* =======================================================
@@ -190,10 +164,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       if (!apiKey) throw new Error("NO_API_KEY");
 
       const fileBase64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader(); 
-        reader.onload = () => resolve(reader.result as string); 
-        reader.onerror = reject; 
-        reader.readAsDataURL(file);
+        const reader = new FileReader(); reader.onload = () => resolve(reader.result as string); reader.onerror = reject; reader.readAsDataURL(file);
       });
       const soloBase64 = fileBase64.split(',')[1];
 
@@ -201,30 +172,22 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       const prompt = `Analiza esta factura/albarán. Devuelve SOLO un JSON estricto: { "proveedor": "Nombre de la empresa", "num": "Número", "fecha": "YYYY-MM-DD", "total": 150.50, "base": 124.38, "iva": 26.12 }`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: soloBase64, mimeType: file.type } }] }],
+        model: "gemini-2.5-flash", contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: soloBase64, mimeType: file.type } }] }],
         config: { responseMimeType: "application/json", temperature: 0.1 }
       });
 
       const rawJson = safeJSON(response.text || "");
-
       const nuevaFacturaIA: FacturaExtended = {
-        id: 'draft-local-' + Date.now(),
-        tipo: 'compra', // 🛡️ Tipado estricto
-        num: rawJson.num || 'S/N',
-        date: rawJson.fecha || DateUtil.today(),
-        prov: rawJson.proveedor || 'Proveedor Desconocido',
-        total: Num.parse(rawJson.total || 0),
-        base: Num.parse(rawJson.base || 0),
-        tax: Num.parse(rawJson.iva || 0),
+        id: 'draft-local-' + Date.now(), tipo: 'compra', num: rawJson.num || 'S/N', date: rawJson.fecha || DateUtil.today(), prov: rawJson.proveedor || 'Proveedor Desconocido',
+        total: Num.parse(rawJson.total || 0), base: Num.parse(rawJson.base || 0), tax: Num.parse(rawJson.iva || 0),
         paid: false, reconciled: false, source: 'email-ia', status: 'draft', unidad_negocio: 'REST', file_base64: fileBase64 
       };
 
       await onSave({ ...safeData, facturas: [nuevaFacturaIA, ...facturasSeguras] });
-      alert("✅ Factura procesada por IA. Búscala en los borradores.");
+      alert("✅ Factura procesada por IA. Búscala en el panel lateral de Auditoría.");
 
     } catch (e) {
-      console.warn("⚠️ Gemini falló. Activando Fallback Local (OCR/PDF)...");
+      console.warn("⚠️ Gemini falló. Activando Fallback Local...");
       try {
         let extractedText = ""; let possibleTotal = 0;
         const fileBase64 = await new Promise<string>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result as string); reader.readAsDataURL(file); });
@@ -243,27 +206,22 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         if (matches) { const nums = matches.map(m => parseFloat(m.replace(',', '.'))); const validNums = nums.filter(n => n < 50000); possibleTotal = validNums.length > 0 ? Math.max(...validNums) : 0; }
         
         const fallbackFactura: FacturaExtended = {
-          id: 'draft-fallback-' + Date.now(), tipo: 'compra', num: 'REVISAR MANUAL', date: DateUtil.today(),
-          prov: file.type.includes('image') ? '📷 OCR Emergencia' : `📄 PDF Rescatado`,
+          id: 'draft-fallback-' + Date.now(), tipo: 'compra', num: 'REVISAR MANUAL', date: DateUtil.today(), prov: file.type.includes('image') ? '📷 OCR Emergencia' : `📄 PDF Rescatado`,
           total: possibleTotal || 0, base: possibleTotal ? Num.round2(possibleTotal / 1.10) : 0, tax: possibleTotal ? Num.round2(possibleTotal - (possibleTotal / 1.10)) : 0,
           paid: false, reconciled: false, source: 'email-ia', status: 'draft', unidad_negocio: 'REST', file_base64: fileBase64 
         };
 
         await onSave({ ...safeData, facturas: [fallbackFactura, ...facturasSeguras] });
-        alert(`⚠️ Rescate completado con visor manual (El límite de IA se agotó).`);
+        alert(`⚠️ Leído con sistema de rescate offline. Revisa los totales manualmente.`);
       } catch (fallbackErr) { alert("⚠️ Archivo corrupto o ilegible."); }
     } finally { setIsSyncing(false); }
   };
 
   /* =======================================================
-   * 🎙️ INTEGRACIÓN VOSK LOCAL PARA FACTURAS
+   * 🎙️ VOSK LOCAL
    * ======================================================= */
   const toggleRecording = async () => {
-    if (isRecording) {
-      mediaRecorderRef.current?.stop();
-      setIsRecording(false);
-      return;
-    }
+    if (isRecording) { mediaRecorderRef.current?.stop(); setIsRecording(false); return; }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mr = new MediaRecorder(stream, { mimeType: 'audio/webm' });
@@ -275,18 +233,16 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         await processAudioWithVosk(audioBlob);
       };
       mr.start(); setIsRecording(true);
-      setTimeout(() => { if (mr.state === 'recording') toggleRecording(); }, 30000); // 30s max
+      setTimeout(() => { if (mr.state === 'recording') toggleRecording(); }, 30000); 
     } catch (err) { alert("⚠️ Necesitas dar permiso al micrófono."); }
   };
 
   const processAudioWithVosk = async (blob: Blob) => {
     setIsSyncing(true);
     try {
-      const formData = new FormData();
-      formData.append("file", blob, "factura.webm");
+      const formData = new FormData(); formData.append("file", blob, "factura.webm");
       const voskRes = await fetch("http://localhost:2700/transcribe", { method: "POST", body: formData });
       if (!voskRes.ok) throw new Error("Vosk no responde");
-      
       const voskData = await voskRes.json();
       const txt = voskData.text || "";
       
@@ -298,7 +254,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         prov: `🎙️ Voz: ${txt.substring(0, 20)}...`, total: possibleTotal, base: Num.round2(possibleTotal / 1.10), tax: Num.round2(possibleTotal - (possibleTotal / 1.10)),
         paid: false, reconciled: false, source: 'email-ia', status: 'draft', unidad_negocio: 'REST'
       };
-
       await onSave({ ...safeData, facturas: [nuevaFacturaVoz, ...facturasSeguras] });
       alert("✅ Factura dictada por voz guardada en borradores.");
     } catch (e) { alert("⚠️ Error conectando con servidor VOSK local."); } 
@@ -306,7 +261,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   };
 
   /* =======================================================
-   * ⚙️ LÓGICA DE NEGOCIO (Grupos, Pagos, Borrados)
+   * ⚙️ LÓGICA DE NEGOCIO (Grupos, Pagos)
    * ======================================================= */
   const handleConfirmAuditoriaIA = async (draftId: string) => {
     const newData = { ...safeData, facturas: [...facturasSeguras], albaranes: [...albaranesSeguros] };
@@ -328,7 +283,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   };
 
   const handleDiscardDraftIA = async (id: string) => {
-    if (!window.confirm("¿Eliminar factura leída por IA?")) return;
+    if (!window.confirm("¿Eliminar este borrador permanentemente?")) return;
     await onSave({ ...safeData, facturas: facturasSeguras.filter(f => f.id !== id) });
   };
 
@@ -344,7 +299,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     const ws = XLSX.utils.json_to_sheet(rows); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Facturas"); XLSX.writeFile(wb, `Gestoria_Arume_${y}_Q${q}_${selectedUnit}.xlsx`); setIsExportModalOpen(false);
   };
 
-  // 📦 Agrupación manual de albaranes optimizada
   const pendingGroups = useMemo(() => {
     const byMonth: Record<string, { name: string; groups: Record<string, any> }> = {};
     albaranesSeguros.forEach(a => {
@@ -407,198 +361,182 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     await onSave(newData);
   };
 
+  // RENDERIZADOS EXTRAÍDOS PARA LIMPIEZA VISUAL
+  const renderPendingGroups = () => (
+    pendingGroups.length > 0 ? (
+      pendingGroups.map(([mk, dataGroup]) => (
+        <div key={mk} className="mb-6 animate-fade-in">
+          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 px-2 border-b border-slate-100 pb-2">{dataGroup.name}</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {Object.values(dataGroup.groups).map((g: any) => {
+              const unitConfig = BUSINESS_UNITS.find(u => u.id === g.unitId);
+              return (
+                <div key={g.label + g.unitId} onClick={() => { setSelectedGroup({ label: g.label, ids: g.ids, unitId: g.unitId }); setModalForm({ num: '', date: DateUtil.today(), selectedAlbs: [...g.ids], unitId: g.unitId }); }} className="flex justify-between items-center p-4 bg-white rounded-2xl border border-slate-200 hover:border-indigo-400 hover:shadow-md transition cursor-pointer group">
+                  <div className="min-w-0">
+                    <p className="font-black text-slate-800 group-hover:text-indigo-600 transition truncate">{g.label}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      {unitConfig && <span className={cn("text-[9px] px-2 py-0.5 rounded-md uppercase tracking-wider font-black", unitConfig.bg, unitConfig.color)}>{unitConfig.name.split(' ')[0]}</span>}
+                      <span className="text-slate-400 font-bold text-[10px]">{g.count} Albaranes</span>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0 ml-4">
+                    <p className="font-black text-slate-900 text-lg">{Num.fmt(g.t)}</p>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ))
+    ) : (
+      <div className="py-20 flex flex-col items-center justify-center opacity-60 bg-slate-50 rounded-[2rem] border-2 border-dashed border-slate-200">
+        <Package className="w-12 h-12 text-slate-300 mb-3" />
+        <p className="text-slate-500 font-black text-sm uppercase tracking-widest">No hay albaranes sueltos</p>
+      </div>
+    )
+  );
+
   return (
     <div 
-      className={cn("dropzone-area animate-fade-in space-y-6 pb-24 min-h-screen relative transition-colors duration-300", isDragging && "bg-indigo-50/50")}
-      onDragEnter={handleDragEnter} 
-      onDragOver={handleDragOver} 
-      onDragLeave={handleDragLeave} 
-      onDrop={handleDrop}
+      className="dropzone-area animate-fade-in space-y-6 pb-24 max-w-[1400px] mx-auto"
+      onDragEnter={handleDragEnter} onDragOver={(e) => e.preventDefault()} onDragLeave={handleDragLeave} onDrop={handleDrop}
     >
-      {/* OVERLAY DE DROP PROTEGIDO */}
+      {/* 🚀 OVERLAY DE DROP CALMADO Y SEGURO (Auditoría Copilot) */}
       <AnimatePresence>
         {isDragging && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[9999] bg-indigo-600/90 backdrop-blur-sm border-[16px] border-dashed border-white/40 flex flex-col items-center justify-center pointer-events-auto transition-opacity duration-300">
-            <div className="pointer-events-none flex flex-col items-center justify-center">
-              <FileDown className="w-32 h-32 text-white mb-6 animate-bounce" />
-              <h2 className="text-5xl font-black text-white tracking-tighter drop-shadow-lg">¡Suelta tu Factura aquí!</h2>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] pointer-events-none">
+            <div className="absolute inset-0 bg-indigo-600/10 backdrop-blur-sm" />
+            <div className="absolute inset-4 md:inset-8 border-4 border-dashed border-indigo-400 rounded-[3rem] flex items-center justify-center bg-indigo-50/50">
+              <div className="text-center bg-white p-8 rounded-3xl shadow-xl">
+                <FileDown className="w-16 h-16 text-indigo-500 mx-auto mb-4 animate-bounce" />
+                <p className="text-3xl font-black text-indigo-900">Suelta tu factura aquí</p>
+                <p className="text-sm text-indigo-500 font-bold mt-2 uppercase tracking-widest">Solo PDF o Imágenes</p>
+              </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {draftsIA.length > 0 && (
-          <motion.div key="ia-audit" initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="bg-slate-900 p-6 md:p-8 rounded-[2.5rem] shadow-2xl border border-slate-800 relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-purple-500 via-indigo-500 to-emerald-500"></div>
-            <h3 className="text-white text-lg font-black flex items-center gap-2 mb-6">
-              <Mail className="w-5 h-5 text-purple-400 animate-bounce" /> Inbox de Conciliación <span className="bg-purple-600 text-xs px-2.5 py-0.5 rounded-full">{draftsIA.length}</span>
-            </h3>
-            <div className="space-y-4">
-              {draftsIA.map(d => (
-                <div key={d.id} className={cn("bg-slate-800/50 p-5 rounded-3xl border transition-colors", d.cuadraPerfecto ? 'border-emerald-500/50' : 'border-amber-500/50')}>
-                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-                    <div className="flex-1">
-                      <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest mb-1">Lectura OCR del Documento</p>
-                      {d.prov.includes('Emergencia') || d.prov.includes('Voz') ? (
-                        <h4 className="text-amber-400 font-black text-xl flex items-center gap-2"><AlertCircle className="w-5 h-5" /> {d.prov}</h4>
-                      ) : (
-                        <h4 className="text-white font-black text-xl">{d.prov}</h4>
-                      )}
-                      <p className="text-slate-400 text-xs font-mono mt-1">Ref: {d.num} | Fecha: {d.date}</p>
-                      <p className="text-3xl font-black text-white mt-3">{Num.fmt(Math.abs(Num.parse(d.total)))}</p>
-                    </div>
-                    
-                    <div className="flex-1 bg-slate-900/80 p-5 rounded-2xl w-full border border-slate-700/50">
-                      <div className="flex justify-between items-center mb-3">
-                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Tus Albaranes del Mes ({d.candidatos.length})</span>
-                        <span className="text-sm font-black text-white">{Num.fmt(d.sumaAlbaranes)}</span>
-                      </div>
-                      {d.candidatos.length > 0 ? (
-                        <div className="space-y-1.5 max-h-32 overflow-y-auto custom-scrollbar pr-2">
-                          {d.candidatos.map((c: any) => (
-                            <div key={c.id} className="flex justify-between text-xs text-slate-400 border-b border-slate-800/50 pb-1.5">
-                              <span>📅 {c.date} - {c.num || 'S/N'}</span><span className="text-slate-200 font-bold">{Num.fmt(c.total)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-rose-400 text-xs font-bold italic py-3 flex items-center gap-2"><AlertCircle className="w-4 h-4"/> No hay albaranes pendientes este mes para este proveedor.</p>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <div className="mt-5 pt-5 border-t border-slate-700/50 flex flex-wrap gap-3 items-center justify-between">
-                    <div>
-                      {d.cuadraPerfecto ? <span className="bg-emerald-500/20 text-emerald-400 text-xs font-black px-4 py-1.5 rounded-lg border border-emerald-500/30">✅ CUADRA PERFECTO</span> : <span className="bg-amber-500/20 text-amber-400 text-xs font-black px-4 py-1.5 rounded-lg border border-amber-500/30">⚠️ DESCUADRE: {Num.fmt(d.diferencia)}</span>}
-                    </div>
-                    <div className="flex gap-2 w-full md:w-auto">
-                      <button type="button" onClick={() => handleConfirmAuditoriaIA(d.id)} className={cn("flex-1 md:flex-none text-white text-xs px-6 py-3 rounded-xl font-black shadow-lg transition active:scale-95", d.cuadraPerfecto ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-amber-600 hover:bg-amber-700')}>
-                        {d.cuadraPerfecto ? 'CERRAR Y VINCULAR' : 'IGNORAR DESCUADRE Y CERRAR'}
-                      </button>
-                      <button type="button" onClick={() => handleDiscardDraftIA(d.id)} className="bg-slate-800 hover:bg-rose-500 text-white p-3 rounded-xl transition"><Trash2 className="w-4 h-4" /></button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <section className="p-6 md:p-8 bg-white rounded-[3rem] shadow-sm border border-slate-100 relative z-10">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-8">
-          <div className="flex flex-wrap gap-2 w-full md:w-auto">
-            <button type="button" onClick={() => setSelectedUnit('ALL')} className={cn("flex-1 md:flex-none px-5 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all border flex items-center justify-center gap-1.5", selectedUnit === 'ALL' ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50")}><Layers className="w-3.5 h-3.5" />Todas</button>
-            {BUSINESS_UNITS.map(unit => (
-              <button type="button" key={unit.id} onClick={() => setSelectedUnit(unit.id)} className={cn("flex-1 md:flex-none px-5 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all border flex items-center justify-center gap-1.5", selectedUnit === unit.id ? `${unit.color.replace('text-', 'bg-')} text-white border-transparent shadow-md` : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50")}>
-                <unit.icon className="w-3.5 h-3.5" /> <span className="hidden sm:inline">{unit.name}</span>
-              </button>
-            ))}
+      {/* 🚀 HEADER COMPACTO Y MODERNO */}
+      <header className={cn(cardBase, "p-6 md:p-8 relative z-10")}>
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+          <div>
+            <h2 className={hTitle}>Facturas · INVØYS PRO</h2>
+            <p className={cn(tLabel, "mt-1")}>Inbox · Conciliación · Contabilización</p>
           </div>
-          
-          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1 w-full md:w-auto">
-            <button onClick={toggleRecording} className={cn("px-4 py-2.5 rounded-xl text-[10px] font-black flex items-center gap-2 shadow-sm transition-colors whitespace-nowrap", isRecording ? "bg-rose-500 text-white animate-pulse" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50")} title="Dictar factura (Vosk Local)">
-               {isRecording ? <Square className="w-3.5 h-3.5"/> : <Mic className="w-3.5 h-3.5"/>} {isRecording ? "DICTANDO..." : "DICTAR"}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={toggleRecording} className={cn("px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 shadow-sm border", isRecording ? "bg-rose-500 text-white border-rose-600 animate-pulse" : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50")}>
+              {isRecording ? <Square className="w-4 h-4 fill-current"/> : <Mic className="w-4 h-4"/>} {isRecording ? "GRABANDO..." : "DICTAR"}
             </button>
             <input type="file" ref={fileInputRef} className="hidden" accept="application/pdf, image/*" onChange={(e) => { if (e.target.files && e.target.files[0]) { processLocalFile(e.target.files[0]); e.target.value = ''; } }} />
-            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isSyncing} className="bg-indigo-50 border border-indigo-100 text-indigo-600 px-5 py-2.5 rounded-xl text-[10px] font-black hover:bg-indigo-100 transition flex items-center gap-2 whitespace-nowrap" title="Sube PDF o Foto"><UploadCloud className="w-4 h-4" /> SUBIR PDF</button>
-            <button type="button" onClick={() => setIsExportModalOpen(true)} className="bg-emerald-600 text-white px-4 py-2.5 rounded-xl text-[10px] font-black hover:bg-emerald-700 transition flex items-center gap-2 shadow-sm"><Download className="w-4 h-4" /></button>
-            <div className="flex items-center gap-1 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
-              <button type="button" onClick={() => setMode('proveedor')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all", mode === 'proveedor' ? "bg-white text-slate-800 shadow-sm" : "text-slate-400 hover:text-slate-600")}>Proveedores</button>
-              <button type="button" onClick={() => setMode('socio')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all", mode === 'socio' ? "bg-white text-slate-800 shadow-sm" : "text-slate-400 hover:text-slate-600")}>Liquidaciones</button>
+            <button onClick={() => fileInputRef.current?.click()} className="px-5 py-2.5 rounded-xl text-xs font-black bg-indigo-600 text-white hover:bg-indigo-700 transition flex items-center gap-2 shadow-md">
+              <UploadCloud className="w-4 h-4" /> SUBIR PDF
+            </button>
+            <button onClick={() => setIsExportModalOpen(true)} className="px-4 py-2.5 rounded-xl text-xs font-black bg-emerald-600 text-white hover:bg-emerald-700 transition flex items-center gap-2 shadow-md">
+              <Download className="w-4 h-4" /> EXPORT
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* 🚀 TOOLBAR STICKY (Filtros e Inputs) */}
+      <div className="sticky top-2 z-40">
+        <div className={cn(cardBase, "px-4 py-3 shadow-md backdrop-blur-md bg-white/90")}>
+          <div className="flex flex-col xl:flex-row items-center justify-between gap-3">
+            
+            {/* TABS DE VISTA */}
+            <div className="flex items-center bg-slate-100 p-1.5 rounded-2xl w-full xl:w-auto overflow-x-auto no-scrollbar">
+              <button onClick={() => setActiveTab('pend')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition whitespace-nowrap", activeTab === 'pend' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
+                📦 Albaranes sin cerrar
+              </button>
+              <button onClick={() => setActiveTab('hist')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition whitespace-nowrap", activeTab === 'hist' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
+                💰 Facturas (Histórico)
+              </button>
             </div>
-          </div>
-        </div>
 
-        <div className="flex items-center gap-2 p-1.5 bg-slate-100 rounded-[2rem] mb-6">
-          <button type="button" onClick={() => setActiveTab('pend')} className={cn("flex-1 py-3.5 rounded-2xl font-black text-xs transition", activeTab === 'pend' ? "bg-white shadow text-indigo-600" : "text-slate-400 hover:bg-slate-200")}>📦 ALBARANES SIN CERRAR</button>
-          <button type="button" onClick={() => setActiveTab('hist')} className={cn("flex-1 py-3.5 rounded-2xl font-black text-xs transition", activeTab === 'hist' ? "bg-white shadow text-indigo-600" : "text-slate-400 hover:bg-slate-200")}>💰 FACTURAS CONTABILIZADAS</button>
-        </div>
-
-        <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-6">
-          <div className="flex items-center gap-4 bg-white border border-slate-200 px-4 py-2 rounded-2xl shadow-sm w-full md:w-auto justify-center">
-            <button type="button" onClick={() => setYear(year - 1)} className="text-indigo-600 hover:bg-indigo-50 p-1.5 rounded-lg transition"><ChevronLeft className="w-5 h-5" /></button>
-            <span className="text-base font-black text-slate-800 w-12 text-center">{year}</span>
-            <button type="button" onClick={() => setYear(year + 1)} className="text-indigo-600 hover:bg-indigo-50 p-1.5 rounded-lg transition"><ChevronRight className="w-5 h-5" /></button>
-          </div>
-          <div className="relative w-full md:w-96 flex gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input type="text" value={searchQ} onChange={(e) => setSearchQ(e.target.value)} placeholder="Buscar nombre o referencia..." className="w-full py-3 pl-11 pr-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-700 outline-none focus:border-indigo-400 focus:bg-white transition" />
-            </div>
-          </div>
-        </div>
-
-        {activeTab === 'hist' && (
-          <div className="flex flex-wrap gap-2 mb-6">
-            {[
-              { id: 'all', label: 'Todas', color: 'text-slate-500' },
-              { id: 'pending', label: '⏳ Pendientes', color: 'text-slate-500' },
-              { id: 'paid', label: '✔️ Pagadas Efectivo', color: 'text-emerald-600' },
-              { id: 'reconciled', label: '🔗 Pagadas Banco', color: 'text-blue-600' }
-            ].map(chip => (
-              <button type="button" key={chip.id} onClick={() => setFilterStatus(chip.id as any)} className={cn("px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-wider border transition-all", filterStatus === chip.id ? "bg-slate-800 text-white border-slate-800 shadow-md" : cn("bg-white border-slate-200 hover:bg-slate-50", chip.color))}>{chip.label}</button>
-            ))}
-          </div>
-        )}
-
-        <div className="space-y-4">
-          {activeTab === 'pend' ? (
-            pendingGroups.length > 0 ? (
-              pendingGroups.map(([mk, dataGroup]) => (
-                <div key={mk} className="mb-8 animate-fade-in">
-                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 pl-2 border-b border-slate-100 pb-2">{dataGroup.name}</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {Object.values(dataGroup.groups).map((g: any) => {
-                      const unitConfig = BUSINESS_UNITS.find(u => u.id === g.unitId);
-                      return (
-                        <div key={g.label + g.unitId} onClick={() => { setSelectedGroup({ label: g.label, ids: g.ids, unitId: g.unitId }); setModalForm({ num: '', date: DateUtil.today(), selectedAlbs: [...g.ids], unitId: g.unitId }); }} className="flex justify-between items-center p-5 bg-white rounded-3xl border border-slate-200 hover:border-indigo-400 hover:shadow-lg transition cursor-pointer group">
-                          <div className="min-w-0">
-                            <p className="font-black text-slate-800 group-hover:text-indigo-600 transition flex items-center gap-2 truncate">
-                              {g.label}
-                            </p>
-                            <div className="flex items-center gap-2 mt-1.5">
-                              {unitConfig && <span className={cn("text-[8px] px-2 py-0.5 rounded-md uppercase tracking-wider font-black", unitConfig.bg, unitConfig.color)}>{unitConfig.name.split(' ')[0]}</span>}
-                              <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-md text-[9px] font-bold">{g.count} Albaranes</span>
-                            </div>
-                          </div>
-                          <div className="text-right shrink-0 ml-4">
-                            <p className="font-black text-slate-900 text-xl">{Num.fmt(g.t)}</p>
-                            <p className="text-[9px] font-black text-indigo-400 group-hover:underline mt-1 flex items-center justify-end gap-1">AGRUPAR <ArrowRight className="w-3 h-3" /></p>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="py-24 flex flex-col items-center justify-center opacity-60 bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200">
-                <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm mb-4"><Package className="w-8 h-8 text-slate-300" /></div>
-                <p className="text-slate-500 font-black text-sm uppercase tracking-widest">No hay albaranes sueltos</p>
-                <p className="text-xs text-slate-400 mt-1">Todo está cerrado y facturado para estos filtros.</p>
+            <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+                <button onClick={() => setMode('proveedor')} className={cn("px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition", mode === 'proveedor' ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700")}>Prov</button>
+                <button onClick={() => setMode('socio')} className={cn("px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition", mode === 'socio' ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700")}>Socio</button>
               </div>
-            )
-          ) : (
-            // 🚀 COMPONENTE AISLADO DE HISTORIAL
-            <InvoicesList 
-              facturas={facturasSeguras} 
-              searchQ={searchQ} 
-              selectedUnit={selectedUnit} 
-              mode={mode} 
-              filterStatus={filterStatus} 
-              year={year} 
-              businessUnits={BUSINESS_UNITS} 
-              sociosReales={SOCIOS_REALES} 
-              superNorm={superNorm} 
-              onOpenDetail={setSelectedInvoice as any} 
-              onTogglePago={handleTogglePago} 
-              onDelete={handleDeleteFactura} 
-            />
-          )}
+
+              <select value={selectedUnit} onChange={e => setSelectedUnit(e.target.value as any)} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[10px] font-black uppercase text-slate-600 outline-none">
+                <option value="ALL">Todas las uds</option>
+                <option value="REST">Restaurante</option>
+                <option value="DLV">Catering</option>
+                <option value="SHOP">Tienda</option>
+                <option value="CORP">Socios/Corp</option>
+              </select>
+
+              <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl">
+                <button className="px-3 py-1.5 text-indigo-600 hover:bg-indigo-50 rounded-l-xl transition" onClick={() => setYear(y => y - 1)}><ChevronLeft className="w-4 h-4"/></button>
+                <span className="px-2 text-xs font-black text-slate-700">{year}</span>
+                <button className="px-3 py-1.5 text-indigo-600 hover:bg-indigo-50 rounded-r-xl transition" onClick={() => setYear(y => y + 1)}><ChevronRight className="w-4 h-4"/></button>
+              </div>
+
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Buscar proveedor, ref..." className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold outline-none focus:ring-2 ring-indigo-500/20 transition focus:bg-white" />
+              </div>
+            </div>
+
+          </div>
         </div>
-      </section>
+      </div>
+
+      {/* 🚀 LAYOUT GRID (Inbox IA a la derecha en Desktop) */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 relative z-10">
+        
+        {/* ZONA IZQUIERDA: Listas Principales */}
+        <section className="xl:col-span-8 space-y-4">
+          {activeTab === 'pend' ? renderPendingGroups() : (
+            <InvoicesList facturas={facturasSeguras} searchQ={searchQ} selectedUnit={selectedUnit} mode={mode} filterStatus={filterStatus} year={year} businessUnits={BUSINESS_UNITS} sociosReales={SOCIOS_REALES} superNorm={superNorm} onOpenDetail={setSelectedInvoice as any} onTogglePago={handleTogglePago} onDelete={handleDeleteFactura} />
+          )}
+        </section>
+
+        {/* ZONA DERECHA: Inbox de IA (Panel de Conciliación) */}
+        <aside className="xl:col-span-4">
+          <div className="sticky top-24 space-y-4">
+            {draftsIA.length > 0 ? (
+              <div className={cn(cardBase, "p-5 border-indigo-100 bg-indigo-50/30")}>
+                <h4 className="text-sm font-black text-slate-800 mb-1 flex items-center gap-2"><Sparkles className="w-4 h-4 text-indigo-500"/> Inbox IA ({draftsIA.length})</h4>
+                <p className={tLabel}>Conciliación Pendiente</p>
+                <div className="mt-4 space-y-3 max-h-[65vh] overflow-y-auto custom-scrollbar pr-1">
+                  {draftsIA.map(d => (
+                    <div key={d.id} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm hover:border-indigo-300 transition group">
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="min-w-0">
+                          <span className="font-black text-slate-800 block truncate text-sm">{d.prov || 'Desconocido'}</span>
+                          <span className="text-[10px] text-slate-400 font-bold">{d.date} · Ref: {d.num}</span>
+                        </div>
+                        <button onClick={() => handleDiscardDraftIA(d.id)} className="text-slate-300 hover:text-rose-500 transition p-1"><Trash2 className="w-4 h-4"/></button>
+                      </div>
+                      <div className="flex justify-between items-end mt-2">
+                        <span className="text-xl font-black text-slate-900">{Num.fmt(d.total)}</span>
+                        {d.cuadraPerfecto ? (
+                          <span className={cn(chipBase, "bg-emerald-50 text-emerald-600 border border-emerald-100")}>Cuadra</span>
+                        ) : (
+                          <span className={cn(chipBase, "bg-amber-50 text-amber-600 border border-amber-100")}>Dif {Num.fmt(d.diferencia)}</span>
+                        )}
+                      </div>
+                      <button onClick={() => handleConfirmAuditoriaIA(d.id)} className="w-full mt-3 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase hover:bg-indigo-700 transition">
+                        Cerrar y Vincular
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className={cn(cardBase, "p-8 text-center bg-slate-50 opacity-60")}>
+                <Mail className="w-8 h-8 mx-auto text-slate-300 mb-3" />
+                <p className="text-xs font-black text-slate-500 uppercase tracking-widest">Inbox Vacío</p>
+                <p className="text-[10px] text-slate-400 mt-2 font-medium">Sube una factura al Dropzone para que la IA la analice.</p>
+              </div>
+            )}
+          </div>
+        </aside>
+      </div>
 
       {/* MODALES MANUALES */}
       <AnimatePresence>
@@ -664,7 +602,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                       <input type="text" value={modalForm.num} onChange={(e) => setModalForm({ ...modalForm, num: e.target.value })} placeholder="Ej: F-2026/012" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:ring-2 ring-indigo-500/20 transition" />
                     </div>
                   )}
-                  <div><label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Fecha de Facturación</label><input type="date" value={modalForm.date} onChange={(e) => setModalForm({ ...modalForm, date: e.target.value })} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:ring-2 ring-indigo-500/20 transition cursor-pointer" /></div>
+                  <div><label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Fecha de Emisión</label><input type="date" value={modalForm.date} onChange={(e) => setModalForm({ ...modalForm, date: e.target.value })} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:ring-2 ring-indigo-500/20 transition cursor-pointer" /></div>
                 </div>
                 <button onClick={handleConfirmManualInvoice} disabled={modalForm.selectedAlbs.length === 0} className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black text-sm shadow-xl shadow-indigo-200 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition flex justify-center items-center gap-2">GUARDAR Y CERRAR ALBARANES <CheckCircle2 className="w-5 h-5"/></button>
               </div>
