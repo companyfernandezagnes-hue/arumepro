@@ -11,17 +11,17 @@ import { AppData, Factura, Albaran, Socio } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
 
-// 🚀 COMPONENTES HIJOS (Asegúrate de que existan en tu carpeta components)
+// 🚀 COMPONENTES HIJOS
 import { InvoicesList } from './InvoicesList';
 import { InvoiceDetailModal } from './InvoiceDetailModal';
 
 export type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
 
-// 🛡️ TIPOS EXTENDIDOS (Pipeline PRO)
+// 🛡️ TIPOS EXTENDIDOS
 export type FacturaExtended = Factura & {
   status?: 'ingested' | 'parsed' | 'draft' | 'approved' | 'paid' | 'reconciled' | 'mismatch';
   file_base64?: string;
-  attachmentSha?: string; // 🔐 Huella digital para evitar duplicados
+  attachmentSha?: string; 
   albaranIdsArr?: string[];
   fecha_pago?: string;
   source?: string;
@@ -51,7 +51,7 @@ const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string
 ];
 
 /* =======================================================
- * 🛡️ 1. UTILIDADES, SEGURIDAD Y ALIAS DE PROVEEDOR
+ * 🛡️ 1. UTILIDADES Y MATCHING
  * ======================================================= */
 const TOLERANCIA = 0.50; 
 
@@ -62,21 +62,21 @@ export const superNorm = (s: string | undefined | null) => {
 
 const safeJSON = (str: string) => { try { const match = str.match(/\{[\s\S]*\}/); return match ? JSON.parse(match[0]) : {}; } catch { return {}; } };
 
-// 🔐 SHA-256 Idempotencia (Evita subir la misma factura 2 veces)
+// Helper D&D (Auditoría Copilot)
+const hasFiles = (e: React.DragEvent | DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes('Files');
+
 async function sha256File(file: File) {
   const buf = await file.arrayBuffer();
   const hash = await crypto.subtle.digest('SHA-256', buf);
   return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
-// 🧠 3-WAY MATCHING ALGORITHM (Factura vs Albaranes)
 const matchAlbaranesToFactura = (factura: FacturaExtended, albaranes: Albaran[], provNormalizado: string) => {
   const mesDraft = (factura.date || DateUtil.today()).substring(0, 7);
   const candidatos = albaranes.filter(a => !a?.invoiced && superNorm(a?.prov) === provNormalizado && (a?.date || '').startsWith(mesDraft));
   const sumaAlbaranes = candidatos.reduce((acc, a) => acc + (Num.parse(a?.total) || 0), 0);
   const totalFactura = Num.parse(factura.total) || 0;
   
-  // Tolerancia: Máximo entre 0.50€ absolutos o 0.5% del total (Lógica PRO)
   const diff = Math.abs(sumaAlbaranes - Math.abs(totalFactura));
   const toleranciaPermitida = Math.max(TOLERANCIA, Math.abs(totalFactura) * 0.005);
   const cuadraPerfecto = diff <= toleranciaPermitida && candidatos.length > 0;
@@ -106,6 +106,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportQuarter, setExportQuarter] = useState(Math.floor(new Date().getMonth() / 3) + 1);
   
+  // 🛡️ D&D States
   const [isSyncing, setIsSyncing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const dragCounter = useRef(0);
@@ -117,16 +118,64 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
 
-  // 📧 SIMULACIÓN DE BANDEJA DE CORREO (Mails)
+  // 📧 SIMULACIÓN BANDEJA CORREO
   const [emailInbox, setEmailInbox] = useState<EmailDraft[]>([
     { id: 'm1', from: 'ventas@makro.es', subject: 'Factura F-2026/012', date: DateUtil.today(), hasAttachment: true, status: 'new' },
     { id: 'm2', from: 'admin@gadisa.com', subject: 'Albarán y Factura Semanal', date: DateUtil.today(), hasAttachment: true, status: 'new' }
   ]);
 
   /* =======================================================
-   * ⌨️ ATAJOS DE TECLADO Y EVENTOS
+   * 🛡️ DRAG & DROP INMORTAL Y NO BLOQUEANTE (Fix Copilot)
+   * ======================================================= */
+  useEffect(() => {
+    // Escape o salida global de la ventana aborta el Drag visual
+    const endDrag = () => { dragCounter.current = 0; setIsDragging(false); };
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') endDrag(); };
+    
+    window.addEventListener('dragend', endDrag);
+    window.addEventListener('dragleave', endDrag);
+    window.addEventListener('keydown', onKeyDown);
+    
+    return () => { 
+      window.removeEventListener('dragend', endDrag);
+      window.removeEventListener('dragleave', endDrag);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, []);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => { 
+    if (!hasFiles(e)) return; 
+    e.preventDefault(); e.stopPropagation();
+    dragCounter.current++; 
+    if (!isDragging) setIsDragging(true); 
+  }, [isDragging]);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => { 
+    if (!hasFiles(e)) return; 
+    e.preventDefault(); e.stopPropagation();
+    dragCounter.current--; 
+    if (dragCounter.current <= 0) { setIsDragging(false); dragCounter.current = 0; } 
+  }, []);
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => { 
+    e.preventDefault(); e.stopPropagation();
+    setIsDragging(false); 
+    dragCounter.current = 0; 
+    
+    const dt = e.dataTransfer;
+    if (!dt?.files?.length) return;
+    if (dt.files.length > 1) return alert("Sube 1 solo documento por importación.");
+    
+    const file = dt.files[0]; 
+    if (!/^(application\/pdf|image\/)/.test(file.type)) return alert("Solo PDFs o imágenes");
+    if (file.size > 15 * 1024 * 1024) return alert("El archivo supera los 15MB.");
+    
+    await processLocalFile(file); 
+  }, []); // Retiramos facturasSeguras de las dependencias para no recrear la funcion constantemente
+
+  /* =======================================================
+   * ⌨️ ATAJOS DE TECLADO RÁPIDOS
    * ======================================================= */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -140,36 +189,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   }, []);
 
   /* =======================================================
-   * 🛡️ DRAG & DROP INMORTAL
-   * ======================================================= */
-  useEffect(() => {
-    const blockDefault = (e: DragEvent) => { 
-      if (!(e.target as HTMLElement)?.closest(".dropzone-area")) { e.preventDefault(); e.stopPropagation(); } 
-    };
-    const cancelDrag = () => { dragCounter.current = 0; setIsDragging(false); };
-    
-    window.addEventListener('dragover', blockDefault); 
-    window.addEventListener('drop', blockDefault); 
-    window.addEventListener('mouseout', (e) => { if (!e.relatedTarget && !e.toElement) cancelDrag(); });
-    
-    return () => { window.removeEventListener('dragover', blockDefault); window.removeEventListener('drop', blockDefault); window.removeEventListener('mouseout', cancelDrag); };
-  }, []);
-
-  const handleDragEnter = useCallback((e: React.DragEvent) => { e.preventDefault(); dragCounter.current++; if (!isDragging) setIsDragging(true); }, [isDragging]);
-  const handleDragLeave = useCallback((e: React.DragEvent) => { e.preventDefault(); dragCounter.current--; if (dragCounter.current <= 0) { setIsDragging(false); dragCounter.current = 0; } }, []);
-  const handleDrop = useCallback(async (e: React.DragEvent) => { 
-    e.preventDefault(); dragCounter.current = 0; setIsDragging(false); 
-    if (!e.dataTransfer?.files?.length) return;
-    if (e.dataTransfer.files.length > 1) return alert("⚠️ Sube 1 solo documento por importación para garantizar la trazabilidad.");
-    
-    const file = e.dataTransfer.files[0]; 
-    if (!/^(application\/pdf|image\/)/.test(file.type)) return alert("⚠️ Solo PDFs o imágenes.");
-    if (file.size > 15 * 1024 * 1024) return alert("⚠️ El archivo supera los 15MB.");
-    
-    processLocalFile(file); 
-  }, [facturasSeguras]);
-
-  /* =======================================================
    * 🧠 AUDITORÍA DE IA MEMOIZADA (3-WAY MATCHING)
    * ======================================================= */
   const draftsIA = useMemo(() => {
@@ -180,15 +199,15 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   }, [facturasSeguras, albaranesSeguros]);
 
   /* =======================================================
-   * 🤖 MOTOR OCR (Google Gemini + Local Fallback)
+   * 🤖 MOTOR OCR (Google Gemini + Local Fallback sin CDN)
    * ======================================================= */
   const processLocalFile = async (file: File) => {
     setIsSyncing(true); 
     try {
-      // 1. Idempotencia: Verificar Hash
+      // 1. Idempotencia SHA-256
       const sha = await sha256File(file);
       const isDuplicate = facturasSeguras.some(f => f.attachmentSha === sha);
-      if (isDuplicate) { setIsSyncing(false); return alert("⚠️ Este archivo ya ha sido procesado anteriormente (Huella Digital idéntica)."); }
+      if (isDuplicate) { setIsSyncing(false); return alert("⚠️ Documento duplicado: ya existe una factura en el sistema con la misma huella digital."); }
 
       const apiKey = localStorage.getItem('gemini_api_key');
       if (!apiKey) throw new Error("NO_API_KEY");
@@ -198,7 +217,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       });
       const soloBase64 = fileBase64.split(',')[1];
 
-      // 2. Extracción de IA
+      // 2. Extracción IA
       const ai = new GoogleGenAI({ apiKey });
       const prompt = `Actúa como un OCR contable. Extrae de esta factura y devuelve SOLO JSON: { "proveedor": "string", "num": "string", "fecha": "YYYY-MM-DD", "total": 0, "base": 0, "iva": 0 }`;
       
@@ -209,8 +228,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       });
 
       const rawJson = safeJSON(response.text || "");
-
-      // 3. Crear Borrador
       const nuevaFacturaIA: FacturaExtended = {
         id: 'draft-local-' + Date.now(), tipo: 'compra', num: rawJson.num || 'S/N', date: rawJson.fecha || DateUtil.today(), prov: rawJson.proveedor || 'Proveedor Desconocido',
         total: Num.parse(rawJson.total || 0), base: Num.parse(rawJson.base || 0), tax: Num.parse(rawJson.iva || 0),
@@ -221,15 +238,24 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       alert("✅ Factura extraída correctamente. Revisa la bandeja de conciliación.");
 
     } catch (e) {
-      console.warn("⚠️ Gemini falló. Activando Rescate Local (Tesseract)...");
+      console.warn("⚠️ Gemini falló. Activando Rescate Local (Tesseract) seguro...");
       try {
         let extractedText = ""; let possibleTotal = 0;
         const fileBase64 = await new Promise<string>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result as string); reader.readAsDataURL(file); });
 
+        // 🚀 PDF.JS LOCAL PROTEGIDO PARA BUILD
         if (file.type.includes('image')) {
            const tesseractModule = await import('tesseract.js'); const Tesseract = tesseractModule.default || tesseractModule;
            const { data: { text } } = await Tesseract.recognize(file, 'spa'); extractedText = text;
-        } 
+        } else if (file.type === 'application/pdf') {
+           const pdfjsLib = await import('pdfjs-dist');
+           // @ts-ignore
+           const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min?url')).default;
+           pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+
+           const arrayBuffer = await file.arrayBuffer(); const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+           for (let i = 1; i <= pdfDoc.numPages; i++) { const page = await pdfDoc.getPage(i); const textContent = await page.getTextContent(); extractedText += textContent.items.map((item: any) => item.str).join(' ') + '\n'; }
+        }
         
         const matches = extractedText.match(/(\d+([.,]\d{2}))/g);
         if (matches) { const nums = matches.map(m => parseFloat(m.replace(',', '.'))); const validNums = nums.filter(n => n < 50000); possibleTotal = validNums.length > 0 ? Math.max(...validNums) : 0; }
@@ -248,55 +274,11 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   };
 
   /* =======================================================
-   * 🎙️ VOSK LOCAL
-   * ======================================================= */
-  const toggleRecording = async () => {
-    if (isRecording) { mediaRecorderRef.current?.stop(); setIsRecording(false); return; }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-      mediaRecorderRef.current = mr; audioChunksRef.current = [];
-      mr.ondataavailable = (e) => audioChunksRef.current.push(e.data);
-      mr.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        stream.getTracks().forEach(t => t.stop());
-        await processAudioWithVosk(audioBlob);
-      };
-      mr.start(); setIsRecording(true);
-      setTimeout(() => { if (mr.state === 'recording') toggleRecording(); }, 30000); 
-    } catch (err) { alert("⚠️ Necesitas dar permiso al micrófono."); }
-  };
-
-  const processAudioWithVosk = async (blob: Blob) => {
-    setIsSyncing(true);
-    try {
-      const formData = new FormData(); formData.append("file", blob, "factura.webm");
-      const voskRes = await fetch("http://localhost:2700/transcribe", { method: "POST", body: formData });
-      if (!voskRes.ok) throw new Error("Vosk no responde");
-      const voskData = await voskRes.json();
-      const txt = voskData.text || "";
-      
-      const matches = txt.match(/(\d+([.,]\d{2})?)/g);
-      const possibleTotal = matches ? parseFloat(matches[matches.length - 1].replace(',', '.')) : 0;
-
-      const nuevaFacturaVoz: FacturaExtended = {
-        id: 'draft-voice-' + Date.now(), tipo: 'compra', num: 'S/N', date: DateUtil.today(),
-        prov: `🎙️ Voz: ${txt.substring(0, 20)}...`, total: possibleTotal, base: Num.round2(possibleTotal / 1.10), tax: Num.round2(possibleTotal - (possibleTotal / 1.10)),
-        paid: false, reconciled: false, source: 'voice', status: 'draft', unidad_negocio: 'REST'
-      };
-
-      await onSave({ ...safeData, facturas: [nuevaFacturaVoz, ...facturasSeguras] });
-    } catch (e) { alert("⚠️ Error conectando con servidor VOSK local."); } 
-    finally { setIsSyncing(false); }
-  };
-
-  /* =======================================================
    * 📧 SIMULADOR EMAIL PARSER
    * ======================================================= */
   const handleParseEmail = (emailId: string) => {
     setEmailInbox(prev => prev.filter(e => e.id !== emailId));
     alert("📥 Correo procesado. El PDF adjunto ha pasado a la bandeja de Conciliación.");
-    // En producción, esto llamaría a processLocalFile con el adjunto del email
   };
 
   /* =======================================================
@@ -326,7 +308,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     await onSave({ ...safeData, facturas: facturasSeguras.filter(f => f.id !== id) });
   };
 
-  // 📦 AGRUPACIÓN MANUAL OPTIMIZADA (Lo que fallaba antes en el Render)
   const pendingGroups = useMemo(() => {
     const byMonth: Record<string, { name: string; groups: Record<string, any> }> = {};
     const q = superNorm(deferredSearch);
@@ -407,9 +388,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     XLSX.writeFile(wb, `Gestoria_Arume_${y}_Q${q}_${selectedUnit}.xlsx`); setIsExportModalOpen(false);
   };
 
-  /* =======================================================
-   * 📤 HANDLE DOWNLOAD FILE (Protegido y Funcional)
-   * ======================================================= */
   const handleDownloadFile = (f: FacturaExtended) => {
     if (!f?.file_base64) return alert('El PDF original no está disponible.');
     const a = document.createElement('a');
@@ -419,36 +397,77 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   };
 
   /* =======================================================
-   * 🎨 RENDER DE UI
+   * 🎨 RENDERIZADO AISLADO (Protección contra crashes)
+   * ======================================================= */
+  const renderPendingGroups = () => {
+    if (pendingGroups.length === 0) {
+      return (
+        <div className="py-20 flex flex-col items-center justify-center opacity-60 bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200">
+          <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm mb-4"><Package className="w-8 h-8 text-slate-300" /></div>
+          <p className="text-slate-500 font-black text-sm uppercase tracking-widest">No hay albaranes sueltos</p>
+        </div>
+      );
+    }
+    
+    return pendingGroups.map(([mk, dataGroup]) => (
+      <div key={mk} className="mb-6 animate-fade-in">
+        <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 px-2 border-b border-slate-100 pb-2">{dataGroup.name}</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {Object.values(dataGroup.groups).map((g: any) => {
+            const unitConfig = BUSINESS_UNITS.find(u => u.id === g.unitId);
+            return (
+              <div key={g.label + g.unitId} onClick={() => { setSelectedGroup({ label: g.label, ids: g.ids, unitId: g.unitId }); setModalForm({ num: '', date: DateUtil.today(), selectedAlbs: [...g.ids], unitId: g.unitId }); }} className="flex justify-between items-center p-5 bg-white rounded-2xl border border-slate-200 hover:border-indigo-400 hover:shadow-md transition cursor-pointer group">
+                <div className="min-w-0">
+                  <p className="font-black text-slate-800 group-hover:text-indigo-600 transition flex items-center gap-2 truncate">{g.label}</p>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    {unitConfig && <span className={cn("text-[8px] px-2 py-0.5 rounded-md uppercase tracking-wider font-black", unitConfig.bg, unitConfig.color)}>{unitConfig.name.split(' ')[0]}</span>}
+                    <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-md text-[9px] font-bold">{g.count} Albaranes</span>
+                  </div>
+                </div>
+                <div className="text-right shrink-0 ml-4">
+                  <p className="font-black text-slate-900 text-xl">{Num.fmt(g.t)}</p>
+                  <p className="text-[9px] font-black text-indigo-400 group-hover:underline mt-1 flex items-center justify-end gap-1">CERRAR MANUAL <ArrowRight className="w-3 h-3" /></p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    ));
+  };
+
+  /* =======================================================
+   * 🎨 RENDER PRINCIPAL
    * ======================================================= */
   return (
     <div 
-      className={cn("dropzone-area animate-fade-in space-y-6 pb-24 min-h-screen relative transition-colors duration-300 max-w-[1600px] mx-auto", isDragging && "bg-indigo-50/50")}
+      className="dropzone-area animate-fade-in space-y-6 pb-24 min-h-screen relative max-w-[1600px] mx-auto"
       onDragEnter={handleDragEnter} onDragOver={(e) => e.preventDefault()} onDragLeave={handleDragLeave} onDrop={handleDrop}
     >
-      {/* 🚀 OVERLAY DE DROP PROTEGIDO */}
+      {/* OVERLAY DE DROP PROTEGIDO Y NO BLOQUEANTE */}
       <AnimatePresence>
         {isDragging && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[9999] bg-indigo-600/90 backdrop-blur-sm border-[16px] border-dashed border-white/40 flex flex-col items-center justify-center pointer-events-auto transition-opacity duration-300">
-            <div className="pointer-events-none flex flex-col items-center justify-center">
-              <FileDown className="w-32 h-32 text-white mb-6 animate-bounce" />
-              <h2 className="text-5xl font-black text-white tracking-tighter drop-shadow-lg">¡Suelta tu Factura aquí!</h2>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] pointer-events-none">
+            <div className="absolute inset-0 bg-indigo-600/10 backdrop-blur-sm" />
+            <div className="absolute inset-4 md:inset-8 border-4 border-dashed border-indigo-400 rounded-[3rem] flex items-center justify-center bg-indigo-50/50">
+              <div className="text-center bg-white p-8 rounded-3xl shadow-xl pointer-events-none">
+                <FileDown className="w-16 h-16 text-indigo-500 mx-auto mb-4 animate-bounce" />
+                <p className="text-3xl font-black text-indigo-900">Suelta tu Factura aquí</p>
+                <p className="text-sm text-indigo-500 font-bold mt-2 uppercase tracking-widest">Solo PDF o Imágenes</p>
+              </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
       
       {/* 🚀 HEADER COMPACTO Y MODERNO */}
-      <header className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6 md:p-8 flex flex-col lg:flex-row justify-between gap-4">
+      <header className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6 md:p-8 flex flex-col lg:flex-row justify-between gap-4 relative z-10">
         <div>
           <h2 className="text-2xl md:text-3xl font-black text-slate-800 tracking-tighter">Facturas · INVØYS PRO</h2>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Inbox · Conciliación · Export</p>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Inbox · Conciliación 3-Way Match</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button onClick={toggleRecording} className={cn("px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 shadow-sm border", isRecording ? "bg-rose-500 text-white border-rose-600 animate-pulse" : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50")}>
-            {isRecording ? <Square className="w-4 h-4 fill-current"/> : <Mic className="w-4 h-4"/>} {isRecording ? "GRABANDO..." : "DICTAR"}
-          </button>
           <input type="file" ref={fileInputRef} className="hidden" accept="application/pdf, image/*" onChange={(e) => { if (e.target.files && e.target.files[0]) { processLocalFile(e.target.files[0]); e.target.value = ''; } }} />
           <button onClick={() => fileInputRef.current?.click()} className="px-5 py-2.5 rounded-xl text-xs font-black bg-indigo-600 text-white hover:bg-indigo-700 transition flex items-center gap-2 shadow-md">
             <UploadCloud className="w-4 h-4" /> SUBIR PDF
@@ -461,10 +480,9 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
       {/* 🚀 TOOLBAR STICKY (Filtros e Inputs) */}
       <div className="sticky top-2 z-40">
-        <div className={cn("bg-white/95 backdrop-blur-md px-4 py-3 rounded-[2rem] shadow-md border border-slate-200")}>
+        <div className="bg-white/95 backdrop-blur-md px-4 py-3 rounded-[2rem] shadow-md border border-slate-200">
           <div className="flex flex-col xl:flex-row items-center justify-between gap-3">
             
-            {/* TABS DE VISTA */}
             <div className="flex items-center bg-slate-100 p-1.5 rounded-2xl w-full xl:w-auto overflow-x-auto no-scrollbar">
               <button onClick={() => setActiveTab('pend')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition whitespace-nowrap", activeTab === 'pend' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
                 📦 Albaranes sin cerrar
@@ -509,40 +527,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         
         {/* ZONA IZQUIERDA: Listas Principales */}
         <section className="xl:col-span-8 space-y-4">
-          {activeTab === 'pend' ? (
-            pendingGroups.length > 0 ? (
-              pendingGroups.map(([mk, dataGroup]) => (
-                <div key={mk} className="mb-6 animate-fade-in">
-                  <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 px-2 border-b border-slate-100 pb-2">{dataGroup.name}</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {Object.values(dataGroup.groups).map((g: any) => {
-                      const unitConfig = BUSINESS_UNITS.find(u => u.id === g.unitId);
-                      return (
-                        <div key={g.label + g.unitId} onClick={() => { setSelectedGroup({ label: g.label, ids: g.ids, unitId: g.unitId }); setModalForm({ num: '', date: DateUtil.today(), selectedAlbs: [...g.ids], unitId: g.unitId }); }} className="flex justify-between items-center p-5 bg-white rounded-2xl border border-slate-200 hover:border-indigo-400 hover:shadow-md transition cursor-pointer group">
-                          <div className="min-w-0">
-                            <p className="font-black text-slate-800 group-hover:text-indigo-600 transition flex items-center gap-2 truncate">{g.label}</p>
-                            <div className="flex items-center gap-2 mt-1.5">
-                              {unitConfig && <span className={cn("text-[8px] px-2 py-0.5 rounded-md uppercase tracking-wider font-black", unitConfig.bg, unitConfig.color)}>{unitConfig.name.split(' ')[0]}</span>}
-                              <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-md text-[9px] font-bold">{g.count} Albaranes</span>
-                            </div>
-                          </div>
-                          <div className="text-right shrink-0 ml-4">
-                            <p className="font-black text-slate-900 text-xl">{Num.fmt(g.t)}</p>
-                            <p className="text-[9px] font-black text-indigo-400 group-hover:underline mt-1 flex items-center justify-end gap-1">CERRAR MANUAL <ArrowRight className="w-3 h-3" /></p>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="py-20 flex flex-col items-center justify-center opacity-60 bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200">
-                <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-sm mb-4"><Package className="w-8 h-8 text-slate-300" /></div>
-                <p className="text-slate-500 font-black text-sm uppercase tracking-widest">No hay albaranes sueltos</p>
-              </div>
-            )
-          ) : (
+          {activeTab === 'pend' ? renderPendingGroups() : (
             <InvoicesList facturas={facturasSeguras} searchQ={deferredSearch} selectedUnit={selectedUnit} mode={mode} filterStatus={filterStatus} year={year} businessUnits={BUSINESS_UNITS} sociosReales={SOCIOS_REALES} superNorm={superNorm} onOpenDetail={setSelectedInvoice as any} onTogglePago={handleTogglePago} onDelete={handleDeleteFactura} />
           )}
         </section>
