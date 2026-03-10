@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { FileText, CheckCircle2, Clock, Trash2, Link as LinkIcon, AlertCircle, Building2, User, Sparkles, Package } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-// 🛡️ Mantenemos el tipado estricto
+// 🛡️ Mantenemos el tipado estricto (Asegúrate de exportarlos en InvoicesView)
 import { FacturaExtended, BusinessUnit } from './InvoicesView'; 
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
@@ -22,7 +22,8 @@ interface InvoicesListProps {
 }
 
 /* =======================================================
- * 🧠 HOOK DE FILTRADO ALTO RENDIMIENTO (Protegido Copilot)
+ * 🧠 HOOK DE FILTRADO: LÓGICA DE SUPERVIVENCIA EXTREMA
+ * Nunca asume que un dato existe. Si falta, aplica un fallback.
  * ======================================================= */
 function useInvoicesFilters(
   facturas: FacturaExtended[], 
@@ -36,31 +37,36 @@ function useInvoicesFilters(
 ) {
   return useMemo(() => {
     try {
+      // Si por algún motivo facturas no es un array, devolvemos array vacío para evitar crash
+      if (!Array.isArray(facturas)) return [];
+
       const searchN = searchQ ? superNorm(searchQ) : '';
-      const normalizedSocios = sociosReales.map(s => superNorm(s));
+      const normalizedSocios = Array.isArray(sociosReales) ? sociosReales.map(s => superNorm(s)) : [];
 
-      return facturas.filter(f => {
-        // 1. Siempre descartar cosas rotas o borradores IA
-        if (!f || f.status === 'draft') return false;
+      const list = facturas.filter(f => {
+        // 1. Descartar basura o borradores IA
+        if (!f || typeof f !== 'object') return false;
+        if (f.status === 'draft') return false;
 
-        // 2. Filtro de Año Seguro (Evita que desaparezcan facturas por fallos de string)
+        // 2. Filtro de Año Seguro (Evita fallos de strings rotos)
         if (f.date) {
           const y = new Date(f.date).getFullYear();
-          if (year && y !== year) return false;
+          if (year && !isNaN(y) && y !== year) return false;
         }
 
-        // 3. Filtro Unidad Seguro (Asume 'REST' si no tiene unidad)
-        if (selectedUnit !== 'ALL' && (f.unidad_negocio || 'REST') !== selectedUnit) return false;
+        // 3. Filtro Unidad Seguro (Asume 'REST' si la factura es antigua y no tiene)
+        const unitToCompare = f.unidad_negocio || 'REST';
+        if (selectedUnit !== 'ALL' && unitToCompare !== selectedUnit) return false;
         
-        // 4. JAMÁS mostrar cajas o bancos (Evitar basura en la lista)
+        // 4. JAMÁS mostrar cajas o bancos (Basura en la lista de compras)
         if (f.tipo === 'caja' || (f as any).tipo === 'banco') return false;
 
         // 5. Evaluar Proveedor vs Socio (Optimizado y Seguro)
         const normCliente = superNorm(f.cliente);
         const normProv = superNorm(f.prov);
-        const esSocioPorNombre = normalizedSocios.some(socio => normCliente.includes(socio) || normProv.includes(socio));
+        const esSocioPorNombre = normalizedSocios.some(socio => socio && (normCliente.includes(socio) || normProv.includes(socio)));
         
-        // Si no tiene tipo, asumimos que es compra por defecto para no ocultarla
+        // Si una factura antigua no tiene 'tipo', asumimos que es 'compra' para no ocultarla
         const isCompra = f.tipo ? f.tipo === 'compra' : true;
 
         if (mode === 'proveedor') {
@@ -74,16 +80,24 @@ function useInvoicesFilters(
         if (filterStatus === 'paid' && !f.paid) return false;
         if (filterStatus === 'reconciled' && !f.reconciled) return false;
 
-        // 7. Búsqueda por texto 
+        // 7. Búsqueda por texto segura
         if (searchN) {
           if (!normProv.includes(searchN) && !normCliente.includes(searchN) && !superNorm(f.num || '').includes(searchN)) return false;
         }
         
         return true;
-      }).sort((a, b) => new Date(b?.date || 0).getTime() - new Date(a?.date || 0).getTime());
+      });
+
+      // Ordenación segura: Si la fecha falla, asume 0 para no romper el sort
+      return list.sort((a, b) => {
+        const timeA = a.date ? new Date(a.date).getTime() : 0;
+        const timeB = b.date ? new Date(b.date).getTime() : 0;
+        return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+      });
+
     } catch (e) {
-      console.error("Error en historyList (Filtros rotos):", e);
-      return [];
+      console.error("Error crítico en el filtrado de InvoicesList:", e);
+      return []; // Si todo falla, devolvemos vacío pero NO crasheamos React
     }
   }, [facturas, year, filterStatus, searchQ, selectedUnit, mode, sociosReales, superNorm]);
 }
@@ -107,7 +121,9 @@ export const InvoicesList = React.memo(({
           <FileText className="w-8 h-8 text-slate-300" />
         </div>
         <p className="text-slate-500 font-black text-sm uppercase tracking-widest">Lista Vacía</p>
-        <p className="text-slate-400 text-xs mt-1">No hay {mode === 'socio' ? 'liquidaciones' : 'facturas'} para estos filtros.</p>
+        <p className="text-slate-400 text-xs mt-1 text-center max-w-xs">
+          No hay {mode === 'socio' ? 'liquidaciones' : 'facturas'} para estos filtros en {year}.
+        </p>
       </motion.div>
     );
   }
@@ -116,7 +132,11 @@ export const InvoicesList = React.memo(({
     <div className="space-y-3">
       <AnimatePresence mode="popLayout">
         {historyList.map(f => {
-          const unitConfig = businessUnits.find(u => u.id === (f.unidad_negocio || 'REST'));
+          // Buscamos la unidad con paracaídas por si businessUnits no está listo
+          const unitConfig = Array.isArray(businessUnits) 
+            ? businessUnits.find(u => u.id === (f.unidad_negocio || 'REST')) 
+            : null;
+            
           const titular = mode === 'socio' ? (f.cliente || f.prov || '—') : (f.prov || f.cliente || '—');
 
           return (
@@ -133,7 +153,7 @@ export const InvoicesList = React.memo(({
                 {/* 🏷️ CHIPS DE ESTADO */}
                 <div className="flex flex-wrap items-center gap-2 mb-2">
                   <span className="text-[10px] font-black text-slate-500 bg-slate-100 px-3 py-1 rounded-full uppercase tracking-tighter border border-slate-200">
-                    {f.date}
+                    {f.date || 'Sin fecha'}
                   </span>
                   
                   {unitConfig && (
@@ -146,9 +166,9 @@ export const InvoicesList = React.memo(({
                   )}
 
                   {f.source === 'email-ia' || f.source === 'dropzone' ? (
-                    <span className="text-[9px] font-black text-purple-600 bg-purple-50 px-2.5 py-1 rounded-full border border-purple-200 flex items-center gap-1"><Sparkles className="w-3 h-3"/> IA</span>
+                    <span className="text-[9px] font-black text-purple-600 bg-purple-50 px-2.5 py-1 rounded-full border border-purple-200"><Sparkles className="w-3 h-3 inline mr-1"/> IA</span>
                   ) : (
-                    <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200 flex items-center gap-1"><Package className="w-3 h-3"/> MANUAL</span>
+                    <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200"><Package className="w-3 h-3 inline mr-1"/> MANUAL</span>
                   )}
                   
                   {f.reconciled ? (
@@ -178,7 +198,7 @@ export const InvoicesList = React.memo(({
               <div className="flex items-center justify-between md:justify-end gap-6 md:w-auto w-full border-t md:border-t-0 pt-4 md:pt-0 border-slate-100">
                 <div className="text-left md:text-right">
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Total</p>
-                  <p className="font-black text-slate-900 text-2xl tracking-tighter leading-none">{Num.fmt(Math.abs(Num.parse(f.total)))}</p>
+                  <p className="font-black text-slate-900 text-2xl tracking-tighter leading-none">{Num.fmt(Math.abs(Num.parse(f.total || 0)))}</p>
                 </div>
                 
                 <div className="flex gap-2">
