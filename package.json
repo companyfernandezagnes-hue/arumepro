@@ -23,7 +23,7 @@
     "jspdf": "^2.5.1",
     "jspdf-autotable": "^3.8.2",
     "lucide-react": "^0.546.0",
-    "motion": "^12.23.24",
+    "framer-motion": "^11.0.0",
     "pdfjs-dist": "^3.11.174",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
