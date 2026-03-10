@@ -3,8 +3,6 @@ import {
   FileText, Search, ChevronLeft, ChevronRight, Zap, Users, Building2, Package, CheckCircle2, Clock, Trash2, AlertCircle, Link as LinkIcon, Mail, ArrowRight, X, RefreshCw, Download, Bell, CheckSquare, Hotel, ShoppingBag, Layers, UploadCloud, FileDown, FileArchive
 } from 'lucide-react';
 
-// ✅ LIBRERÍAS ACTIVADAS
-import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { GoogleGenAI } from "@google/genai";
 
@@ -29,9 +27,6 @@ interface InvoicesViewProps {
   onSave: (newData: AppData) => Promise<void>;
 }
 
-// TODO: Extraer a data/partners.ts en el futuro
-const REAL_PARTNERS = ['PAU', 'JERONI', 'AGNES', 'ONLY ONE', 'TIENDA DE SAKES'];
-
 // 🚀 SUPER NORMALIZADOR
 const superNorm = (s: string) => {
   if (!s) return 'desconocido';
@@ -43,8 +38,11 @@ const superNorm = (s: string) => {
 };
 
 export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
-  // ✅ FIX 2: MODO SEGURO
-  const safeData = data || { facturas: [], albaranes: [] };
+  // ✅ MODO SEGURO
+  const safeData = data || { facturas: [], albaranes: [], socios: [] };
+  
+  // ✅ CONEXIÓN A LA NUEVA BASE DE DATOS DE SOCIOS (Soluciona Error 7)
+  const SOCIOS_REALES = safeData.socios?.filter(s => s.active).map(s => s.n) || ['PAU', 'JERONI', 'AGNES', 'ONLY ONE', 'TIENDA DE SAKES'];
 
   const [activeTab, setActiveTab] = useState<'pend' | 'hist'>('pend');
   const [mode, setMode] = useState<'proveedor' | 'socio'>('proveedor');
@@ -73,7 +71,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 🛡️ FIX 3: SALVAVIDAS GLOBAL EXTREMO PARA EL DRAG & DROP
+  // 🛡️ DRAG & DROP HANDLERS SEGUROS
   useEffect(() => {
     const handleGlobalDragEnd = () => {
       dragDepth.current = 0;
@@ -519,11 +517,11 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       if (selectedUnit !== 'ALL' && f.unidad_negocio !== selectedUnit) return false;
       
       if (mode === 'proveedor') {
-        const isSocio = REAL_PARTNERS.some(rp => superNorm(f.cliente).includes(superNorm(rp)));
+        const isSocio = SOCIOS_REALES.some(rp => superNorm(f.cliente).includes(superNorm(rp)));
         if (isSocio) return false;
         if (f.cliente && superNorm(f.cliente) !== 'arume' && superNorm(f.cliente) !== 'zdiario') return false;
       } else {
-        const isSocio = REAL_PARTNERS.some(rp => superNorm(f.cliente).includes(superNorm(rp)) || superNorm(f.prov).includes(superNorm(rp)));
+        const isSocio = SOCIOS_REALES.some(rp => superNorm(f.cliente).includes(superNorm(rp)) || superNorm(f.prov).includes(superNorm(rp)));
         if (!isSocio) return false;
       }
 
@@ -538,9 +536,9 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       }
       return true;
     }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [safeData.facturas, year, filterStatus, searchQ, selectedUnit, mode]);
+  }, [safeData.facturas, year, filterStatus, searchQ, selectedUnit, mode, SOCIOS_REALES]);
 
-  // 🚀 LÓGICA ERP: Control de Pagos y Estados (Soluciona Error 10)
+  // 🚀 LÓGICA ERP: Control de Pagos y Estados
   const handleTogglePago = async (id: string) => {
     const newData = { ...safeData };
     const idx = newData.facturas.findIndex(f => f.id === id);
@@ -569,7 +567,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     }
   };
 
-  // 🛡️ UX SEGURA: Confirmación antes de borrar (Soluciona Error 16)
+  // 🛡️ UX SEGURA: Confirmación antes de borrar
   const handleDeleteFactura = async (id: string) => {
     const fac = safeData.facturas.find(f => f.id === id);
     if (!fac) return;
@@ -606,7 +604,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         overdue.slice(0, 5).map(f => `- ${f.prov}: ${Num.fmt(f.total)} (Venció: ${f.dueDate})`).join('\n') +
         (overdue.length > 5 ? `\n...y ${overdue.length - 5} más.` : '');
       
-      // Aseguramos que no falle si NotificationService no está implementado
       try {
           await NotificationService.sendAlert(safeData, msg, 'WARNING');
           alert("Alerta de vencimientos enviada a Telegram.");
@@ -621,7 +618,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
   return (
     <div 
-      className={cn("animate-fade-in space-y-6 pb-24 min-h-screen relative transition-colors duration-300", isDragging && "bg-indigo-50/50")}
+      className={cn("space-y-6 pb-24 min-h-screen relative transition-colors duration-300", isDragging && "bg-indigo-50/50")}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -631,116 +628,99 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         ✅ Render OK — Datos: {String((safeData?.facturas || []).length)}
       </div>
 
-      <AnimatePresence>
-        {isDragging && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[9999] bg-indigo-600/90 backdrop-blur-sm border-[16px] border-dashed border-white/40 flex flex-col items-center justify-center pointer-events-none"
-          >
-            <motion.div 
-              initial={{ scale: 0.8, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              className="flex flex-col items-center justify-center"
-            >
-              <FileDown className="w-32 h-32 text-white mb-6 animate-bounce" />
-              <h2 className="text-5xl font-black text-white tracking-tighter drop-shadow-lg">¡Suelta tu PDF aquí!</h2>
-              <p className="text-indigo-200 text-xl font-bold mt-4">La IA se encarga de extraer todos los datos</p>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* OVERLAY NATIVO (Sin Framer Motion) */}
+      {isDragging && (
+        <div className="fixed inset-0 z-[9999] bg-indigo-600/90 backdrop-blur-sm border-[16px] border-dashed border-white/40 flex flex-col items-center justify-center pointer-events-none transition-opacity duration-300">
+          <div className="flex flex-col items-center justify-center">
+            <FileDown className="w-32 h-32 text-white mb-6 animate-bounce" />
+            <h2 className="text-5xl font-black text-white tracking-tighter drop-shadow-lg">¡Suelta tu PDF aquí!</h2>
+            <p className="text-indigo-200 text-xl font-bold mt-4">La IA se encarga de extraer todos los datos</p>
+          </div>
+        </div>
+      )}
 
-      <AnimatePresence>
-        {draftsIA.length > 0 && (
-          <motion.div 
-            key="ia-audit"
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="bg-slate-900 p-6 rounded-[2.5rem] shadow-2xl border border-slate-800 relative overflow-hidden"
-          >
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 via-indigo-500 to-emerald-500"></div>
-            <h3 className="text-white text-lg font-black flex items-center gap-2 mb-4">
-              <Mail className="w-5 h-5 text-purple-400 animate-bounce" /> 
-              Borradores y Auditoría 
-              <span className="bg-purple-600 text-xs px-2 py-0.5 rounded-full">{draftsIA.length}</span>
-            </h3>
-            
-            <div className="space-y-4">
-              {draftsIA.map(d => (
-                <div key={d.id} className={cn(
-                  "bg-slate-800/50 p-5 rounded-3xl border transition-colors",
-                  d.cuadraPerfecto ? 'border-emerald-500/50' : 'border-amber-500/50'
-                )}>
-                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                    <div className="flex-1">
-                      <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest mb-1">Leído en el Documento</p>
-                      {d.prov.includes('Emergencia') || d.prov.includes('PDF:') ? (
-                        <h4 className="text-amber-400 font-black text-xl flex items-center gap-2">
-                           <AlertCircle className="w-5 h-5" /> {d.prov}
-                        </h4>
-                      ) : (
-                        <h4 className="text-white font-black text-xl">{d.prov}</h4>
-                      )}
-                      
-                      <p className="text-slate-400 text-xs font-mono">Ref: {d.num} | Fecha: {d.date}</p>
-                      <p className="text-3xl font-black text-white mt-2">{Num.fmt(Math.abs(Num.parse(d.total)))}</p>
-                    </div>
-
-                    <div className="flex-1 bg-slate-900 p-4 rounded-2xl w-full">
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="text-[10px] text-slate-400 font-bold uppercase">Tus Albaranes ({d.candidatos.length})</span>
-                        <span className="text-sm font-black text-white">{Num.fmt(d.sumaAlbaranes)}</span>
-                      </div>
-                      {d.candidatos.length > 0 ? (
-                        <div className="space-y-1 max-h-24 overflow-y-auto custom-scrollbar pr-2">
-                          {d.candidatos.map((c: any) => (
-                            <div key={c.id} className="flex justify-between text-[10px] text-slate-500 border-b border-slate-800 pb-1">
-                              <span>📅 {c.date} - {c.num}</span>
-                              <span className="text-slate-300 font-bold">{Num.fmt(c.total)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-rose-400 text-[10px] font-bold italic py-2">⚠️ No hay albaranes pendientes este mes para este proveedor.</p>
-                      )}
-                    </div>
+      {/* IA AUDIT SECTION NATIVA */}
+      {draftsIA.length > 0 && (
+        <div className="bg-slate-900 p-6 rounded-[2.5rem] shadow-2xl border border-slate-800 relative overflow-hidden transition-all duration-300">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 via-indigo-500 to-emerald-500"></div>
+          <h3 className="text-white text-lg font-black flex items-center gap-2 mb-4">
+            <Mail className="w-5 h-5 text-purple-400 animate-bounce" /> 
+            Borradores y Auditoría 
+            <span className="bg-purple-600 text-xs px-2 py-0.5 rounded-full">{draftsIA.length}</span>
+          </h3>
+          
+          <div className="space-y-4">
+            {draftsIA.map(d => (
+              <div key={d.id} className={cn(
+                "bg-slate-800/50 p-5 rounded-3xl border transition-colors",
+                d.cuadraPerfecto ? 'border-emerald-500/50' : 'border-amber-500/50'
+              )}>
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                  <div className="flex-1">
+                    <p className="text-[10px] text-purple-400 font-bold uppercase tracking-widest mb-1">Leído en el Documento</p>
+                    {d.prov.includes('Emergencia') || d.prov.includes('PDF:') ? (
+                      <h4 className="text-amber-400 font-black text-xl flex items-center gap-2">
+                         <AlertCircle className="w-5 h-5" /> {d.prov}
+                      </h4>
+                    ) : (
+                      <h4 className="text-white font-black text-xl">{d.prov}</h4>
+                    )}
+                    
+                    <p className="text-slate-400 text-xs font-mono">Ref: {d.num} | Fecha: {d.date}</p>
+                    <p className="text-3xl font-black text-white mt-2">{Num.fmt(Math.abs(Num.parse(d.total)))}</p>
                   </div>
 
-                  <div className="mt-4 pt-4 border-t border-slate-700 flex flex-wrap gap-2 items-center justify-between">
-                    <div>
-                      {d.cuadraPerfecto ? (
-                        <span className="bg-emerald-500/20 text-emerald-400 text-xs font-black px-3 py-1 rounded-lg">✅ CUADRA PERFECTO</span>
-                      ) : (
-                        <span className="bg-amber-500/20 text-amber-400 text-xs font-black px-3 py-1 rounded-lg">⚠️ DESCUADRE: {Num.fmt(d.diferencia)}</span>
-                      )}
+                  <div className="flex-1 bg-slate-900 p-4 rounded-2xl w-full">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase">Tus Albaranes ({d.candidatos.length})</span>
+                      <span className="text-sm font-black text-white">{Num.fmt(d.sumaAlbaranes)}</span>
                     </div>
-                    <div className="flex gap-2">
-                      <button 
-                        onClick={() => handleConfirmAuditoriaIA(d.id)}
-                        className={cn(
-                          "text-white text-xs px-5 py-2.5 rounded-xl font-black shadow-lg transition active:scale-95",
-                          d.cuadraPerfecto ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-amber-500 hover:bg-amber-600'
-                        )}
-                      >
-                        {d.cuadraPerfecto ? 'VINCULAR Y CERRAR MES' : 'CERRAR IGNORANDO DIFERENCIA'}
-                      </button>
-                      <button 
-                        onClick={() => handleDiscardDraftIA(d.id)}
-                        className="bg-slate-700 hover:bg-rose-500 text-white text-xs p-2.5 rounded-xl font-black transition"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                    {d.candidatos.length > 0 ? (
+                      <div className="space-y-1 max-h-24 overflow-y-auto custom-scrollbar pr-2">
+                        {d.candidatos.map((c: any) => (
+                          <div key={c.id} className="flex justify-between text-[10px] text-slate-500 border-b border-slate-800 pb-1">
+                            <span>📅 {c.date} - {c.num}</span>
+                            <span className="text-slate-300 font-bold">{Num.fmt(c.total)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-rose-400 text-[10px] font-bold italic py-2">⚠️ No hay albaranes pendientes este mes para este proveedor.</p>
+                    )}
                   </div>
                 </div>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+
+                <div className="mt-4 pt-4 border-t border-slate-700 flex flex-wrap gap-2 items-center justify-between">
+                  <div>
+                    {d.cuadraPerfecto ? (
+                      <span className="bg-emerald-500/20 text-emerald-400 text-xs font-black px-3 py-1 rounded-lg">✅ CUADRA PERFECTO</span>
+                    ) : (
+                      <span className="bg-amber-500/20 text-amber-400 text-xs font-black px-3 py-1 rounded-lg">⚠️ DESCUADRE: {Num.fmt(d.diferencia)}</span>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => handleConfirmAuditoriaIA(d.id)}
+                      className={cn(
+                        "text-white text-xs px-5 py-2.5 rounded-xl font-black shadow-lg transition active:scale-95",
+                        d.cuadraPerfecto ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-amber-500 hover:bg-amber-600'
+                      )}
+                    >
+                      {d.cuadraPerfecto ? 'VINCULAR Y CERRAR MES' : 'CERRAR IGNORANDO DIFERENCIA'}
+                    </button>
+                    <button 
+                      onClick={() => handleDiscardDraftIA(d.id)}
+                      className="bg-slate-700 hover:bg-rose-500 text-white text-xs p-2.5 rounded-xl font-black transition"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <section className="p-6 bg-white rounded-[2.5rem] shadow-sm border border-slate-100 relative z-10">
         <div className="flex flex-col md:flex-row items-center justify-between gap-4 mb-6">
@@ -1026,287 +1006,251 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         </div>
       </section>
 
-      <AnimatePresence>
-        {isExportModalOpen && (
-          <motion.div 
-            key="export-modal"
-            initial={{ opacity: 0 }} 
-            animate={{ opacity: 1 }} 
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex justify-center items-center p-4"
-          >
-            <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" onClick={() => setIsExportModalOpen(false)} />
-            <motion.div 
-              initial={{ scale: 0.95, y: 20 }} 
-              animate={{ scale: 1, y: 0 }} 
-              exit={{ scale: 0.95, y: 20 }}
-              className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl relative z-10"
-            >
-              <h3 className="text-xl font-black text-slate-800 mb-2">Exportar Trimestre</h3>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-6">Generar Excel para Gestoría</p>
-              
-              <div className="space-y-4">
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Año Fiscal</label>
-                  <input 
-                    type="number" value={year} onChange={(e) => setYear(Number(e.target.value))}
-                    className="w-full p-4 bg-slate-50 rounded-2xl text-sm font-black border-0 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Trimestre</label>
-                  <div className="grid grid-cols-4 gap-2">
-                    {[1, 2, 3, 4].map(q => (
-                      <button
-                        key={q} onClick={() => setExportQuarter(q)}
-                        className={cn(
-                          "py-3 rounded-xl text-xs font-black transition",
-                          exportQuarter === q ? "bg-indigo-600 text-white shadow-lg" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
-                        )}
-                      >
-                        Q{q}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                
-                <div className="pt-4">
-                  <button onClick={handleExportGestoria} className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-black text-sm shadow-xl hover:bg-emerald-700 active:scale-95 transition flex justify-center items-center gap-2">
-                    <Download className="w-4 h-4" /> DESCARGAR EXCEL
-                  </button>
-                  <button onClick={() => setIsExportModalOpen(false)} className="w-full text-slate-400 text-xs font-bold py-3 hover:text-slate-600 mt-2">
-                    Cancelar
-                  </button>
+      {/* MODAL EXPORTAR GESTORÍA NATIVO */}
+      {isExportModalOpen && (
+        <div className="fixed inset-0 z-[100] flex justify-center items-center p-4">
+          <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" onClick={() => setIsExportModalOpen(false)} />
+          <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl relative z-10 animate-fade-in">
+            <h3 className="text-xl font-black text-slate-800 mb-2">Exportar Trimestre</h3>
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-6">Generar Excel para Gestoría</p>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Año Fiscal</label>
+                <input 
+                  type="number" value={year} onChange={(e) => setYear(Number(e.target.value))}
+                  className="w-full p-4 bg-slate-50 rounded-2xl text-sm font-black border-0 outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Trimestre</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[1, 2, 3, 4].map(q => (
+                    <button
+                      key={q} onClick={() => setExportQuarter(q)}
+                      className={cn(
+                        "py-3 rounded-xl text-xs font-black transition",
+                        exportQuarter === q ? "bg-indigo-600 text-white shadow-lg" : "bg-slate-100 text-slate-400 hover:bg-slate-200"
+                      )}
+                    >
+                      Q{q}
+                    </button>
+                  ))}
                 </div>
               </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {selectedGroup && (
-          <motion.div 
-            key="group-modal"
-            initial={{ opacity: 0 }} 
-            animate={{ opacity: 1 }} 
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex justify-center items-center p-4"
-          >
-            <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" onClick={() => setSelectedGroup(null)} />
-            <motion.div 
-              initial={{ scale: 0.95, y: 20 }} 
-              animate={{ scale: 1, y: 0 }} 
-              exit={{ scale: 0.95, y: 20 }}
-              className="bg-white w-full max-w-2xl rounded-[2.5rem] p-8 shadow-2xl relative z-10 flex flex-col max-h-[90vh]"
-            >
-              <button onClick={() => setSelectedGroup(null)} className="absolute top-6 right-6 text-slate-300 hover:text-slate-500 text-2xl transition">✕</button>
               
-              <div className="border-b border-slate-100 pb-4 mb-4 flex justify-between items-end">
-                <div>
-                  <h3 className="text-2xl font-black text-slate-800">{selectedGroup.label}</h3>
-                  <div className="flex items-center gap-2 mt-1">
-                    <p className="text-xs font-bold text-indigo-500 uppercase tracking-widest">Cierre de mes manual</p>
-                    <span className="text-[10px] font-black bg-slate-100 text-slate-500 px-2 py-0.5 rounded uppercase">
-                      {BUSINESS_UNITS.find(u => u.id === selectedGroup.unitId)?.name}
-                    </span>
-                  </div>
-                </div>
-                
-                <button onClick={handleToggleAllAlbs} className="flex items-center gap-1 text-[10px] font-black uppercase text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition">
-                  <CheckSquare className="w-3 h-3" />
-                  {modalForm.selectedAlbs.length === selectedGroup.ids.length ? 'Desmarcar Todos' : 'Marcar Todos'}
+              <div className="pt-4">
+                <button onClick={handleExportGestoria} className="w-full bg-emerald-600 text-white py-4 rounded-2xl font-black text-sm shadow-xl hover:bg-emerald-700 active:scale-95 transition flex justify-center items-center gap-2">
+                  <Download className="w-4 h-4" /> DESCARGAR EXCEL
+                </button>
+                <button onClick={() => setIsExportModalOpen(false)} className="w-full text-slate-400 text-xs font-bold py-3 hover:text-slate-600 mt-2">
+                  Cancelar
                 </button>
               </div>
-              
-              <div className="space-y-2 flex-1 overflow-y-auto pr-2 custom-scrollbar bg-slate-50 rounded-2xl p-4 border border-slate-100">
-                {(safeData.albaranes || []).filter(a => selectedGroup.ids.includes(a.id)).map(a => (
-                  <label key={a.id} className="flex justify-between items-center py-3 border-b border-slate-200 last:border-0 cursor-pointer hover:bg-white px-3 rounded-xl transition shadow-sm hover:shadow">
-                    <div className="flex items-center gap-4">
-                      <div className="relative flex items-center justify-center">
-                        <input 
-                          type="checkbox" 
-                          checked={modalForm.selectedAlbs.includes(a.id)}
-                          onChange={(e) => {
-                            const newSelected = e.target.checked 
-                              ? [...modalForm.selectedAlbs, a.id]
-                              : modalForm.selectedAlbs.filter(id => id !== a.id);
-                            setModalForm({ ...modalForm, selectedAlbs: newSelected });
-                          }}
-                          className="w-5 h-5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 cursor-pointer" 
-                        />
-                      </div>
-                      <div>
-                        <p className="font-bold text-slate-700 text-sm">{a.date}</p>
-                        <p className="text-[10px] font-mono text-slate-400 mt-0.5">Ref: {a.num || 'S/N'}</p>
-                      </div>
-                    </div>
-                    <p className="font-black text-slate-900">{Num.fmt(a.total)}</p>
-                  </label>
-                ))}
-              </div>
-              
-              <div className="mt-6 space-y-4">
-                <div className="flex items-center justify-between bg-slate-900 p-5 rounded-2xl text-white shadow-lg">
-                  <div>
-                    <span className="text-xs font-black uppercase tracking-widest text-slate-400 block mb-1">Total a Facturar</span>
-                    <span className="text-[10px] text-indigo-400 font-bold">{modalForm.selectedAlbs.length} albaranes seleccionados</span>
-                  </div>
-                  <span className="text-4xl font-black text-emerald-400 tracking-tighter">
-                    {Num.fmt(modalForm.selectedAlbs.reduce((acc, id) => {
-                      const alb = safeData.albaranes.find(a => a.id === id);
-                      return acc + (Num.parse(alb?.total) || 0);
-                    }, 0))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL AGRUPAR ALBARANES NATIVO */}
+      {selectedGroup && (
+        <div className="fixed inset-0 z-[100] flex justify-center items-center p-4">
+          <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" onClick={() => setSelectedGroup(null)} />
+          <div className="bg-white w-full max-w-2xl rounded-[2.5rem] p-8 shadow-2xl relative z-10 flex flex-col max-h-[90vh] animate-fade-in">
+            <button onClick={() => setSelectedGroup(null)} className="absolute top-6 right-6 text-slate-300 hover:text-slate-500 text-2xl transition">✕</button>
+            
+            <div className="border-b border-slate-100 pb-4 mb-4 flex justify-between items-end">
+              <div>
+                <h3 className="text-2xl font-black text-slate-800">{selectedGroup.label}</h3>
+                <div className="flex items-center gap-2 mt-1">
+                  <p className="text-xs font-bold text-indigo-500 uppercase tracking-widest">Cierre de mes manual</p>
+                  <span className="text-[10px] font-black bg-slate-100 text-slate-500 px-2 py-0.5 rounded uppercase">
+                    {BUSINESS_UNITS.find(u => u.id === selectedGroup.unitId)?.name}
                   </span>
                 </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {mode === 'socio' ? (
-                    <div>
-                      <label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Seleccionar Socio</label>
-                      <select 
-                        value={modalForm.num.startsWith('SOCIO-') ? modalForm.num.split('-')[1] : ''}
-                        onChange={(e) => {
-                          const socio = e.target.value;
-                          setModalForm({ ...modalForm, num: `LIQ-${socio}-${modalForm.date.replace(/-/g,'')}` });
-                          setSelectedGroup(prev => prev ? { ...prev, label: socio } : null);
-                        }}
-                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:border-indigo-500 focus:bg-white transition"
-                      >
-                        <option value="">-- Selecciona Socio --</option>
-                        {REAL_PARTNERS.map(p => <option key={p} value={p}>{p}</option>)}
-                      </select>
-                    </div>
-                  ) : (
-                    <div>
-                      <label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Nº Factura Oficial</label>
+              </div>
+              
+              <button onClick={handleToggleAllAlbs} className="flex items-center gap-1 text-[10px] font-black uppercase text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition">
+                <CheckSquare className="w-3 h-3" />
+                {modalForm.selectedAlbs.length === selectedGroup.ids.length ? 'Desmarcar Todos' : 'Marcar Todos'}
+              </button>
+            </div>
+            
+            <div className="space-y-2 flex-1 overflow-y-auto pr-2 custom-scrollbar bg-slate-50 rounded-2xl p-4 border border-slate-100">
+              {(safeData.albaranes || []).filter(a => selectedGroup.ids.includes(a.id)).map(a => (
+                <label key={a.id} className="flex justify-between items-center py-3 border-b border-slate-200 last:border-0 cursor-pointer hover:bg-white px-3 rounded-xl transition shadow-sm hover:shadow">
+                  <div className="flex items-center gap-4">
+                    <div className="relative flex items-center justify-center">
                       <input 
-                        type="text" 
-                        value={modalForm.num}
-                        onChange={(e) => setModalForm({ ...modalForm, num: e.target.value })}
-                        placeholder="Ej: F-2024/012" 
-                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:border-indigo-500 focus:bg-white transition"
+                        type="checkbox" 
+                        checked={modalForm.selectedAlbs.includes(a.id)}
+                        onChange={(e) => {
+                          const newSelected = e.target.checked 
+                            ? [...modalForm.selectedAlbs, a.id]
+                            : modalForm.selectedAlbs.filter(id => id !== a.id);
+                          setModalForm({ ...modalForm, selectedAlbs: newSelected });
+                        }}
+                        className="w-5 h-5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 cursor-pointer" 
                       />
                     </div>
-                  )}
+                    <div>
+                      <p className="font-bold text-slate-700 text-sm">{a.date}</p>
+                      <p className="text-[10px] font-mono text-slate-400 mt-0.5">Ref: {a.num || 'S/N'}</p>
+                    </div>
+                  </div>
+                  <p className="font-black text-slate-900">{Num.fmt(a.total)}</p>
+                </label>
+              ))}
+            </div>
+            
+            <div className="mt-6 space-y-4">
+              <div className="flex items-center justify-between bg-slate-900 p-5 rounded-2xl text-white shadow-lg">
+                <div>
+                  <span className="text-xs font-black uppercase tracking-widest text-slate-400 block mb-1">Total a Facturar</span>
+                  <span className="text-[10px] text-indigo-400 font-bold">{modalForm.selectedAlbs.length} albaranes seleccionados</span>
+                </div>
+                <span className="text-4xl font-black text-emerald-400 tracking-tighter">
+                  {Num.fmt(modalForm.selectedAlbs.reduce((acc, id) => {
+                    const alb = safeData.albaranes.find(a => a.id === id);
+                    return acc + (Num.parse(alb?.total) || 0);
+                  }, 0))}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {mode === 'socio' ? (
                   <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Fecha de Emisión</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Seleccionar Socio</label>
+                    <select 
+                      value={modalForm.num.startsWith('SOCIO-') ? modalForm.num.split('-')[1] : ''}
+                      onChange={(e) => {
+                        const socio = e.target.value;
+                        setModalForm({ ...modalForm, num: `LIQ-${socio}-${modalForm.date.replace(/-/g,'')}` });
+                        setSelectedGroup(prev => prev ? { ...prev, label: socio } : null);
+                      }}
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:border-indigo-500 focus:bg-white transition"
+                    >
+                      <option value="">-- Selecciona Socio --</option>
+                      {SOCIOS_REALES.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Nº Factura Oficial</label>
                     <input 
-                      type="date" 
-                      value={modalForm.date}
-                      onChange={(e) => setModalForm({ ...modalForm, date: e.target.value })}
-                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:border-indigo-500 focus:bg-white transition cursor-pointer"
+                      type="text" 
+                      value={modalForm.num}
+                      onChange={(e) => setModalForm({ ...modalForm, num: e.target.value })}
+                      placeholder="Ej: F-2024/012" 
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:border-indigo-500 focus:bg-white transition"
                     />
                   </div>
-                </div>
-
-                <button 
-                  onClick={handleConfirmManualInvoice}
-                  disabled={modalForm.selectedAlbs.length === 0}
-                  className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black text-sm shadow-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition"
-                >
-                  GUARDAR FACTURA OFICIAL
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {selectedInvoice && (
-          <motion.div 
-            key="detail-modal"
-            initial={{ opacity: 0 }} 
-            animate={{ opacity: 1 }} 
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] flex justify-center items-center p-4"
-          >
-            <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" onClick={() => setSelectedInvoice(null)} />
-            <motion.div 
-              initial={{ scale: 0.95, y: 20 }} 
-              animate={{ scale: 1, y: 0 }} 
-              exit={{ scale: 0.95, y: 20 }}
-              className="bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl relative z-10"
-            >
-              <button onClick={() => setSelectedInvoice(null)} className="absolute top-6 right-6 text-slate-300 hover:text-slate-500 text-2xl transition">✕</button>
-              
-              <div className="flex items-center gap-3 mb-1">
-                <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center">
-                  <FileText className="w-5 h-5" />
-                </div>
+                )}
                 <div>
-                  <h3 className="text-xl font-black text-slate-800 leading-tight">
-                    {mode === 'socio' ? (selectedInvoice.cliente || selectedInvoice.prov) : (selectedInvoice.prov || selectedInvoice.cliente)}
-                  </h3>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Detalle de Factura</p>
+                  <label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Fecha de Emisión</label>
+                  <input 
+                    type="date" 
+                    value={modalForm.date}
+                    onChange={(e) => setModalForm({ ...modalForm, date: e.target.value })}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:border-indigo-500 focus:bg-white transition cursor-pointer"
+                  />
                 </div>
               </div>
 
-              <div className="bg-slate-50 p-4 rounded-2xl mt-6 mb-6 border border-slate-100">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-[10px] font-black text-slate-400 uppercase">Referencia</span>
-                  <span className="text-xs font-mono font-bold text-slate-700">{selectedInvoice.num}</span>
-                </div>
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-[10px] font-black text-slate-400 uppercase">Fecha Emisión</span>
-                  <span className="text-xs font-bold text-slate-700">{selectedInvoice.date}</span>
-                </div>
-                <div className="flex justify-between items-center border-t border-slate-200 pt-2 mt-2">
-                  <span className="text-[10px] font-black text-slate-400 uppercase">Unidad Asignada</span>
-                  <span className={cn(
-                    "text-[9px] font-black px-2 py-0.5 rounded border uppercase",
-                    BUSINESS_UNITS.find(u => u.id === selectedInvoice.unidad_negocio)?.color,
-                    BUSINESS_UNITS.find(u => u.id === selectedInvoice.unidad_negocio)?.bg,
-                    "border-current"
-                  )}>
-                    {BUSINESS_UNITS.find(u => u.id === selectedInvoice.unidad_negocio)?.name || 'Restaurante'}
-                  </span>
-                </div>
+              <button 
+                onClick={handleConfirmManualInvoice}
+                disabled={modalForm.selectedAlbs.length === 0}
+                className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black text-sm shadow-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition"
+              >
+                GUARDAR FACTURA OFICIAL
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
-                {selectedInvoice.file_base64 && (
-                  <div className="mt-4 pt-4 border-t border-slate-200">
-                    <button 
-                      onClick={() => handleDownloadFile(selectedInvoice)}
-                      className="w-full bg-slate-800 text-white py-3 rounded-xl font-black text-xs hover:bg-slate-900 transition flex items-center justify-center gap-2"
-                    >
-                      <FileArchive className="w-4 h-4" /> DESCARGAR DOCUMENTO ORIGINAL
-                    </button>
-                  </div>
-                )}
+      {/* DETALLE FACTURA MODAL NATIVO */}
+      {selectedInvoice && (
+        <div className="fixed inset-0 z-[100] flex justify-center items-center p-4">
+          <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" onClick={() => setSelectedInvoice(null)} />
+          <div className="bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl relative z-10 animate-fade-in">
+            <button onClick={() => setSelectedInvoice(null)} className="absolute top-6 right-6 text-slate-300 hover:text-slate-500 text-2xl transition">✕</button>
+            
+            <div className="flex items-center gap-3 mb-1">
+              <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center">
+                <FileText className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-xl font-black text-slate-800 leading-tight">
+                  {mode === 'socio' ? (selectedInvoice.cliente || selectedInvoice.prov) : (selectedInvoice.prov || selectedInvoice.cliente)}
+                </h3>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Detalle de Factura</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-2xl mt-6 mb-6 border border-slate-100">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-[10px] font-black text-slate-400 uppercase">Referencia</span>
+                <span className="text-xs font-mono font-bold text-slate-700">{selectedInvoice.num}</span>
+              </div>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-[10px] font-black text-slate-400 uppercase">Fecha Emisión</span>
+                <span className="text-xs font-bold text-slate-700">{selectedInvoice.date}</span>
+              </div>
+              <div className="flex justify-between items-center border-t border-slate-200 pt-2 mt-2">
+                <span className="text-[10px] font-black text-slate-400 uppercase">Unidad Asignada</span>
+                <span className={cn(
+                  "text-[9px] font-black px-2 py-0.5 rounded border uppercase",
+                  BUSINESS_UNITS.find(u => u.id === selectedInvoice.unidad_negocio)?.color,
+                  BUSINESS_UNITS.find(u => u.id === selectedInvoice.unidad_negocio)?.bg,
+                  "border-current"
+                )}>
+                  {BUSINESS_UNITS.find(u => u.id === selectedInvoice.unidad_negocio)?.name || 'Restaurante'}
+                </span>
               </div>
 
-              <div className="space-y-2 mb-6 max-h-48 overflow-y-auto custom-scrollbar pr-2">
-                {selectedInvoice.albaranIdsArr && selectedInvoice.albaranIdsArr.length > 0 ? (
-                  <>
-                    <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-3 border-b border-indigo-100 pb-2">Albaranes Vinculados ({selectedInvoice.albaranIdsArr.length})</p>
-                    {selectedInvoice.albaranIdsArr.map(id => {
-                      const alb = safeData.albaranes.find(a => a.id === id);
-                      return alb ? (
-                        <div key={id} className="flex justify-between text-xs py-2 px-3 bg-white border border-slate-100 rounded-xl text-slate-600 font-bold hover:shadow-sm transition">
-                          <span className="flex items-center gap-2"><Package className="w-3 h-3 text-slate-300"/> {alb.date}</span>
-                          <span className="text-slate-900">{Num.fmt(alb.total)}</span>
-                        </div>
-                      ) : null;
-                    })}
-                  </>
-                ) : (
-                  <div className="text-center py-6 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                    <Zap className="w-6 h-6 text-slate-300 mx-auto mb-2" />
-                    <p className="text-xs text-slate-500 font-bold">Gasto Directo</p>
-                    <p className="text-[9px] text-slate-400 uppercase">Sin albaranes previos</p>
-                  </div>
-                )}
-              </div>
+              {selectedInvoice.file_base64 && (
+                <div className="mt-4 pt-4 border-t border-slate-200">
+                  <button 
+                    onClick={() => handleDownloadFile(selectedInvoice)}
+                    className="w-full bg-slate-800 text-white py-3 rounded-xl font-black text-xs hover:bg-slate-900 transition flex items-center justify-center gap-2"
+                  >
+                    <FileArchive className="w-4 h-4" /> DESCARGAR DOCUMENTO ORIGINAL
+                  </button>
+                </div>
+              )}
+            </div>
 
-              <div className="flex justify-between items-end bg-slate-900 p-5 rounded-2xl text-white shadow-lg mt-4">
-                <span className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Total Factura</span>
-                <span className="text-3xl font-black">{Num.fmt(Math.abs(Num.parse(selectedInvoice.total)))}</span>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            <div className="space-y-2 mb-6 max-h-48 overflow-y-auto custom-scrollbar pr-2">
+              {selectedInvoice.albaranIdsArr && selectedInvoice.albaranIdsArr.length > 0 ? (
+                <>
+                  <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-3 border-b border-indigo-100 pb-2">Albaranes Vinculados ({selectedInvoice.albaranIdsArr.length})</p>
+                  {selectedInvoice.albaranIdsArr.map(id => {
+                    const alb = safeData.albaranes.find(a => a.id === id);
+                    return alb ? (
+                      <div key={id} className="flex justify-between text-xs py-2 px-3 bg-white border border-slate-100 rounded-xl text-slate-600 font-bold hover:shadow-sm transition">
+                        <span className="flex items-center gap-2"><Package className="w-3 h-3 text-slate-300"/> {alb.date}</span>
+                        <span className="text-slate-900">{Num.fmt(alb.total)}</span>
+                      </div>
+                    ) : null;
+                  })}
+                </>
+              ) : (
+                <div className="text-center py-6 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                  <Zap className="w-6 h-6 text-slate-300 mx-auto mb-2" />
+                  <p className="text-xs text-slate-500 font-bold">Gasto Directo</p>
+                  <p className="text-[9px] text-slate-400 uppercase">Sin albaranes previos</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-between items-end bg-slate-900 p-5 rounded-2xl text-white shadow-lg mt-4">
+              <span className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Total Factura</span>
+              <span className="text-3xl font-black">{Num.fmt(Math.abs(Num.parse(selectedInvoice.total)))}</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
