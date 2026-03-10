@@ -12,6 +12,10 @@ import { cn } from '../lib/utils';
 import { proxyFetch } from '../services/api';
 import { NotificationService } from '../services/notifications';
 
+// 🚀 IMPORTAMOS NUESTROS COMPONENTES SEPARADOS
+import { InvoicesList } from '../components/InvoicesList';
+import { InvoiceDetailModal } from '../components/InvoiceDetailModal';
+
 // 🚀 TIPOS B2B
 export type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
 
@@ -28,7 +32,7 @@ interface InvoicesViewProps {
 }
 
 // 🚀 SUPER NORMALIZADOR (Blindado)
-const superNorm = (s: string | undefined | null) => {
+export const superNorm = (s: string | undefined | null) => {
   if (!s || typeof s !== 'string') return 'desconocido';
   try {
     return s.toLowerCase()
@@ -512,41 +516,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     setSelectedGroup(null);
   };
 
-  // --- HISTORY (Blindado) ---
-  const historyList = useMemo(() => {
-    try {
-      return facturasSeguras.filter(f => {
-        if (!f) return false;
-        if (f.status === 'draft') return false;
-        if (!(f.date || '').startsWith(year.toString())) return false;
-        if (selectedUnit !== 'ALL' && f.unidad_negocio !== selectedUnit) return false;
-        
-        if (mode === 'proveedor') {
-          const isSocio = SOCIOS_REALES.some(rp => superNorm(f.cliente).includes(superNorm(rp)));
-          if (isSocio) return false;
-          if (f.cliente && superNorm(f.cliente) !== 'arume' && superNorm(f.cliente) !== 'zdiario') return false;
-        } else {
-          const isSocio = SOCIOS_REALES.some(rp => superNorm(f.cliente).includes(superNorm(rp)) || superNorm(f.prov).includes(superNorm(rp)));
-          if (!isSocio) return false;
-        }
-
-        if (filterStatus === 'pending' && f.paid) return false;
-        if (filterStatus === 'paid' && !f.paid) return false;
-        if (filterStatus === 'reconciled' && !f.reconciled) return false;
-
-        if (searchQ) {
-          const ownerNorm = superNorm(f.prov || f.cliente || '');
-          const searchN = superNorm(searchQ);
-          if (!ownerNorm.includes(searchN) && !superNorm(f.num || '').includes(searchN)) return false;
-        }
-        return true;
-      }).sort((a, b) => new Date(b?.date || 0).getTime() - new Date(a?.date || 0).getTime());
-    } catch (e) {
-      console.error("Error en historyList:", e);
-      return [];
-    }
-  }, [facturasSeguras, year, filterStatus, searchQ, selectedUnit, mode, SOCIOS_REALES]);
-
   // 🚀 LÓGICA ERP: Control de Pagos y Estados
   const handleTogglePago = async (id: string) => {
     const newData = { ...safeData, facturas: [...facturasSeguras] };
@@ -947,76 +916,21 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                 </div>
               )
             ) : (
-              historyList.length > 0 ? (
-                <div className="space-y-3">
-                  {historyList.map(f => {
-                    const unitConfig = BUSINESS_UNITS.find(u => u.id === f.unidad_negocio);
-                    return (
-                      <div key={f.id} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 hover:shadow-md transition">
-                        <div className="flex-1 cursor-pointer" onClick={() => setSelectedInvoice(f)}>
-                          <div className="flex flex-wrap items-center gap-2 mb-1">
-                            <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded uppercase">{f.date}</span>
-                            
-                            {unitConfig && (
-                              <span className={cn(
-                                "text-[9px] font-black px-2 py-0.5 rounded border uppercase",
-                                unitConfig.color, unitConfig.bg, "border-current opacity-70"
-                              )}>
-                                {unitConfig.name.split(' ')[0]}
-                              </span>
-                            )}
-
-                            {f.source === 'email-ia' ? (
-                              <span className="text-[9px] font-black text-purple-600 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">🤖 LEÍDA POR IA</span>
-                            ) : (
-                              <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">📦 CERRADA MANUAL</span>
-                            )}
-                            {f.reconciled ? (
-                              <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
-                                <LinkIcon className="w-2 h-2" /> BANCO OK
-                              </span>
-                            ) : (
-                              <span className="text-[9px] font-black text-rose-500 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">ESPERANDO BANCO</span>
-                            )}
-                          </div>
-                          <p className="font-black text-slate-800 text-base">
-                            {mode === 'socio' ? (f.cliente || f.prov || '—') : (f.prov || f.cliente || '—')}
-                          </p>
-                          <p className="text-xs text-slate-400 font-bold font-mono mt-0.5">Ref: {f.num}</p>
-                        </div>
-                        
-                        <div className="flex items-center justify-between md:justify-end gap-6 md:w-auto w-full border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
-                          <div className="text-left md:text-right">
-                            <p className="font-black text-slate-900 text-xl">{Num.fmt(Math.abs(Num.parse(f.total)))}</p>
-                          </div>
-                          <div className="flex gap-2">
-                            <button 
-                              onClick={() => handleTogglePago(f.id)}
-                              className={cn(
-                                "px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all shadow-sm flex items-center gap-1",
-                                f.paid ? 'bg-emerald-500 text-white hover:bg-emerald-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                              )}
-                            >
-                              {f.paid ? <><CheckCircle2 className="w-3 h-3"/> CASH OK</> : <><Clock className="w-3 h-3"/> PENDIENTE</>}
-                            </button>
-                            <button 
-                              onClick={() => handleDeleteFactura(f.id)}
-                              className="w-9 h-9 flex items-center justify-center bg-white border border-slate-200 text-slate-400 rounded-xl hover:bg-rose-500 hover:border-rose-500 hover:text-white transition shadow-sm"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="py-20 flex flex-col items-center justify-center opacity-50 bg-slate-50 rounded-3xl border-2 border-dashed border-slate-200">
-                  <FileText className="w-12 h-12 mb-3 text-slate-300" />
-                  <p className="text-slate-500 font-bold text-sm">No hay facturas cerradas.</p>
-                </div>
-              )
+              // 🚀 IMPORTAMOS EL COMPONENTE DE LISTA DE FACTURAS
+              <InvoicesList 
+                facturas={facturasSeguras} 
+                searchQ={searchQ} 
+                selectedUnit={selectedUnit} 
+                mode={mode} 
+                filterStatus={filterStatus} 
+                year={year} 
+                businessUnits={BUSINESS_UNITS} 
+                sociosReales={SOCIOS_REALES} 
+                superNorm={superNorm} 
+                onOpenDetail={setSelectedInvoice} 
+                onTogglePago={handleTogglePago} 
+                onDelete={handleDeleteFactura} 
+              />
             )}
           </div>
         </section>
@@ -1184,92 +1098,20 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           </div>
         )}
 
-        {/* DETALLE FACTURA MODAL NATIVO */}
+        {/* DETALLE FACTURA MODAL NATIVO (IMPORTAMOS EL NUEVO COMPONENTE) */}
         {selectedInvoice && (
-          <div className="fixed inset-0 z-[100] flex justify-center items-center p-4">
-            <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" onClick={() => setSelectedInvoice(null)} />
-            <div className="bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl relative z-10 animate-fade-in">
-              <button onClick={() => setSelectedInvoice(null)} className="absolute top-6 right-6 text-slate-300 hover:text-slate-500 text-2xl transition">✕</button>
-              
-              <div className="flex items-center gap-3 mb-1">
-                <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center">
-                  <FileText className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-black text-slate-800 leading-tight">
-                    {mode === 'socio' ? (selectedInvoice.cliente || selectedInvoice.prov) : (selectedInvoice.prov || selectedInvoice.cliente)}
-                  </h3>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Detalle de Factura</p>
-                </div>
-              </div>
-
-              <div className="bg-slate-50 p-4 rounded-2xl mt-6 mb-6 border border-slate-100">
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-[10px] font-black text-slate-400 uppercase">Referencia</span>
-                  <span className="text-xs font-mono font-bold text-slate-700">{selectedInvoice.num}</span>
-                </div>
-                <div className="flex justify-between items-center mb-2">
-                  <span className="text-[10px] font-black text-slate-400 uppercase">Fecha Emisión</span>
-                  <span className="text-xs font-bold text-slate-700">{selectedInvoice.date}</span>
-                </div>
-                <div className="flex justify-between items-center border-t border-slate-200 pt-2 mt-2">
-                  <span className="text-[10px] font-black text-slate-400 uppercase">Unidad Asignada</span>
-                  <span className={cn(
-                    "text-[9px] font-black px-2 py-0.5 rounded border uppercase",
-                    BUSINESS_UNITS.find(u => u.id === selectedInvoice.unidad_negocio)?.color,
-                    BUSINESS_UNITS.find(u => u.id === selectedInvoice.unidad_negocio)?.bg,
-                    "border-current"
-                  )}>
-                    {BUSINESS_UNITS.find(u => u.id === selectedInvoice.unidad_negocio)?.name || 'Restaurante'}
-                  </span>
-                </div>
-
-                {selectedInvoice.file_base64 && (
-                  <div className="mt-4 pt-4 border-t border-slate-200">
-                    <button 
-                      onClick={() => handleDownloadFile(selectedInvoice)}
-                      className="w-full bg-slate-800 text-white py-3 rounded-xl font-black text-xs hover:bg-slate-900 transition flex items-center justify-center gap-2"
-                    >
-                      <FileArchive className="w-4 h-4" /> DESCARGAR DOCUMENTO ORIGINAL
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-2 mb-6 max-h-48 overflow-y-auto custom-scrollbar pr-2">
-                {selectedInvoice.albaranIdsArr && selectedInvoice.albaranIdsArr.length > 0 ? (
-                  <>
-                    <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-3 border-b border-indigo-100 pb-2">Albaranes Vinculados ({selectedInvoice.albaranIdsArr.length})</p>
-                    {selectedInvoice.albaranIdsArr.map(id => {
-                      const alb = albaranesSeguros.find(a => a.id === id);
-                      return alb ? (
-                        <div key={id} className="flex justify-between text-xs py-2 px-3 bg-white border border-slate-100 rounded-xl text-slate-600 font-bold hover:shadow-sm transition">
-                          <span className="flex items-center gap-2"><Package className="w-3 h-3 text-slate-300"/> {alb.date}</span>
-                          <span className="text-slate-900">{Num.fmt(alb.total)}</span>
-                        </div>
-                      ) : null;
-                    })}
-                  </>
-                ) : (
-                  <div className="text-center py-6 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                    <Zap className="w-6 h-6 text-slate-300 mx-auto mb-2" />
-                    <p className="text-xs text-slate-500 font-bold">Gasto Directo</p>
-                    <p className="text-[9px] text-slate-400 uppercase">Sin albaranes previos</p>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex justify-between items-end bg-slate-900 p-5 rounded-2xl text-white shadow-lg mt-4">
-                <span className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Total Factura</span>
-                <span className="text-3xl font-black">{Num.fmt(Math.abs(Num.parse(selectedInvoice.total)))}</span>
-              </div>
-            </div>
-          </div>
+          <InvoiceDetailModal 
+            factura={selectedInvoice} 
+            albaranes={albaranesSeguros} 
+            businessUnits={BUSINESS_UNITS} 
+            mode={mode} 
+            onClose={() => setSelectedInvoice(null)} 
+            onDownloadFile={handleDownloadFile} 
+          />
         )}
       </div>
     );
   } catch (error) {
-    // Si algo catastrófico ocurre, mostramos este mensaje en lugar de pantalla blanca
     console.error("Error crítico renderizando InvoicesView:", error);
     return (
       <div className="p-8 bg-red-50 text-red-600 rounded-2xl border border-red-200">
