@@ -78,7 +78,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const safeData = data || { albaranes: [], socios: [] };
   const albaranesSeguros = Array.isArray(safeData.albaranes) ? safeData.albaranes : [];
   
-  // 🛡️ SALVAVIDAS: Si no hay socios, cargamos estos por defecto
+  // 🛡️ SALVAVIDAS: Si el localStorage no tiene socios, usamos estos por defecto para que no se bloquee el desplegable.
   const fallbackSocios = [{ id: "s1", n: "PAU" }, { id: "s2", n: "JERONI" }, { id: "s3", n: "AGNES" }, { id: "s4", n: "ONLY ONE" }, { id: "s5", n: "TIENDA DE SAKES" }];
   const sociosReales = (Array.isArray(safeData.socios) && safeData.socios.length > 0) ? safeData.socios.filter(s => s?.active) : fallbackSocios;
 
@@ -100,9 +100,9 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   // ESTADOS DEL MODAL
   const [editForm, setEditForm] = useState<Albaran | null>(null);
 
-  // IA y Lector Dummy para que no de error la UI (Mantén aquí tu lógica completa si la necesitas)
-  const handleDirectScan = () => alert("Sube tu archivo");
-  const startVoiceRecording = () => alert("Inicia voz");
+  // IA y Lector Dummy para que no de error la UI
+  const handleDirectScan = () => alert("Sube tu archivo (Configura IA primero)");
+  const startVoiceRecording = () => alert("Inicia voz (Configura IA primero)");
 
   const parseSmartLine = (line: string) => {
     let clean = line.replace(/[€$]/g, '').replace(/,/g, '.').trim();
@@ -170,13 +170,12 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     setEditForm(JSON.parse(JSON.stringify(albaran))); 
   };
 
-  // 🛡️ GUARDADO BLINDADO (El que fallaba)
+  // 🛡️ GUARDADO BLINDADO CONTRA ERRORES
   const handleSaveEdits = async (e?: React.MouseEvent) => {
-    if (e) e.preventDefault(); // Fundamental para no recargar la página
-
+    if (e) e.preventDefault(); // Previene recarga de la página al pulsar enter o guardar
     try {
       if (!editForm) return;
-      const newData = JSON.parse(JSON.stringify(safeData)); // Copia profunda fresca
+      const newData = JSON.parse(JSON.stringify(safeData)); // Copia profunda segura
       if (!newData.albaranes) newData.albaranes = [];
       
       const index = newData.albaranes.findIndex((a: Albaran) => a.id === editForm.id);
@@ -217,12 +216,12 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       };
 
       await onSave(newData);
-      setEditForm(null);
-      alert("✅ Albarán actualizado y recalculado con éxito.");
+      setEditForm(null); // Solo cerramos si el guardado funcionó
+      alert("✅ Albarán actualizado y guardado correctamente.");
 
     } catch (error) {
       console.error(error);
-      alert("⚠️ Hubo un error procesando el guardado. Revisa los datos introducidos.");
+      alert("⚠️ Hubo un error al calcular los totales. Revisa que no haya casillas vacías.");
     }
   };
 
@@ -232,12 +231,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     await onSave(newData);
     setEditForm(null);
   };
-
-  // KPIs
-  const kpis = useMemo(() => {
-    let totalGlobal = 0, totalMes = 0, totalTrim = 0;
-    return { totalGlobal, totalMes, totalTrim };
-  }, [albaranesSeguros, selectedUnit]);
 
   return (
     <div className="space-y-6 pb-24">
@@ -297,4 +290,41 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
               )}
             </div>
 
-            <button type="button" onClick={handleSaveAlbaran} className="w-full mt-2 bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-xl hover:bg-
+            <button type="button" onClick={handleSaveAlbaran} className="w-full mt-2 bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-xl hover:bg-indigo-700 transition active:scale-95">GUARDAR COMPRA</button>
+          </div>
+        </div>
+
+        {/* Lista Central (IMPORTAMOS EL NUEVO COMPONENTE) */}
+        <div className="lg:col-span-2 space-y-6">
+          <div className="bg-white p-2 rounded-full shadow-sm border border-slate-100 flex items-center px-4">
+            <Search className="w-4 h-4 text-slate-400 shrink-0" />
+            <input value={searchQ} onChange={(e) => setSearchQ(e.target.value)} type="text" placeholder="Buscar por proveedor o ref..." className="bg-transparent text-sm font-bold outline-none w-full text-slate-600 pl-3" />
+          </div>
+
+          <AlbaranesList 
+            albaranes={albaranesSeguros} 
+            searchQ={searchQ} 
+            selectedUnit={selectedUnit} 
+            businessUnits={BUSINESS_UNITS} 
+            onOpenEdit={openEditModal} 
+          />
+        </div>
+      </div>
+
+      {/* MODAL DE EDICIÓN (IMPORTAMOS EL NUEVO COMPONENTE) */}
+      {editForm && (
+        <AlbaranEditModal 
+          editForm={editForm} 
+          sociosReales={sociosReales}
+          setEditForm={setEditForm} 
+          onClose={() => setEditForm(null)} 
+          onSave={handleSaveEdits} 
+          onDelete={handleDelete}
+          recordingMode={recordingMode}
+          startVoiceRecording={startVoiceRecording}
+        />
+      )}
+
+    </div>
+  );
+};
