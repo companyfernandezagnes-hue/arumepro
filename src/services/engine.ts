@@ -1,7 +1,7 @@
-import { AppData, GastoFijo, Activo } from "../types";
+import { AppData, GastoFijo, Activo, Albaran, Factura, Cierre } from "../types";
 
 /* ===========================
- * NUMÉRICAS ROBUSTAS (A prueba de bombas)
+ * 🔢 NUMÉRICAS ROBUSTAS 
  * =========================== */
 export const Num = {
   parse: (val: unknown): number => {
@@ -10,20 +10,19 @@ export const Num = {
 
     let s = String(val).trim();
 
-    // Paréntesis contables -> negativo (Ej: (100) -> -100)
+    // Soporte para paréntesis contables (100) -> -100
     let negative = false;
     if (s.startsWith("(") && s.endsWith(")")) {
       negative = true;
       s = s.slice(1, -1);
     }
 
-    // Quitar moneda y signos no numéricos (excepto . , -)
-    s = s.replace(/[^\d.,\-+]/g, "").replace(/[\u00A0\u202F\s']/g, "");
+    // Limpieza de caracteres no numéricos
+    s = s.replace(/[^\d.,\-+]/g, "").replace(/[\s']/g, "");
 
     const sign = s.includes("-") ? -1 : 1;
     s = s.replace(/[+-]/g, "");
 
-    // Detección de separador decimal automático
     const lastDot = s.lastIndexOf(".");
     const lastComma = s.lastIndexOf(",");
     let decimalSep: "." | "," | null = null;
@@ -31,7 +30,6 @@ export const Num = {
     if (lastDot >= 0 || lastComma >= 0) {
       if (lastDot > lastComma) decimalSep = ".";
       else if (lastComma > lastDot) decimalSep = ",";
-      else decimalSep = lastDot >= 0 ? "." : lastComma >= 0 ? "," : null;
     }
 
     if (decimalSep === ",") {
@@ -52,86 +50,66 @@ export const Num = {
       style: "currency",
       currency: "EUR",
       minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
     }).format(Number.isFinite(val) ? val : 0),
 
   round2: (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100,
 };
 
 /* ===========================
- * FECHAS ROBUSTAS
+ * 📅 FECHAS ROBUSTAS
  * =========================== */
 export const DateUtil = {
   today: (): string => new Date().toISOString().split("T")[0],
 
   getMonthBounds: (month: number, year: number) => {
-    const m = month >= 1 && month <= 12 ? month - 1 : month; // normalizar
-    const start = new Date(year, m, 1);
-    const end = new Date(year, m + 1, 0);
-    start.setHours(0, 0, 0, 0);
-    end.setHours(23, 59, 59, 999);
+    // month viene de 1 a 12
+    const start = new Date(year, month - 1, 1, 0, 0, 0, 0);
+    const end = new Date(year, month, 0, 23, 59, 59, 999);
     return { start, end };
   },
 
   parse: (d: any): Date => {
     if (!d) return new Date();
     if (d instanceof Date) return d;
-    if (typeof d === "number") return new Date(d);
-
     const s = String(d).trim();
-    const mEU = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/;
-    const mISO = /^(\d{4})-(\d{1,2})-(\d{1,2})$/;
-
-    let y = 0, m = 0, day = 0;
-    if (mEU.test(s)) {
-      const [, dd, mm, yyyy] = s.match(mEU)!;
-      y = Number(yyyy.length === 2 ? "20" + yyyy : yyyy);
-      m = Number(mm) - 1;
-      day = Number(dd);
-      return new Date(y, m, day);
+    // Soporte ISO y formato DD/MM/YYYY
+    if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(s)) {
+      const [dd, mm, yyyy] = s.split("/");
+      return new Date(Number(yyyy), Number(mm) - 1, Number(dd));
     }
-    if (mISO.test(s)) {
-      const [, yyyy, mm, dd] = s.match(mISO)!;
-      y = Number(yyyy);
-      m = Number(mm) - 1;
-      day = Number(dd);
-      return new Date(y, m, day);
-    }
-    return new Date(s);
+    const date = new Date(s);
+    return isNaN(date.getTime()) ? new Date() : date;
   },
 };
 
-export function calcularAmortizacionMensual(activos: Activo[]): number {
-  if (!activos || activos.length === 0) return 0;
-  let total = 0;
+/* ===========================
+ * 📈 CÁLCULOS ERP
+ * =========================== */
+export function calcularAmortizacionMensual(activos: Activo[] = []): number {
   const hoy = new Date();
+  let total = 0;
   for (const a of activos) {
-    const importe = Num.parse(a?.importe);
-    const vida = Number(a?.vida_util_meses);
-    const fCompra = DateUtil.parse(a?.fecha_compra);
+    const importe = Num.parse(a.importe);
+    const vida = Number(a.vida_util_meses) || 0;
+    const fCompra = DateUtil.parse(a.fecha_compra);
 
-    if (!(importe > 0) || !(vida > 0) || isNaN(fCompra.getTime())) continue;
+    if (importe <= 0 || vida <= 0) continue;
 
-    const meses = (hoy.getFullYear() - fCompra.getFullYear()) * 12 + (hoy.getMonth() - fCompra.getMonth());
-    if (meses >= 0 && meses < vida) {
+    const mesesTranscurridos = (hoy.getFullYear() - fCompra.getFullYear()) * 12 + (hoy.getMonth() - fCompra.getMonth());
+    if (mesesTranscurridos >= 0 && mesesTranscurridos < vida) {
       total += importe / vida;
     }
   }
   return Num.round2(total);
 }
 
-/* ===========================
- * MOTOR PRINCIPAL (ARUME MULTI-LOCAL ENGINE)
- * =========================== */
 export const ArumeEngine = {
-  // Calculadora de impuestos usada en Albaranes
   calcularImpuestos: (totalConIva: number, tipoIva: 4 | 10 | 21 = 10) => {
     const total = Num.parse(totalConIva);
     const base = total / (1 + (tipoIva / 100));
-    const cuota = total - base;
     return { 
       base: Num.round2(base), 
-      cuota: Num.round2(cuota), 
+      cuota: Num.round2(total - base), 
       total: Num.round2(total) 
     };
   },
@@ -141,7 +119,6 @@ export const ArumeEngine = {
     const sMs = start.getTime();
     const eMs = end.getTime();
 
-    // 🚀 ESTRUCTURA BASE MULTI-UNIDAD
     const unitBreakdown: Record<string, { income: number; expenses: number; profit: number }> = {
       REST: { income: 0, expenses: 0, profit: 0 },
       DLV: { income: 0, expenses: 0, profit: 0 },
@@ -149,123 +126,92 @@ export const ArumeEngine = {
       CORP: { income: 0, expenses: 0, profit: 0 },
     };
 
-    // A. INGRESOS (Cajas Z + Facturas de Catering)
+    // 1. INGRESOS (Z + Facturas)
     let cajaZ = 0, facturasB2B = 0;
-    
-    // 1. Cajas Z (Restaurante y Tienda)
-    for (const c of (data.cierres || [])) {
+
+    (data.cierres || []).forEach(c => {
       const d = DateUtil.parse(c.date).getTime();
       if (d >= sMs && d <= eMs) {
         const val = Num.parse(c.totalVenta);
         cajaZ += val;
-        
         const u = c.unitId || 'REST';
-        if (unitBreakdown[u] && u !== 'DLV') { // DLV no usa TPV
-          unitBreakdown[u].income += val;
-        }
+        if (unitBreakdown[u]) unitBreakdown[u].income += val;
       }
-    }
+    });
 
-    // 2. Facturas de Catering B2B (Solo suman los ingresos de la unidad DLV y clientes reales)
-    for (const f of (data.facturas || [])) {
+    (data.facturas || []).forEach(f => {
       const d = DateUtil.parse(f.date).getTime();
-      if (d < sMs || d > eMs) continue;
-      
+      if (d < sMs || d > eMs) return;
       const val = Num.parse(f.total);
-      const isZ = String(f.num ?? "").toUpperCase().startsWith("Z");
-      const isIngreso = val > 0; // Evitamos facturas rectificativas si no aplican
+      const isZ = String(f.num || "").toUpperCase().startsWith("Z");
       const u = (f as any).unidad_negocio || 'REST';
 
-      if (!isZ && isIngreso && f.cliente !== 'Z DIARIO') {
-        if (u === 'DLV') {
-          facturasB2B += val;
-        }
-        if (unitBreakdown[u]) {
-          unitBreakdown[u].income += val;
-        }
+      if (!isZ && f.cliente !== 'Z DIARIO') {
+        if (u === 'DLV') facturasB2B += val;
+        if (unitBreakdown[u]) unitBreakdown[u].income += val;
       }
-    }
+    });
 
-    const totalIngresos = Num.round2(cajaZ + facturasB2B);
-
-    // B. GASTOS VARIABLES (Albaranes)
+    // 2. GASTOS (Albaranes)
     let gComida = 0, gBebida = 0, gOtros = 0;
-    for (const a of (data.albaranes || [])) {
+    (data.albaranes || []).forEach(a => {
       const d = DateUtil.parse(a.date).getTime();
-      if (d < sMs || d > eMs) continue;
+      if (d < sMs || d > eMs) return;
 
       const total = Num.parse(a.total);
       const prov = String(a.prov || "").toLowerCase();
       const cat = String((a as any).category || "").toLowerCase();
-      const u = a.unitId || 'REST'; // Si no tiene, por defecto a Restaurante
+      const u = a.unitId || 'REST';
 
-      if (cat === 'comida' || prov.match(/fruta|carne|pesca|makro|mercadona|pan|huevo|verdu|aliment|chef|congelad|lidl|dia|eroski|assortiment|gourmet/)) {
+      if (cat === 'comida' || prov.match(/fruta|carne|pesca|makro|pan|huevo|aliment|chef|gourmet/)) {
         gComida += total;
-      } else if (cat === 'bebida' || prov.match(/estrella|mahou|coca|vino|bebida|licor|bodega|drinks|cervez|agua|cafe|schweppes|pepsi|sake/)) {
+      } else if (cat === 'bebida' || prov.match(/estrella|mahou|coca|vino|licor|bodega|cervez|sake/)) {
         gBebida += total;
       } else {
         gOtros += total;
       }
+      if (unitBreakdown[u]) unitBreakdown[u].expenses += total;
+    });
 
-      // Sumamos al bloque correspondiente
-      if (unitBreakdown[u]) {
-        unitBreakdown[u].expenses += total;
-      }
-    }
-
-    // C. GASTOS FIJOS (Se asumen devengados siempre para calcular rentabilidad real)
+    // 3. GASTOS FIJOS Y AMORTIZACIÓN
     let gPersonal = 0, gEstructura = 0;
-    for (const g of (data.gastos_fijos || [])) {
-      if (g.active === false) continue;
-
+    (data.gastos_fijos || []).forEach(g => {
+      if (g.active === false) return;
       let val = Num.parse(g.amount);
       const freq = String(g.freq || "").toLowerCase();
-      
       if (freq === 'anual') val /= 12;
-      else if (freq === 'semestral') val /= 6;
       else if (freq === 'trimestral') val /= 3;
-      else if (freq === 'bimensual') val /= 2;
       else if (freq === 'semanal') val *= 4.33;
 
       if (g.cat === 'personal') gPersonal += val;
       else gEstructura += val;
 
       const u = g.unitId || 'REST';
-      if (unitBreakdown[u]) {
-        unitBreakdown[u].expenses += val;
-      }
-    }
+      if (unitBreakdown[u]) unitBreakdown[u].expenses += val;
+    });
 
-    // D. AMORTIZACIONES (Se las solemos cargar al corporativo o divididas)
     const gAmort = calcularAmortizacionMensual(data.activos);
-    unitBreakdown['CORP'].expenses += gAmort; // Por defecto al bloque Socios/Corporativo
+    unitBreakdown['CORP'].expenses += gAmort;
 
+    const totalIngresos = Num.round2(cajaZ + facturasB2B);
     const totalGastos = Num.round2(gComida + gBebida + gOtros + gPersonal + gEstructura + gAmort);
 
-    // E. CALCULAR BENEFICIOS NETOS POR BLOQUE
+    // 4. RATIOS Y FINALIZACIÓN
     Object.keys(unitBreakdown).forEach(k => {
-      unitBreakdown[k].income = Num.round2(unitBreakdown[k].income);
-      unitBreakdown[k].expenses = Num.round2(unitBreakdown[k].expenses);
       unitBreakdown[k].profit = Num.round2(unitBreakdown[k].income - unitBreakdown[k].expenses);
     });
 
-    // Ratios
-    const safeDiv = (num: number, den: number) => (den ? num / den : 0);
-    
+    const safeDiv = (n: number, d: number) => (d > 0 ? (n / d) * 100 : 0);
+
     return {
       ingresos: { total: totalIngresos, caja: Num.round2(cajaZ), b2b: Num.round2(facturasB2B) },
-      gastos: { 
-        total: totalGastos, comida: Num.round2(gComida), bebida: Num.round2(gBebida), 
-        personal: Num.round2(gPersonal), otros: Num.round2(gOtros), 
-        estructura: Num.round2(gEstructura), amortizacion: Num.round2(gAmort) 
-      },
+      gastos: { total: totalGastos, comida: gComida, bebida: gBebida, personal: gPersonal, estructura: gEstructura, amortizacion: gAmort },
       neto: Num.round2(totalIngresos - totalGastos),
-      unitBreakdown, // 🚀 AHORA EL DASHBOARD RECIBE ESTO PERFECTAMENTE CALCULADO
+      unitBreakdown,
       ratios: {
-        foodCost: Num.round2(safeDiv(gComida, totalIngresos) * 100),
-        drinkCost: Num.round2(safeDiv(gBebida, totalIngresos) * 100),
-        staffCost: Num.round2(safeDiv(gPersonal, totalIngresos) * 100),
-        primeCost: Num.round2(safeDiv(gComida + gBebida + gPersonal, totalIngresos) * 100)
+        foodCost: Num.round2(safeDiv(gComida, totalIngresos)),
+        staffCost: Num.round2(safeDiv(gPersonal, totalIngresos)),
+        primeCost: Num.round2(safeDiv(gComida + gBebida + gPersonal, totalIngresos))
       }
     };
   }
