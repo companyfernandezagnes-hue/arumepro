@@ -46,12 +46,15 @@ export const AlbaranEditModal = ({ editForm, sociosReales, setEditForm, onClose,
   const vaciarItems = () => setEditForm(prev => prev ? ({ ...prev, items: [] }) : prev);
 
   return (
-    <div className="fixed inset-0 z-[200] flex justify-center items-start pt-10 md:items-center md:pt-0 p-4">
+    // 🚀 FIX: flex-col y justify-end asegura que no se salga de la pantalla en móviles
+    <div className="fixed inset-0 z-[200] flex flex-col justify-end md:justify-center items-center p-0 md:p-4">
       <div onClick={() => !recordingMode && onClose()} className="absolute inset-0 bg-slate-900/90 backdrop-blur-sm" />
       
-      <div className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl relative z-10 flex flex-col max-h-[85vh] overflow-hidden animate-fade-in">
+      {/* 🚀 FIX: h-[90vh] asegura que el modal ocupe máximo el 90% de tu pantalla */}
+      <div className="bg-white w-full max-w-2xl rounded-t-[2.5rem] md:rounded-[2.5rem] shadow-2xl relative z-10 flex flex-col h-[90vh] md:max-h-[85vh] overflow-hidden animate-fade-in">
         
-        <div className="p-6 md:p-8 border-b border-slate-100 flex justify-between items-end bg-white relative z-20">
+        {/* 📌 CABECERA FIJA (shrink-0 impide que se aplaste) */}
+        <div className="p-6 border-b border-slate-100 flex justify-between items-end bg-white relative z-20 shrink-0">
             <button type="button" disabled={recordingMode !== null} onClick={onClose} className="absolute top-6 right-6 text-slate-300 hover:text-slate-500 text-2xl transition disabled:opacity-0"><X className="w-6 h-6" /></button>
           <div>
             <h3 className="text-2xl font-black text-slate-800 tracking-tighter">Editando Albarán</h3>
@@ -59,7 +62,8 @@ export const AlbaranEditModal = ({ editForm, sociosReales, setEditForm, onClose,
           </div>
         </div>
         
-        <div className="flex-1 overflow-y-auto p-6 md:p-8 pt-4 custom-scrollbar space-y-6">
+        {/* 📜 ÁREA DE SCROLL (flex-1 hace que ocupe el centro y overflow-y-auto le da scroll propio) */}
+        <div className="flex-1 overflow-y-auto p-6 pt-4 custom-scrollbar space-y-6">
           
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
@@ -72,7 +76,6 @@ export const AlbaranEditModal = ({ editForm, sociosReales, setEditForm, onClose,
               <input type="date" value={editForm.date} onChange={e => setEditForm(prev => prev ? {...prev, date: e.target.value} : null)} className="w-full bg-white border border-slate-200 rounded p-1 text-sm font-bold outline-none focus:border-indigo-500" />
             </div>
 
-            {/* 🚀 SELECTOR DE SOCIOS A PRUEBA DE FALLOS */}
             <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
               <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Pagado por (Socio)</p>
               <select 
@@ -129,7 +132,7 @@ export const AlbaranEditModal = ({ editForm, sociosReales, setEditForm, onClose,
             </div>
           </div>
 
-          <div className="flex justify-between items-center bg-slate-900 p-6 rounded-[2rem] text-white shadow-xl">
+          <div className="flex justify-between items-center bg-slate-900 p-6 rounded-[2rem] text-white shadow-xl mb-4">
             <div><p className="text-[10px] font-black text-slate-400 uppercase">Total Importe</p><p className="text-3xl font-black text-emerald-400">{Num.fmt(editForm.total)}</p></div>
             <div className="text-right">
               <label className="flex items-center gap-2 cursor-pointer bg-slate-800 p-2 rounded-xl">
@@ -139,12 +142,13 @@ export const AlbaranEditModal = ({ editForm, sociosReales, setEditForm, onClose,
           </div>
         </div>
 
-        {/* 🚀 BOTONES STICKY QUE NO RECARGAN LA PÁGINA */}
-        <div className="p-6 md:p-8 pt-4 pb-6 bg-white border-t border-slate-100 flex gap-3 relative z-20 shadow-[0_-10px_20px_-10px_rgba(0,0,0,0.05)]">
+        {/* 📌 FOOTER FIJO CON BOTONES (shrink-0 garantiza que JAMÁS se oculte) */}
+        <div className="p-4 md:p-6 bg-white border-t border-slate-100 flex gap-3 relative z-20 shadow-[0_-10px_20px_-10px_rgba(0,0,0,0.05)] shrink-0 pb-8 md:pb-6">
           <button type="button" onClick={() => onDelete(editForm.id)} className="w-12 bg-rose-50 text-rose-500 rounded-2xl flex items-center justify-center hover:bg-rose-100 transition"><Trash2 className="w-4 h-4" /></button>
           <button type="button" onClick={onClose} className="flex-1 bg-slate-100 text-slate-600 py-4 rounded-2xl font-black text-xs hover:bg-slate-200 transition">CANCELAR</button>
           <button type="button" onClick={onSave} className="flex-[2] bg-indigo-600 text-white py-4 rounded-2xl font-black text-xs hover:bg-indigo-700 transition flex justify-center items-center gap-2 shadow-lg"><Save className="w-4 h-4" /> GUARDAR CAMBIOS</button>
         </div>
+
       </div>
     </div>
   );
