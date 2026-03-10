@@ -63,6 +63,14 @@ export const INITIAL_DATA: AppData = {
     { name: "Alquiler local", id: "dvt9qwg4q", dia_pago: 9, freq: "mensual", amount: 2705.09, cat: "local", active: true, unitId: "REST" },
     { name: "Cuota Autónomos Socios", id: "aut-1", dia_pago: 30, freq: "mensual", amount: 600.00, cat: "impuestos", active: true, unitId: "CORP" }
   ],
+  // 🚀 SECCIÓN PROFESIONAL PARA SOCIOS AÑADIDA
+  socios: [
+    { id: "socio-1", n: "PAU", email: "", active: true },
+    { id: "socio-2", n: "JERONI", email: "", active: true },
+    { id: "socio-3", n: "AGNES", email: "", active: true },
+    { id: "socio-4", n: "ONLY ONE", email: "", active: true },
+    { id: "socio-5", n: "TIENDA DE SAKES", email: "", active: true }
+  ],
   platos: [],
   ventas_menu: [],
   cierres_mensuales: [],
@@ -71,6 +79,6 @@ export const INITIAL_DATA: AppData = {
   diario: [],
   priceHistory: {},
   sales_history: [],
-  liquidaciones: [], // 🚀 PREPARADO PARA GUARDAR LOS REPARTOS DEL 20% Y 10%
+  liquidaciones: [], 
   control_pagos: {}
 };
