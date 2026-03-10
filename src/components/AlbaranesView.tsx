@@ -77,7 +77,10 @@ function reconcileAlbaran(ai: AlbaranIA) {
 export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const safeData = data || { albaranes: [], socios: [] };
   const albaranesSeguros = Array.isArray(safeData.albaranes) ? safeData.albaranes : [];
-  const sociosReales = Array.isArray(safeData.socios) ? safeData.socios.filter(s => s?.active) : [];
+  
+  // 🛡️ SALVAVIDAS: Si no hay socios, cargamos estos por defecto
+  const fallbackSocios = [{ id: "s1", n: "PAU" }, { id: "s2", n: "JERONI" }, { id: "s3", n: "AGNES" }, { id: "s4", n: "ONLY ONE" }, { id: "s5", n: "TIENDA DE SAKES" }];
+  const sociosReales = (Array.isArray(safeData.socios) && safeData.socios.length > 0) ? safeData.socios.filter(s => s?.active) : fallbackSocios;
 
   const [searchQ, setSearchQ] = useState('');
   const [selectedUnit, setSelectedUnit] = useState<BusinessUnit | 'ALL'>('ALL'); 
@@ -140,7 +143,8 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     }
   };
 
-  const handleSaveAlbaran = async () => {
+  const handleSaveAlbaran = async (e: React.MouseEvent) => {
+    e.preventDefault();
     if (!form.prov) return alert("Por favor, introduce el nombre del proveedor.");
     const newData = { ...safeData, albaranes: [...albaranesSeguros] };
     const taxesArray = Object.values(liveTotals.taxes) as { b: number; i: number }[];
@@ -166,26 +170,59 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     setEditForm(JSON.parse(JSON.stringify(albaran))); 
   };
 
-  const handleSaveEdits = async () => {
-    if (!editForm) return;
-    const newData = { ...safeData, albaranes: [...albaranesSeguros] };
-    const index = newData.albaranes.findIndex(a => a.id === editForm.id);
-    if (index !== -1) {
+  // 🛡️ GUARDADO BLINDADO (El que fallaba)
+  const handleSaveEdits = async (e?: React.MouseEvent) => {
+    if (e) e.preventDefault(); // Fundamental para no recargar la página
+
+    try {
+      if (!editForm) return;
+      const newData = JSON.parse(JSON.stringify(safeData)); // Copia profunda fresca
+      if (!newData.albaranes) newData.albaranes = [];
+      
+      const index = newData.albaranes.findIndex((a: Albaran) => a.id === editForm.id);
+      
+      if (index === -1) {
+        alert("⚠️ Error: No se encontró el albarán original en la base de datos.");
+        return;
+      }
+
+      // Limpiamos los datos por si quedó alguna celda vacía al editar
+      const safeLines = (editForm.items || []).map((it: any) => ({ 
+        qty: Number(it.q) || 1, 
+        name: it.n || "Varios", 
+        unit: 'ud', 
+        unit_price: Number(it.unitPrice) || 0, 
+        tax_rate: (Number(it.rate) as 4|10|21) || 10, 
+        total: Number(it.t) || 0 
+      }));
+
       const al: AlbaranIA = {
-        proveedor: editForm.prov, fecha: editForm.date, num: editForm.num || 'S/N', unidad: editForm.unitId,
-        lineas: (editForm.items || []).map(it => ({ qty: it.q, name: it.n, unit: 'ud', unit_price: it.unitPrice || 0, tax_rate: (it.rate as 4|10|21) || 10, total: it.t }))
+        proveedor: editForm.prov || "Desconocido", 
+        fecha: editForm.date || DateUtil.today(), 
+        num: editForm.num || 'S/N', 
+        unidad: editForm.unitId || 'REST',
+        lineas: safeLines
       };
+      
       const rec = reconcileAlbaran(al);
+      
       newData.albaranes[index] = {
         ...editForm,
         socio: editForm.socio || "Arume",
         unitId: editForm.unitId || "REST",
         items: rec.lineas.map(l => ({ q: l.qty, n: l.name, t: l.total, rate: l.tax_rate, base: l.base, tax: l.tax, unitPrice: l.unit_price })),
-        total: rec.sum_total, base: rec.sum_base, taxes: rec.sum_tax
+        total: rec.sum_total, 
+        base: rec.sum_base, 
+        taxes: rec.sum_tax
       };
+
       await onSave(newData);
       setEditForm(null);
       alert("✅ Albarán actualizado y recalculado con éxito.");
+
+    } catch (error) {
+      console.error(error);
+      alert("⚠️ Hubo un error procesando el guardado. Revisa los datos introducidos.");
     }
   };
 
@@ -232,7 +269,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
             <div className={cn("mb-4 p-3 rounded-2xl border transition-colors", form.unitId === 'REST' ? "bg-indigo-50/50 border-indigo-100" : form.unitId === 'DLV' ? "bg-amber-50/50 border-amber-100" : "bg-emerald-50/50 border-emerald-100")}>
               <div className="grid grid-cols-2 gap-2">
                 {BUSINESS_UNITS.map(unit => (
-                  <button key={unit.id} onClick={() => setForm({ ...form, unitId: unit.id })} className={cn("p-2 rounded-xl border-2 transition-all flex items-center gap-1", form.unitId === unit.id ? `${unit.color.replace('text-', 'border-')} ${unit.bg} ${unit.color} shadow-sm` : "border-slate-100 bg-white text-slate-400 grayscale hover:grayscale-0")}><unit.icon className="w-3 h-3" /><span className="text-[9px] font-black uppercase">{unit.name}</span></button>
+                  <button type="button" key={unit.id} onClick={() => setForm({ ...form, unitId: unit.id })} className={cn("p-2 rounded-xl border-2 transition-all flex items-center gap-1", form.unitId === unit.id ? `${unit.color.replace('text-', 'border-')} ${unit.bg} ${unit.color} shadow-sm` : "border-slate-100 bg-white text-slate-400 grayscale hover:grayscale-0")}><unit.icon className="w-3 h-3" /><span className="text-[9px] font-black uppercase">{unit.name}</span></button>
                 ))}
               </div>
             </div>
@@ -248,53 +285,16 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
             <div className="flex items-center gap-1 mb-2 bg-slate-50 p-2 rounded-xl border border-slate-100">
               <input type="text" value={quickCalc.name} onChange={(e) => setQuickCalc({ ...quickCalc, name: e.target.value })} placeholder="Producto..." className="w-1/2 p-2 bg-white rounded-lg text-xs font-bold outline-none" />
               <input type="number" value={quickCalc.total} onChange={(e) => setQuickCalc({ ...quickCalc, total: e.target.value })} placeholder="Total €" className="w-1/4 p-2 bg-white rounded-lg text-xs font-bold outline-none text-right" />
-              <button onClick={handleQuickAdd} className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center hover:bg-indigo-200 transition"><Plus className="w-4 h-4" /></button>
+              <button type="button" onClick={handleQuickAdd} className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center hover:bg-indigo-200 transition"><Plus className="w-4 h-4" /></button>
             </div>
 
             <div className="relative group">
               <textarea value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="Ej: 5 kg Salmón 150.00" className="w-full h-32 bg-slate-50 rounded-2xl p-4 pr-10 text-xs font-mono border-0 outline-none resize-none mb-3 shadow-inner focus:bg-white transition" />
               {form.text && (
-                <button onClick={() => setForm({...form, text: ''})} className="absolute top-4 right-4 text-slate-300 hover:text-rose-500 transition">
+                <button type="button" onClick={() => setForm({...form, text: ''})} className="absolute top-4 right-4 text-slate-300 hover:text-rose-500 transition">
                   <XCircle className="w-5 h-5" />
                 </button>
               )}
             </div>
 
-            <button onClick={handleSaveAlbaran} className="w-full mt-2 bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-xl hover:bg-indigo-700 transition active:scale-95">GUARDAR COMPRA</button>
-          </div>
-        </div>
-
-        {/* Lista Central (IMPORTAMOS EL NUEVO COMPONENTE) */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white p-2 rounded-full shadow-sm border border-slate-100 flex items-center px-4">
-            <Search className="w-4 h-4 text-slate-400 shrink-0" />
-            <input value={searchQ} onChange={(e) => setSearchQ(e.target.value)} type="text" placeholder="Buscar por proveedor o ref..." className="bg-transparent text-sm font-bold outline-none w-full text-slate-600 pl-3" />
-          </div>
-
-          <AlbaranesList 
-            albaranes={albaranesSeguros} 
-            searchQ={searchQ} 
-            selectedUnit={selectedUnit} 
-            businessUnits={BUSINESS_UNITS} 
-            onOpenEdit={openEditModal} 
-          />
-        </div>
-      </div>
-
-      {/* MODAL DE EDICIÓN (IMPORTAMOS EL NUEVO COMPONENTE) */}
-      {editForm && (
-        <AlbaranEditModal 
-          editForm={editForm} 
-          sociosReales={sociosReales}
-          setEditForm={setEditForm} 
-          onClose={() => setEditForm(null)} 
-          onSave={handleSaveEdits} 
-          onDelete={handleDelete}
-          recordingMode={recordingMode}
-          startVoiceRecording={startVoiceRecording}
-        />
-      )}
-
-    </div>
-  );
-};
+            <button type="button" onClick={handleSaveAlbaran} className="w-full mt-2 bg-indigo-600 text-white py-4 rounded-2xl font-black shadow-xl hover:bg-
