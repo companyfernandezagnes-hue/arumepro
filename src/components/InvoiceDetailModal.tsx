@@ -3,6 +3,7 @@ import {
   FileText, FileArchive, Package, Zap, X, Calendar, Hash, ShieldCheck, Link as LinkIcon
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+// 🛡️ Tipos importados correctamente
 import { FacturaExtended, BusinessUnit } from './InvoicesView';
 import { Albaran } from '../types';
 import { Num } from '../services/engine';
@@ -25,8 +26,9 @@ interface InvoiceDetailModalProps {
   onDownloadFile: (factura: FacturaExtended) => void;
 }
 
-// 🏷️ CHIPS DE ESTADO (Consistentes con el Pipeline)
-const statusChip = (f: FacturaExtended) => {
+// 🏷️ CHIPS DE ESTADO: Protegido contra factura undefined
+const statusChip = (f: FacturaExtended | undefined | null) => {
+  if (!f) return { label: 'DESCONOCIDO', cls: 'bg-slate-50 text-slate-600 border-slate-200' };
   if (f.reconciled) return { label: 'CONCILIADA', cls: 'bg-blue-50 text-blue-600 border-blue-200' };
   switch (f.status) {
     case 'paid':       return { label: 'PAGADA',     cls: 'bg-emerald-50 text-emerald-600 border-emerald-200' };
@@ -39,7 +41,7 @@ const statusChip = (f: FacturaExtended) => {
   }
 };
 
-// ♿ ENVOLTORIO DE ACCESIBILIDAD: Atrapa el foco del teclado dentro del modal
+// ♿ ENVOLTORIO DE ACCESIBILIDAD: Atrapa el foco para que no rompa el scroll del fondo
 function useFocusTrap(active: boolean) {
   const ref = useRef<HTMLDivElement | null>(null);
   
@@ -72,10 +74,10 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
   factura, albaranes, businessUnits, mode, onClose, onDownloadFile
 }: InvoiceDetailModalProps) {
 
-  // 🛡️ PROTECCIÓN CRÍTICA: Si no hay factura, no renderizamos nada (Evita Pantalla Azul)
-  if (!factura) return null;
+  // 🛡️ PARACAÍDAS 1: Si no hay factura, destruimos el modal antes de que crashee
+  if (!factura || typeof factura !== 'object') return null;
 
-  // ♿ Cierre con tecla ESC
+  // ♿ Cierre seguro con tecla ESC
   useEffect(() => {
     const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onEsc);
@@ -84,45 +86,62 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
 
   const trapRef = useFocusTrap(true);
 
+  // 🛡️ PARACAÍDAS 2: Arrays siempre seguros, aunque vengan corruptos
+  const safeBusinessUnits = Array.isArray(businessUnits) ? businessUnits : [];
+  const safeAlbaranes = Array.isArray(albaranes) ? albaranes : [];
+
   // ✅ Indexación rápida de Unidades
   const unitById = useMemo(() => {
     const map = new Map<BusinessUnit, BusinessUnitCfg>();
-    for (const u of businessUnits || []) map.set(u.id, u);
+    for (const u of safeBusinessUnits) {
+      if (u && u.id) map.set(u.id, u);
+    }
     return map;
-  }, [businessUnits]);
+  }, [safeBusinessUnits]);
 
-  // ✅ Saneamiento de cadenas de texto (Seguridad)
+  // 🛡️ PARACAÍDAS 3: Saneamiento extremo de cadenas de texto
   const titular = useMemo(() => {
     const raw = mode === 'socio' ? (factura.cliente || factura.prov) : (factura.prov || factura.cliente);
-    return (raw || 'Desconocido').trim().toUpperCase();
+    return typeof raw === 'string' ? raw.trim().toUpperCase() : 'DESCONOCIDO';
   }, [factura, mode]);
 
-  const refStr  = (factura.num || 'S/N').trim().toUpperCase();
-  const dateStr = factura.date || 'FECHA DESCONOCIDA';
+  const refStr  = typeof factura.num === 'string' ? factura.num.trim().toUpperCase() : 'S/N';
+  const dateStr = typeof factura.date === 'string' ? factura.date : 'FECHA DESCONOCIDA';
 
-  // ✅ Albaranes vinculados seguros
+  // 🛡️ PARACAÍDAS 4: Filtrado de Albaranes seguro
   const albaranesVinculados = useMemo(() => {
-    const ids = factura.albaranIdsArr || [];
-    if (!ids.length) return [];
+    const ids = Array.isArray(factura.albaranIdsArr) ? factura.albaranIdsArr : [];
+    if (ids.length === 0) return [];
+    
     const setIds = new Set(ids);
-    return (albaranes || []).filter(a => setIds.has(a.id));
-  }, [factura.albaranIdsArr, albaranes]);
+    return safeAlbaranes.filter(a => a && a.id && setIds.has(a.id));
+  }, [factura.albaranIdsArr, safeAlbaranes]);
 
   const sumaAlbaranes = useMemo(() => {
     return albaranesVinculados.reduce((acc, a) => acc + (Num.parse(a.total) || 0), 0);
   }, [albaranesVinculados]);
 
-  // ✅ Desglose contable inteligente (Fallback al 10% si el OCR falló en desglose)
+  // 🛡️ PARACAÍDAS 5: Matemáticas a prueba de fallos (Num.parse ya protege, pero añadimos absolutos)
   const total = Math.abs(Num.parse(factura.total) || 0);
-  const base  = Num.parse(factura.base) || Num.round2(total / 1.10);
-  const iva   = Num.parse(factura.tax)  || Num.round2(total - base);
+  const base  = Math.abs(Num.parse(factura.base)  || Num.round2(total / 1.10));
+  const iva   = Math.abs(Num.parse(factura.tax)   || Num.round2(total - base));
 
   const chip = statusChip(factura);
-  const handleDownload = useCallback(() => onDownloadFile(factura), [onDownloadFile, factura]);
-  const handleClose = useCallback(() => onClose(), [onClose]);
+
+  // ✅ Handlers protegidos
+  const handleDownload = useCallback(() => {
+    if (onDownloadFile && typeof onDownloadFile === 'function') onDownloadFile(factura);
+  }, [onDownloadFile, factura]);
+  
+  const handleClose = useCallback(() => {
+    if (onClose && typeof onClose === 'function') onClose();
+  }, [onClose]);
+
+  // ✅ Unidad visual protegida
   const unit = factura.unidad_negocio ? unitById.get(factura.unidad_negocio) : undefined;
 
   return (
+    // 🛡️ FIX ROOT: Quitamos AnimatePresence de la raíz para evitar bloqueos del DOM
     <div
       className="fixed inset-0 z-[200] flex flex-col justify-end md:justify-center items-center p-0 md:p-4"
       aria-modal="true"
@@ -131,21 +150,25 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
       aria-describedby="invoice-desc"
     >
       {/* 🌑 Fondo oscuro interactivo */}
-      <motion.button
-        type="button"
-        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        className="absolute inset-0 w-full h-full bg-slate-900/60 backdrop-blur-sm cursor-default border-none outline-none"
+      <motion.div
+        initial={{ opacity: 0 }} 
+        animate={{ opacity: 1 }} 
+        exit={{ opacity: 0 }}
+        className="absolute inset-0 w-full h-full bg-slate-900/60 backdrop-blur-sm cursor-default"
         onClick={handleClose}
         aria-label="Cerrar modal"
       />
 
       {/* 🚀 Contenedor Modal */}
+      {/* 🛡️ FIX FRAMER: initial no soporta breakpoints (md:). Corregido a valores puros */}
       <motion.div
         ref={trapRef}
-        initial={{ y: '100%', opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: '100%', opacity: 0 }}
+        initial={{ y: 100, opacity: 0 }} 
+        animate={{ y: 0, opacity: 1 }} 
+        exit={{ y: 100, opacity: 0 }}
         transition={{ type: 'spring', damping: 24, stiffness: 220 }}
         className="bg-[#F8FAFC] w-full max-w-md rounded-t-[2.5rem] md:rounded-[2.5rem] shadow-2xl relative z-10 flex flex-col h-[85dvh] md:h-auto md:max-h-[85dvh] overflow-hidden focus:outline-none"
-        onClick={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()} // Evita propagar clic al fondo
       >
         {/* 📌 Header */}
         <div className="p-6 border-b border-slate-200 bg-white flex justify-between items-center relative z-20 shrink-0">
@@ -167,6 +190,7 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
             <span className={cn('text-[9px] font-black px-2.5 py-1 rounded-full border', chip.cls)} title="Estado de la factura">
               {chip.label}
             </span>
+
             <button
               type="button"
               onClick={handleClose}
@@ -201,16 +225,20 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
 
             <div className="flex justify-between items-center border-t border-slate-50 pt-4">
               <span className="text-[10px] font-black text-slate-400 uppercase">Unidad Asignada</span>
-              <span className={cn(
-                'text-[9px] font-black px-2.5 py-1 rounded-md border uppercase tracking-wider shadow-sm',
-                unit?.color || 'text-slate-600', unit?.bg || 'bg-slate-100', 'border-current opacity-90'
-              )}>
+              <span
+                className={cn(
+                  'text-[9px] font-black px-2.5 py-1 rounded-md border uppercase tracking-wider shadow-sm',
+                  unit?.color || 'text-slate-600',
+                  unit?.bg || 'bg-slate-100',
+                  'border-current opacity-90'
+                )}
+              >
                 {unit?.name || 'Restaurante'}
               </span>
             </div>
 
-            {/* Email Meta (Si proviene de Ingesta Automática) */}
-            {factura.emailMeta && (
+            {/* Email Meta */}
+            {factura.emailMeta && typeof factura.emailMeta === 'object' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border-t border-slate-50 pt-4">
                 <div className="text-[10px] text-slate-500">
                   <span className="font-black uppercase block mb-1">Correo Origen</span>
@@ -223,8 +251,8 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
               </div>
             )}
 
-            {/* Botón Descargar Original */}
-            {factura.file_base64 && (
+            {/* Botón descarga (Protegido por handler externo) */}
+            {factura.file_base64 && typeof factura.file_base64 === 'string' && (
               <div className="pt-5 border-t border-slate-100 mt-2">
                 <button
                   type="button"
@@ -243,11 +271,11 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
               <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">3‑Way Match</p>
               <span className={cn(
                 'text-[10px] font-black px-2.5 py-1 rounded-full border',
-                Math.abs(sumaAlbaranes - total) <= Math.max(TOLERANCIA, total * 0.005)
+                Math.abs(sumaAlbaranes - total) <= Math.max(0.50, total * 0.005)
                   ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
                   : 'bg-amber-50 text-amber-600 border-amber-200'
               )}>
-                {Math.abs(sumaAlbaranes - total) <= Math.max(TOLERANCIA, total * 0.005) ? 'CUADRA EXACTO' : 'DIFERENCIA DETECTADA'}
+                {Math.abs(sumaAlbaranes - total) <= Math.max(0.50, total * 0.005) ? 'CUADRA' : 'DIFERENCIA'}
               </span>
             </div>
 
@@ -261,10 +289,10 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
                 <p className="text-lg font-black text-slate-800 mt-1">{Num.fmt(total)}</p>
               </div>
               <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Δ Margen</p>
+                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Δ Diferencia</p>
                 <p className={cn(
                   'text-lg font-black mt-1',
-                  Math.abs(sumaAlbaranes - total) <= Math.max(TOLERANCIA, total * 0.005) ? 'text-emerald-600' : 'text-amber-600'
+                  Math.abs(sumaAlbaranes - total) <= Math.max(0.50, total * 0.005) ? 'text-emerald-600' : 'text-amber-600'
                 )}>
                   {Num.fmt(Math.abs(sumaAlbaranes - total))}
                 </p>
@@ -275,15 +303,15 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
             {albaranesVinculados.length > 0 ? (
               <div className="space-y-2 mt-4 pt-4 border-t border-slate-100">
                 {albaranesVinculados.map(alb => (
-                  <div key={alb.id} className="flex justify-between items-center text-xs py-3 px-4 bg-slate-50 border border-slate-100 rounded-xl text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 transition-colors">
+                  <div key={alb.id} className="flex justify-between items-center text-xs py-3 px-4 bg-slate-50 border border-slate-100 rounded-xl text-slate-600 hover:bg-white hover:shadow-sm transition-colors">
                     <div className="flex items-center gap-3">
                       <Package className="w-4 h-4 opacity-50" aria-hidden="true" />
                       <div>
-                        <p className="font-bold">{alb.date}</p>
+                        <p className="font-bold text-slate-700">{alb.date || 'Sin fecha'}</p>
                         <p className="text-[9px] font-mono uppercase mt-0.5 opacity-70">Ref: {alb.num || 'S/N'}</p>
                       </div>
                     </div>
-                    <span className="font-black text-sm">{Num.fmt(Num.parse(alb.total) || 0)}</span>
+                    <span className="font-black text-sm">{Num.fmt(Num.parse(alb.total || 0))}</span>
                   </div>
                 ))}
               </div>
