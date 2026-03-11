@@ -13,7 +13,8 @@ import { GoogleGenAI } from "@google/genai";
 import { AppData, Factura, Albaran, Socio } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
-// import { proxyFetch } from '../services/api'; // Ya no lo necesitamos para Gmail
+// 🚀 IMPORTAMOS TU CLIENTE OFICIAL DE SUPABASE
+import { supabase } from '../services/api'; 
 
 // 🚀 COMPONENTES HIJOS
 import { InvoicesList } from './InvoicesList';
@@ -65,8 +66,10 @@ export interface InvoicesViewProps {
  * ======================================================= */
 const TOLERANCIA = 0.50; 
 
+// 🐛 EL BUG ESTABA AQUÍ: Ahora si 's' está vacío, devuelve '' (vacío) en vez de 'desconocido'
 export const superNorm = (s: string | undefined | null) => {
-  if (!s || typeof s !== 'string') return 'desconocido';
+  if (!s) return ''; 
+  if (typeof s !== 'string') return 'desconocido';
   try { return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\b(s\.?l\.?|s\.?a\.?|s\.?l\.?u\.?|s\.?c\.?p\.?)\b/gi, '').replace(/[^a-z0-9]/g, '').trim(); } catch (e) { return 'desconocido'; }
 };
 
@@ -195,7 +198,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       document.body.removeEventListener('dragover', handleDragOver);
       document.body.removeEventListener('drop', handleDropGlobal);
     };
-  }, [facturasSeguras]); // Dependencia necesaria para processLocalFile
+  }, [facturasSeguras]);
 
   /* =======================================================
    * ⌨️ ATAJOS DE TECLADO RÁPIDOS
@@ -302,31 +305,24 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   };
 
   /* =======================================================
-   * 📧 LECTOR DE SUPABASE Y PARSER DE IA (REAL)
+   * 📧 LECTOR DE GMAIL DESDE SUPABASE (API NATIVA)
    * ======================================================= */
-  const SUPABASE_URL = "[https://awbgboucnbsuzojocbuy.supabase.co](https://awbgboucnbsuzojocbuy.supabase.co)"; 
-  const SUPABASE_ANON_KEY = "sb_publishable_drOQ5PsFA8eox_aRTXNATQ_5kibM6ST";
-
   const handleFetchEmails = async () => {
     setIsSyncing(true);
     try {
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/inbox_gmail?select=*`, {
-        headers: {
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-        }
-      });
+      // 1. Usamos tu cliente importado para leer la tabla
+      const { data: correosBD, error } = await supabase
+        .from('inbox_gmail')
+        .select('*');
 
-      if (!res.ok) throw new Error("Error leyendo Supabase");
-      
-      const correosBD = await res.json();
+      if (error) throw error;
       
       if (correosBD && correosBD.length > 0) {
         const nuevosCorreos: EmailDraft[] = correosBD.map((fila: any) => ({
           id: fila.id,
           from: fila.remitente,
           subject: fila.asunto,
-          date: fila.fecha.slice(0, 10),
+          date: fila.fecha ? fila.fecha.slice(0, 10) : DateUtil.today(),
           hasAttachment: true,
           status: 'new',
           fileBase64: fila.archivo_base64,
@@ -342,9 +338,9 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       } else {
         alert("📭 No hay correos nuevos con facturas en este momento.");
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      alert("⚠️ Error conectando con Supabase. Revisa la consola.");
+      alert(`⚠️ Error conectando con Supabase: ${e.message || 'Desconocido'}`);
     } finally {
       setIsSyncing(false);
     }
@@ -391,16 +387,19 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
       await onSave({ ...safeData, facturas: [nuevaFacturaIA, ...facturasSeguras] });
       
-      await fetch(`${SUPABASE_URL}/rest/v1/inbox_gmail?id=eq.${emailId}`, {
-        method: 'DELETE',
-        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
-      });
+      // 2. Eliminamos de Supabase al procesarlo para que no vuelva a salir
+      const { error: deleteError } = await supabase
+        .from('inbox_gmail')
+        .delete()
+        .eq('id', emailId);
+        
+      if (deleteError) console.error("Aviso: No se pudo borrar de Supabase", deleteError);
 
       setEmailInbox(prev => prev.filter(e => e.id !== emailId));
       alert("✅ Factura extraída y enviada a Borradores.");
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      alert("⚠️ Error al procesar el PDF del correo. Es posible que no tengas la API KEY configurada o el PDF sea muy pesado.");
+      alert("⚠️ Error al procesar el PDF del correo. Quizás no tengas saldo en Gemini o el PDF esté protegido.");
     } finally {
       setIsSyncing(false);
     }
@@ -441,7 +440,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const pendingGroups = useMemo(() => {
     try {
       const byMonth: Record<string, { name: string; groups: Record<string, any> }> = {};
-      const q = superNorm(deferredSearch);
+      const q = deferredSearch ? superNorm(deferredSearch) : ''; // 🛡️ Ahora es infalible
 
       albaranesSeguros.forEach(a => {
         const aDate = a?.date || '';
@@ -452,7 +451,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         
         const owner = (mode === 'proveedor' ? a?.prov : a?.socio) || 'Arume';
         
-        // CORRECCIÓN DEL BUSCADOR
+        // CORRECCIÓN DEL BUSCADOR: Si no buscas nada (q=''), esto no bloquea
         if (q) {
             const matchOwner = superNorm(owner).includes(q);
             const matchNum = superNorm(a?.num || '').includes(q);
