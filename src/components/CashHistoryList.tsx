@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trash2, ChevronRight, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Trash2, ChevronRight, CheckCircle2, AlertCircle, Building2, ShoppingBag } from 'lucide-react';
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
 import { Cierre } from '../types';
@@ -50,6 +50,8 @@ export const CashHistoryList: React.FC<CashHistoryListProps> = ({
           {sorted.map(c => {
             // Verificamos si la caja está cuadrada (margen de 2 euros como máximo)
             const isOk = Math.abs(c.descuadre || 0) <= 2;
+            // Identificamos la unidad de negocio para el icono
+            const isRest = c.unitId === 'REST' || !c.unitId; // Asumimos REST por defecto si es antiguo
 
             return (
               <motion.div
@@ -63,9 +65,16 @@ export const CashHistoryList: React.FC<CashHistoryListProps> = ({
                 )}
               >
                 <div className="flex flex-col">
-                  <span className="text-[10px] font-black text-slate-400 uppercase">
-                    {c.date}
-                  </span>
+                  <div className="flex items-center gap-2 mb-1">
+                    {/* Icono de la Unidad de Negocio */}
+                    <div className={cn("p-1 rounded-md", isRest ? "bg-indigo-100 text-indigo-600" : "bg-emerald-100 text-emerald-600")}>
+                      {isRest ? <Building2 className="w-3 h-3" /> : <ShoppingBag className="w-3 h-3" />}
+                    </div>
+                    <span className="text-[10px] font-black text-slate-400 uppercase">
+                      {c.date}
+                    </span>
+                  </div>
+                  
                   <span className="font-black text-slate-700 text-lg">
                     {Num.fmt(c.totalVenta)}
                   </span>
