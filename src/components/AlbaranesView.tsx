@@ -77,12 +77,14 @@ const normalizeUnitPrice = (q: number, u: string | undefined, unitPrice: number)
 /* =======================================================
  * 🚀 CEREBRO FACTURACIÓN: PROMOCIÓN AUTOMÁTICA A FACTURAS
  * ======================================================= */
-const normProv = (s?: string) =>
-  (s || '').toLowerCase().normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+const normProv = (s?: string) => {
+  if (!s) return 'desconocido';
+  return s.toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .replace(/\b(s\.?l\.?|s\.?a\.?|s\.?l\.?u\.?|s\.?c\.?p\.?)\b/gi, '')
     .replace(/[^a-z0-9]/g, '')
     .trim();
+};
 
 const groupKey = (alb: Albaran) => `${normProv(alb.prov)}__${(alb.date || DateUtil.today()).slice(0, 7)}`;
 
@@ -113,9 +115,10 @@ function detachFromPreviousFacturaIfMoved(data: AppData, before: Albaran, after:
   const bb = Num.parse(before.base)  || Num.round2(tb / 1.10);
   const ib = Num.parse(before.taxes) || Num.round2(tb - bb);
 
-  F.total = String(Num.round2((Num.parse(F.total) || 0) - tb));
-  F.base  = String(Num.round2((Num.parse(F.base)  || 0) - bb));
-  F.tax   = String(Num.round2((Num.parse(F.tax)   || 0) - ib));
+  // CORRECCIÓN: Guardar como números, no como strings
+  F.total = Num.round2((Num.parse(F.total) || 0) - tb);
+  F.base  = Num.round2((Num.parse(F.base)  || 0) - bb);
+  F.tax   = Num.round2((Num.parse(F.tax)   || 0) - ib);
   F.albaranIdsArr = F.albaranIdsArr.filter((id: string) => id !== before.id);
 
   if ((F.albaranIdsArr || []).length === 0 && !F.reconciled) {
@@ -135,9 +138,10 @@ function upsertFacturaFromAlbaran(data: AppData, alb: Albaran) {
   if (idx >= 0) {
     const F = data.facturas[idx] as any;
     if (!facturaHasAlb(F, alb.id)) {
-      F.total = String(Num.round2((Num.parse(F.total) || 0) + t));
-      F.base  = String(Num.round2((Num.parse(F.base)  || 0) + b));
-      F.tax   = String(Num.round2((Num.parse(F.tax)   || 0) + i));
+      // CORRECCIÓN: Guardar como números, no como strings
+      F.total = Num.round2((Num.parse(F.total) || 0) + t);
+      F.base  = Num.round2((Num.parse(F.base)  || 0) + b);
+      F.tax   = Num.round2((Num.parse(F.tax)   || 0) + i);
       F.albaranIdsArr = Array.from(new Set([...(F.albaranIdsArr || []), alb.id]));
     }
   } else {
@@ -147,7 +151,8 @@ function upsertFacturaFromAlbaran(data: AppData, alb: Albaran) {
       num: `AUTO-${alb.num || 'SN'}`,
       date: alb.date || DateUtil.today(),
       prov: alb.prov,
-      total: String(t), base: String(b), tax: String(i),
+      // CORRECCIÓN: Guardar como números, no como strings
+      total: t, base: b, tax: i,
       paid: false,
       reconciled: false,
       status: 'approved',
@@ -325,7 +330,15 @@ function PriceEvolutionChart({ data, unitLabel = "€/ud", upThreshold = 10 }: a
 function PriceInspector({ priceHistory, albaranesLite, proveedores, suggestionsByProv, defaultProv, defaultItem }: any) {
   const [prov, setProv] = useState((defaultProv||'').toUpperCase());
   const [item, setItem] = useState((defaultItem||'').toUpperCase());
-  const { series, avgAll } = usePriceSeries({ history: priceHistory, albaranes: albaranesLite, prov, item });
+  
+  // SOLUCIÓN AL BLOQUEO: useDeferredValue retrasa el recálculo pesado hasta que dejas de teclear
+  const deferredProv = useDeferredValue(prov);
+  const deferredItem = useDeferredValue(item);
+
+  // Usamos los valores diferidos para el cálculo pesado
+  const { series, avgAll } = usePriceSeries({ history: priceHistory, albaranes: albaranesLite, prov: deferredProv, item: deferredItem });
+  
+  // Sugerencias basadas en lo que el usuario está tecleando (rápido)
   const topItems = (suggestionsByProv?.[prov] || []).slice(0, 10);
 
   return (
@@ -349,7 +362,7 @@ function PriceInspector({ priceHistory, albaranesLite, proveedores, suggestionsB
       ) : (
         <div className="bg-white rounded-[2rem] border border-slate-100 p-8 text-center mt-4 shadow-sm">
           <span className="text-3xl mb-2 block opacity-50">📉</span>
-          <p className="text-slate-500 font-bold text-sm">Faltan datos</p>
+          <p className="text-slate-500 font-bold text-sm">Faltan datos o buscando...</p>
           <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-widest">Selecciona proveedor y producto con +2 compras.</p>
         </div>
       )}
