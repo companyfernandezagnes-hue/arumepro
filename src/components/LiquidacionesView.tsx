@@ -1,67 +1,71 @@
 import React, { useState, useMemo } from 'react';
 import { 
-  Scale, 
-  Download, 
-  Send, 
-  FileText, 
-  Users, 
-  TrendingUp, 
-  TrendingDown, 
-  CheckCircle2, 
-  AlertCircle,
-  Calendar,
-  RefreshCw,
-  ArrowRight,
-  ChefHat,
-  Zap
+  Scale, Download, FileText, Users, TrendingUp, TrendingDown, 
+  CheckCircle2, Calendar, ChefHat, Zap, Wallet, Building2, 
+  ArrowUpRight, ArrowDownRight, Calculator
 } from 'lucide-react';
-import { motion } from 'motion/react';
-import { AppData, Albaran, Factura } from '../types';
+import { motion } from 'framer-motion';
+import * as XLSX from 'xlsx';
+import { AppData } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
-import { proxyFetch } from '../services/api';
 
 interface LiquidacionesViewProps {
   data: AppData;
   onSave: (newData: AppData) => Promise<void>;
 }
 
-const REAL_PARTNERS = ['PAU', 'JERONI', 'AGNES', 'ONLY ONE', 'TIENDA DE SAKES'];
-
 export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
-  const [isExporting, setIsExporting] = useState(false);
-  const [selectedPeriod, setSelectedPeriod] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+  const [selectedPeriod, setSelectedPeriod] = useState(DateUtil.today().slice(0, 7)); // YYYY-MM
+  
+  // Estados interactivos para el personal
+  const [propinasPct, setPropinasPct] = useState<number>(3);
+  const [horasExtraEuro, setHorasExtraEuro] = useState<number>(0);
 
-  // --- CALCULATIONS ---
+  // --- CÁLCULOS ROBUSTOS ---
   const stats = useMemo(() => {
-    const year = parseInt(selectedPeriod.split('-')[0]);
-    const month = parseInt(selectedPeriod.split('-')[1]) - 1;
+    // 1. Obtener socios dinámicamente de la DB
+    const sociosActivos = Array.isArray(data.socios) && data.socios.length > 0 
+      ? data.socios.filter(s => s.active).map(s => s.n) 
+      : ['ARUME', 'PAU'];
 
-    const periodFacturas = (data.facturas || []).filter(f => {
-      const d = DateUtil.parse(f.date);
-      return d.getFullYear() === year && d.getMonth() === month;
+    // 2. Filtrar por periodo
+    const periodFacturas = (data.facturas || []).filter(f => 
+      f.date && f.date.startsWith(selectedPeriod) && f.tipo !== 'caja'
+    );
+    const periodAlbaranes = (data.albaranes || []).filter(a => 
+      a.date && a.date.startsWith(selectedPeriod)
+    );
+
+    // 3. IVA Repercutido (Ventas - Facturas emitidas)
+    let totalVentas = 0;
+    let ivaRepercutido = 0;
+    periodFacturas.forEach(f => {
+      const t = Num.parse(f.total);
+      totalVentas += t;
+      ivaRepercutido += Num.parse(f.tax) || Num.round2(t - Num.parse(f.base));
     });
 
-    const periodAlbaranes = (data.albaranes || []).filter(a => {
-      const d = DateUtil.parse(a.date);
-      return d.getFullYear() === year && d.getMonth() === month;
+    // 4. IVA Soportado (Compras - Albaranes recibidos)
+    let totalGastos = 0;
+    let ivaSoportado = 0;
+    periodAlbaranes.forEach(a => {
+      const t = Num.parse(a.total);
+      totalGastos += t;
+      ivaSoportado += Num.parse(a.taxes) || Num.round2(t - Num.parse(a.base));
     });
 
-    // IVA Repercutido (Facturas emitidas)
-    const ivaRepercutido = periodFacturas.reduce((acc, f) => acc + (Num.parse(f.total) - (Num.parse(f.total) / 1.1)), 0); // Simplificado 10%
-    const totalVentas = periodFacturas.reduce((acc, f) => acc + Num.parse(f.total), 0);
-
-    // IVA Soportado (Albaranes/Gastos)
-    const ivaSoportado = periodAlbaranes.reduce((acc, a) => acc + (Num.parse(a.taxes) || 0), 0);
-    const totalGastos = periodAlbaranes.reduce((acc, a) => acc + Num.parse(a.total), 0);
-
-    // Partner Settlements
+    // 5. Gastos por Socio
     const partnerSpending: Record<string, number> = {};
-    REAL_PARTNERS.forEach(p => partnerSpending[p] = 0);
+    sociosActivos.forEach(p => partnerSpending[p] = 0);
+    partnerSpending['OTROS / RESTAURANTE'] = 0;
     
     periodAlbaranes.forEach(a => {
-      if (a.socio && REAL_PARTNERS.includes(a.socio)) {
-        partnerSpending[a.socio] += Num.parse(a.total);
+      const socioName = (a.socio || '').toUpperCase();
+      if (sociosActivos.includes(socioName)) {
+        partnerSpending[socioName] += Num.parse(a.total);
+      } else {
+        partnerSpending['OTROS / RESTAURANTE'] += Num.parse(a.total);
       }
     });
 
@@ -72,195 +76,268 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
       ivaSoportado,
       ivaBalance: ivaRepercutido - ivaSoportado,
       partnerSpending,
+      sociosActivos,
       countFacturas: periodFacturas.length,
       countAlbaranes: periodAlbaranes.length,
-      // Mock data for other things
-      propinas: totalVentas * 0.03, // 3% estimation
-      horasExtra: 450,
-      docsGestoria: [
-        { id: '1', name: 'Modelo 303 (Borrador)', status: 'ready' },
-        { id: '2', name: 'Resumen Retenciones 111', status: 'pending' },
-        { id: '3', name: 'Certificado de Estar al Corriente', status: 'ready' }
-      ]
+      propinasVal: Num.round2(totalVentas * (propinasPct / 100)),
+      rawFacturas: periodFacturas,
+      rawAlbaranes: periodAlbaranes
     };
-  }, [data.facturas, data.albaranes, selectedPeriod]);
+  }, [data, selectedPeriod, propinasPct]);
 
-  const handleExportGestoria = async () => {
-    if (!confirm(`¿Enviar liquidación de ${selectedPeriod} a la Gestoría?`)) return;
-    
-    setIsExporting(true);
-    try {
-      // n8n Webhook Integration
-      const n8nWebhook = "https://ia.permatunnelopen.org/webhook/gestoria-export";
-      const payload = {
-        period: selectedPeriod,
-        stats,
-        facturas: data.facturas.filter(f => f.date.startsWith(selectedPeriod)),
-        albaranes: data.albaranes.filter(a => a.date.startsWith(selectedPeriod)),
-        timestamp: new Date().toISOString()
-      };
-
-      await proxyFetch(n8nWebhook, {
-        method: 'POST',
-        body: payload
-      });
-      
-      alert("¡Documentos enviados a Gestoría con éxito! ✅");
-    } catch (err) {
-      console.error(err);
-      alert("Error al conectar con n8n. Verifica el túnel.");
-    } finally {
-      setIsExporting(false);
+  // --- EXPORTACIÓN PROFESIONAL A EXCEL PARA GESTORÍA ---
+  const handleExportGestoria = () => {
+    if (stats.countFacturas === 0 && stats.countAlbaranes === 0) {
+      return alert("No hay datos en este mes para exportar.");
     }
+
+    // Hoja 1: Resumen (Modelo 303)
+    const resumenData = [
+      { CONCEPTO: 'TOTAL VENTAS (BRUTO)', IMPORTE: Num.fmt(stats.totalVentas) },
+      { CONCEPTO: 'IVA REPERCUTIDO (A PAGAR)', IMPORTE: Num.fmt(stats.ivaRepercutido) },
+      { CONCEPTO: 'TOTAL GASTOS (BRUTO)', IMPORTE: Num.fmt(stats.totalGastos) },
+      { CONCEPTO: 'IVA SOPORTADO (A DEDUCIR)', IMPORTE: Num.fmt(stats.ivaSoportado) },
+      { CONCEPTO: 'RESULTADO LIQUIDACIÓN IVA', IMPORTE: Num.fmt(stats.ivaBalance) },
+    ];
+    const wsResumen = XLSX.utils.json_to_sheet(resumenData);
+    wsResumen['!cols'] = [{ wch: 35 }, { wch: 15 }];
+
+    // Hoja 2: Ventas
+    const ventasData = stats.rawFacturas.map(f => ({
+      FECHA: f.date, FACTURA: f.num, CLIENTE: f.cliente || f.prov, 
+      BASE: Num.parse(f.base), IVA: Num.parse(f.tax), TOTAL: Num.parse(f.total)
+    }));
+    const wsVentas = XLSX.utils.json_to_sheet(ventasData);
+
+    // Hoja 3: Compras
+    const comprasData = stats.rawAlbaranes.map(a => ({
+      FECHA: a.date, PROVEEDOR: a.prov, REF: a.num, SOCIO: a.socio,
+      BASE: Num.parse(a.base), IVA: Num.parse(a.taxes), TOTAL: Num.parse(a.total)
+    }));
+    const wsCompras = XLSX.utils.json_to_sheet(comprasData);
+
+    // Crear Libro
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, wsResumen, "Resumen_Impuestos");
+    XLSX.utils.book_append_sheet(wb, wsVentas, "Facturas_Emitidas");
+    XLSX.utils.book_append_sheet(wb, wsCompras, "Gastos_Recibidos");
+
+    XLSX.writeFile(wb, `Liquidacion_Gestoria_${selectedPeriod}.xlsx`);
+  };
+
+  const formatMonth = (iso: string) => {
+    const [y, m] = iso.split('-');
+    const date = new Date(Number(y), Number(m) - 1);
+    return date.toLocaleString('es-ES', { month: 'long', year: 'numeric' }).toUpperCase();
   };
 
   return (
-    <div className="animate-fade-in space-y-6 pb-24">
-      {/* Header */}
-      <header className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4">
+    <div className="animate-fade-in space-y-6 pb-24 max-w-[1600px] mx-auto">
+      
+      {/* 🚀 HEADER ESTILO HOLDED */}
+      <header className="bg-white p-6 md:p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div>
-          <h2 className="text-xl font-black text-slate-800 tracking-tighter">Liquidaciones & Gestoría</h2>
-          <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest">Cierre de Periodo · IVA · Socios</p>
+          <h2 className="text-3xl font-black text-slate-800 tracking-tighter">Impuestos & Cierres</h2>
+          <p className="text-xs text-indigo-500 font-bold uppercase tracking-widest mt-1 flex items-center gap-1">
+            <Building2 className="w-3 h-3" /> Panel Financiero Arume
+          </p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="bg-slate-50 p-2 rounded-2xl border border-slate-100 flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-slate-400" />
+        
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-200 flex items-center gap-2 shadow-inner">
+            <Calendar className="w-5 h-5 text-slate-400 ml-1" />
             <input 
               type="month" 
               value={selectedPeriod}
               onChange={(e) => setSelectedPeriod(e.target.value)}
-              className="bg-transparent text-xs font-black text-slate-700 outline-none"
+              className="bg-transparent text-sm font-black text-slate-700 outline-none w-36 cursor-pointer"
             />
           </div>
           <button 
             onClick={handleExportGestoria}
-            disabled={isExporting}
-            className="bg-slate-900 text-white px-6 py-3 rounded-2xl text-[10px] font-black shadow-lg hover:bg-indigo-600 transition flex items-center gap-2 disabled:opacity-50"
+            className="bg-slate-900 text-white px-6 py-4 rounded-2xl text-xs font-black shadow-xl hover:bg-emerald-600 transition-all flex items-center gap-2 transform active:scale-95"
           >
-            {isExporting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-            ENVIAR GESTORÍA
+            <Download className="w-4 h-4" />
+            EXPORTAR EXCEL GESTORÍA
           </button>
         </div>
       </header>
 
-      {/* IVA & Totals Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden">
-          <TrendingUp className="absolute -right-4 -top-4 w-24 h-24 opacity-5 text-emerald-500" />
-          <p className="text-[10px] font-black text-slate-400 uppercase mb-1">IVA Repercutido</p>
-          <h3 className="text-2xl font-black text-emerald-600">{Num.fmt(stats.ivaRepercutido)}</h3>
-          <p className="text-[9px] text-slate-400 font-bold mt-1">Ventas: {Num.fmt(stats.totalVentas)}</p>
+      {/* 📊 DASHBOARD IVA (Top Cards) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-md transition-shadow">
+          <div className="absolute -right-6 -top-6 w-32 h-32 bg-emerald-50 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform duration-500">
+            <TrendingUp className="w-12 h-12 text-emerald-200" />
+          </div>
+          <div className="relative z-10">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">IVA Repercutido (Ventas)</p>
+            <h3 className="text-4xl font-black text-emerald-600 tracking-tighter">{Num.fmt(stats.ivaRepercutido)}</h3>
+            <div className="mt-4 flex items-center gap-2 text-xs font-bold text-slate-500 bg-slate-50 w-fit px-3 py-1.5 rounded-xl border border-slate-100">
+              <ArrowUpRight className="w-4 h-4 text-emerald-500" /> Base Ventas: {Num.fmt(stats.totalVentas)}
+            </div>
+          </div>
         </div>
-        <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden">
-          <TrendingDown className="absolute -right-4 -top-4 w-24 h-24 opacity-5 text-rose-500" />
-          <p className="text-[10px] font-black text-slate-400 uppercase mb-1">IVA Soportado</p>
-          <h3 className="text-2xl font-black text-rose-600">{Num.fmt(stats.ivaSoportado)}</h3>
-          <p className="text-[9px] text-slate-400 font-bold mt-1">Gastos: {Num.fmt(stats.totalGastos)}</p>
+
+        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-md transition-shadow">
+          <div className="absolute -right-6 -top-6 w-32 h-32 bg-rose-50 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform duration-500">
+            <TrendingDown className="w-12 h-12 text-rose-200" />
+          </div>
+          <div className="relative z-10">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">IVA Soportado (Gastos)</p>
+            <h3 className="text-4xl font-black text-rose-600 tracking-tighter">{Num.fmt(stats.ivaSoportado)}</h3>
+            <div className="mt-4 flex items-center gap-2 text-xs font-bold text-slate-500 bg-slate-50 w-fit px-3 py-1.5 rounded-xl border border-slate-100">
+              <ArrowDownRight className="w-4 h-4 text-rose-500" /> Base Gastos: {Num.fmt(stats.totalGastos)}
+            </div>
+          </div>
         </div>
+
         <div className={cn(
-          "p-6 rounded-[2rem] border shadow-sm relative overflow-hidden",
-          stats.ivaBalance >= 0 ? "bg-indigo-50 border-indigo-100" : "bg-amber-50 border-amber-100"
+          "p-8 rounded-[2.5rem] border shadow-lg relative overflow-hidden flex flex-col justify-center",
+          stats.ivaBalance >= 0 ? "bg-slate-900 border-slate-800 text-white" : "bg-amber-500 border-amber-600 text-white"
         )}>
-          <Scale className="absolute -right-4 -top-4 w-24 h-24 opacity-10 text-indigo-500" />
-          <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Balance IVA (Estimado)</p>
-          <h3 className={cn("text-2xl font-black", stats.ivaBalance >= 0 ? "text-indigo-600" : "text-amber-600")}>
-            {Num.fmt(stats.ivaBalance)}
-          </h3>
-          <p className="text-[9px] text-slate-400 font-bold mt-1">A liquidar en trimestre</p>
+          <Scale className="absolute -right-4 -top-4 w-32 h-32 opacity-10" />
+          <div className="relative z-10">
+            <p className="text-xs font-black opacity-70 uppercase tracking-widest mb-2">
+              Resultado IVA ({formatMonth(selectedPeriod)})
+            </p>
+            <h3 className="text-5xl font-black tracking-tighter">
+              {Num.fmt(Math.abs(stats.ivaBalance))}
+            </h3>
+            <p className="text-sm font-bold mt-2 opacity-90 flex items-center gap-1">
+              <Calculator className="w-4 h-4" />
+              {stats.ivaBalance >= 0 ? "A pagar a Hacienda (Estimado)" : "A devolver por Hacienda"}
+            </p>
+          </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Partner Settlements */}
-        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
-          <h3 className="text-xs font-black text-slate-800 uppercase mb-6 flex items-center gap-2">
-            <Users className="w-4 h-4 text-indigo-500" />
-            Liquidación Socios
+        
+        {/* 👥 LIQUIDACIÓN SOCIOS */}
+        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col">
+          <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
+            <Wallet className="w-5 h-5 text-indigo-500" /> Liquidación Socios
           </h3>
-          <div className="space-y-3">
-            {REAL_PARTNERS.map(partner => (
-              <div key={partner} className="flex justify-between items-center p-3 bg-slate-50 rounded-2xl hover:bg-slate-100 transition">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center font-black text-indigo-600 shadow-sm text-[10px]">
-                    {partner.charAt(0)}
+          <div className="space-y-3 flex-1">
+            {Object.entries(stats.partnerSpending).map(([partner, amount]) => {
+              if (amount === 0 && partner === 'OTROS / RESTAURANTE') return null;
+              const isOther = partner === 'OTROS / RESTAURANTE';
+              return (
+                <div key={partner} className={cn("flex justify-between items-center p-4 rounded-2xl border transition-all", isOther ? "bg-slate-50 border-slate-100" : "bg-white border-indigo-50 hover:border-indigo-200 hover:shadow-sm")}>
+                  <div className="flex items-center gap-3">
+                    <div className={cn("w-10 h-10 rounded-full flex items-center justify-center font-black text-xs shadow-inner", isOther ? "bg-slate-200 text-slate-500" : "bg-indigo-100 text-indigo-700")}>
+                      {isOther ? '?' : partner.substring(0, 2)}
+                    </div>
+                    <div>
+                      <p className="text-sm font-black text-slate-800">{partner}</p>
+                      <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">{isOther ? 'Gastos generales' : 'Retirado en compras'}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-xs font-black text-slate-800">{partner}</p>
-                    <p className="text-[8px] text-slate-400 font-bold uppercase">Gasto personal</p>
-                  </div>
+                  <p className="text-lg font-black text-slate-900">{Num.fmt(amount)}</p>
                 </div>
-                <p className="text-sm font-black text-slate-900">{Num.fmt(stats.partnerSpending[partner])}</p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
-        {/* Staff Settlements */}
-        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
-          <h3 className="text-xs font-black text-slate-800 uppercase mb-6 flex items-center gap-2">
-            <ChefHat className="w-4 h-4 text-amber-500" />
-            Liquidación Personal
+        {/* 🧑‍🍳 LIQUIDACIÓN PERSONAL (INTERACTIVO) */}
+        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col">
+          <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
+            <ChefHat className="w-5 h-5 text-amber-500" /> Retribución Equipo
           </h3>
-          <div className="space-y-4">
-            <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-[10px] font-black text-amber-800 uppercase">Propinas Estimadas</span>
-                <span className="text-sm font-black text-amber-600">{Num.fmt(stats.propinas)}</span>
+          <div className="space-y-6 flex-1">
+            
+            {/* Propinas Editables */}
+            <div className="p-5 bg-amber-50 rounded-[2rem] border border-amber-100 relative">
+              <div className="flex justify-between items-end mb-4">
+                <div>
+                  <span className="text-[10px] font-black text-amber-800 uppercase tracking-widest">Bote Propinas (Estimado)</span>
+                  <div className="flex items-center gap-2 mt-1">
+                    <input 
+                      type="number" 
+                      value={propinasPct} 
+                      onChange={e => setPropinasPct(Number(e.target.value))}
+                      className="w-12 bg-white border border-amber-200 rounded-lg text-center font-bold text-amber-700 text-xs py-1 outline-none focus:ring-2 ring-amber-400"
+                    />
+                    <span className="text-xs font-bold text-amber-600">% de ventas netas</span>
+                  </div>
+                </div>
+                <span className="text-3xl font-black text-amber-600 tracking-tighter">{Num.fmt(stats.propinasVal)}</span>
               </div>
-              <div className="h-1.5 bg-amber-200/30 rounded-full overflow-hidden">
-                <div className="h-full bg-amber-500 w-3/4 rounded-full"></div>
+              <div className="w-full h-2 bg-amber-200/50 rounded-full overflow-hidden">
+                <div className="h-full bg-amber-500 rounded-full" style={{ width: `${Math.min(propinasPct * 10, 100)}%` }}></div>
               </div>
-              <p className="text-[8px] text-amber-600 font-bold mt-2 uppercase">Basado en 3% de ventas brutas</p>
             </div>
             
-            <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
-              <div className="flex justify-between items-center mb-2">
-                <span className="text-[10px] font-black text-indigo-800 uppercase">Horas Extra / Refuerzos</span>
-                <span className="text-sm font-black text-indigo-600">{Num.fmt(stats.horasExtra)}</span>
+            {/* Horas extra Editables */}
+            <div className="p-5 bg-indigo-50 rounded-[2rem] border border-indigo-100">
+              <div className="flex justify-between items-start mb-2">
+                <span className="text-[10px] font-black text-indigo-800 uppercase tracking-widest mt-2">Bolsa Horas Extra</span>
+                <input 
+                  type="number" 
+                  value={horasExtraEuro} 
+                  onChange={e => setHorasExtraEuro(Number(e.target.value))}
+                  placeholder="0.00"
+                  className="w-28 bg-white border border-indigo-200 rounded-xl text-right font-black text-indigo-700 text-xl py-2 px-3 outline-none focus:ring-2 ring-indigo-400 shadow-sm"
+                />
               </div>
-              <p className="text-[8px] text-indigo-400 font-bold uppercase">Pendiente de validación gerencia</p>
+              <p className="text-[9px] text-indigo-400 font-bold uppercase tracking-widest mt-2">Repartir a final de mes</p>
             </div>
 
-            <button className="w-full py-3 border-2 border-dashed border-slate-200 rounded-2xl text-[10px] font-black text-slate-400 hover:border-indigo-300 hover:text-indigo-500 transition uppercase">
-              + Añadir Concepto Personal
-            </button>
+            <div className="pt-4 border-t border-slate-100 flex justify-between items-center">
+              <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Total Equipo:</span>
+              <span className="text-xl font-black text-slate-900">{Num.fmt(stats.propinasVal + horasExtraEuro)}</span>
+            </div>
           </div>
         </div>
 
-        {/* Gestoria & Docs */}
-        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
-          <h3 className="text-xs font-black text-slate-800 uppercase mb-6 flex items-center gap-2">
-            <FileText className="w-4 h-4 text-emerald-500" />
-            Documentos Gestoría
+        {/* 📑 GESTORÍA Y DOCUMENTOS */}
+        <div className="bg-slate-900 p-8 rounded-[2.5rem] shadow-xl text-white flex flex-col relative overflow-hidden">
+          <Zap className="absolute -right-10 -bottom-10 w-48 h-48 opacity-5 text-indigo-300" />
+          <h3 className="text-sm font-black text-white uppercase tracking-widest mb-6 flex items-center gap-2 relative z-10">
+            <FileText className="w-5 h-5 text-emerald-400" /> Pack Documentos
           </h3>
-          <div className="space-y-3">
-            {stats.docsGestoria.map(doc => (
-              <div key={doc.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-100 group hover:bg-white hover:shadow-md transition cursor-pointer">
-                <div className="flex items-center gap-3">
-                  <div className={cn(
-                    "w-8 h-8 rounded-xl flex items-center justify-center",
-                    doc.status === 'ready' ? "bg-emerald-100 text-emerald-600" : "bg-amber-100 text-amber-600"
-                  )}>
-                    <FileText className="w-4 h-4" />
-                  </div>
-                  <span className="text-xs font-bold text-slate-700">{doc.name}</span>
+          
+          <div className="space-y-4 flex-1 relative z-10">
+            <div className="flex items-center justify-between p-4 bg-slate-800/50 rounded-2xl border border-slate-700">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                <div>
+                  <p className="text-xs font-bold text-slate-200">Facturas de Venta</p>
+                  <p className="text-[9px] text-slate-500 uppercase tracking-widest font-black mt-0.5">{stats.countFacturas} Registros</p>
                 </div>
-                {doc.status === 'ready' ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : <RefreshCw className="w-4 h-4 text-amber-400 animate-spin-slow" />}
               </div>
-            ))}
-            
-            <div className="mt-6 p-4 bg-indigo-600 rounded-2xl text-white shadow-lg relative overflow-hidden">
-              <Zap className="absolute -right-2 -bottom-2 w-16 h-16 opacity-20" />
-              <p className="text-[10px] font-black uppercase opacity-80">Exportación Inteligente</p>
-              <p className="text-xs font-bold mt-1">¿Necesitas un informe a medida?</p>
-              <button className="mt-3 bg-white text-indigo-600 px-4 py-2 rounded-xl text-[10px] font-black hover:bg-indigo-50 transition">
-                PEDIR A IA
-              </button>
+            </div>
+
+            <div className="flex items-center justify-between p-4 bg-slate-800/50 rounded-2xl border border-slate-700">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                <div>
+                  <p className="text-xs font-bold text-slate-200">Gastos y Compras</p>
+                  <p className="text-[9px] text-slate-500 uppercase tracking-widest font-black mt-0.5">{stats.countAlbaranes} Registros</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between p-4 bg-slate-800/50 rounded-2xl border border-slate-700">
+              <div className="flex items-center gap-3">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                <div>
+                  <p className="text-xs font-bold text-slate-200">Resumen IVA Mod.303</p>
+                  <p className="text-[9px] text-slate-500 uppercase tracking-widest font-black mt-0.5">Autogenerado</p>
+                </div>
+              </div>
             </div>
           </div>
+
+          <button 
+            onClick={handleExportGestoria}
+            className="w-full mt-6 bg-indigo-500 text-white py-5 rounded-[1.5rem] text-xs font-black uppercase tracking-widest hover:bg-indigo-400 transition shadow-lg active:scale-95 flex justify-center items-center gap-2 relative z-10"
+          >
+            <Download className="w-4 h-4" /> DESCARGAR PACK EXCEL
+          </button>
         </div>
       </div>
     </div>
   );
 };
-
