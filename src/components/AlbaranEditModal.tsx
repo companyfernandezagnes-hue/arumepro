@@ -54,7 +54,10 @@ const predictVat = (name: string, learnedMemory: Record<string, number>, default
 export const AlbaranEditModal = ({ 
   editForm, sociosReales, setEditForm, onClose, onSave, onDelete, recordingMode, startVoiceRecording 
 }: AlbaranEditModalProps) => {
-  
+
+  // 🛡️ PROTECCIÓN CRÍTICA: Si el formulario es null, no renderizamos nada para evitar el crash
+  if (!editForm) return null;
+
   const [saving, setSaving] = useState(false);
   const undoRef = useRef<any[]>([]); // Memoria de Deshacer
   
@@ -106,7 +109,7 @@ export const AlbaranEditModal = ({
     setEditForm(prev => {
       if (!prev || !prev.items) return prev;
       
-      // Guardamos para Undo si el cambio es sustancial (un blur o select, no cada tecla)
+      // Guardamos para Undo si el cambio es sustancial
       if (['rate', 'u'].includes(field)) pushUndo(prev);
 
       const items = [...prev.items];
@@ -153,16 +156,15 @@ export const AlbaranEditModal = ({
     });
   };
 
-  // 🚀 Aprender IVA Manualmente (El usuario le da al botón "Enseñar a la IA")
+  // 🚀 Aprender IVA Manualmente
   const handleLearnVat = (index: number, name: string, rate: number) => {
     const normName = (name || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
     if (!normName) return;
     
     const newRules = { ...learnedVatRules, [normName]: rate };
     setLearnedVatRules(newRules);
-    localStorage.setItem('arume_vat_rules', JSON.stringify(newRules)); // Persistimos en local (simulando BD)
+    localStorage.setItem('arume_vat_rules', JSON.stringify(newRules)); 
     
-    // Y aplicamos el cambio a la línea
     handleItemChange(index, 'rate', rate);
   };
 
@@ -178,7 +180,6 @@ export const AlbaranEditModal = ({
         onSaveClick(e as any); 
       }
       
-      // Cmd/Ctrl + D -> Clonar línea activa
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
         const active = document.activeElement as HTMLElement | null;
         const idx = Number(active?.getAttribute('data-idx') ?? -1);
@@ -208,6 +209,7 @@ export const AlbaranEditModal = ({
   };
 
   const isRecordingState = recordingMode === 'edit';
+  const safeSociosReales = Array.isArray(sociosReales) ? sociosReales : []; // 🛡️ Protección de Array
 
   return (
     <div className="fixed inset-0 z-[200] flex justify-center items-start pt-4 md:items-center md:pt-0 p-0 md:p-4">
@@ -218,13 +220,16 @@ export const AlbaranEditModal = ({
         className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" 
       />
       
+      {/* 🛡️ FIX FRAMER: Quitado el objeto en 'initial' que rompía React */}
       <motion.div 
-        initial={{ y: "100%", md: { y: 20, opacity: 0 } }}
+        initial={{ y: 100, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 100, opacity: 0 }}
+        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
         className="bg-[#F8FAFC] w-full max-w-4xl rounded-t-[2.5rem] md:rounded-[2.5rem] shadow-2xl relative z-10 flex flex-col h-[90dvh] md:max-h-[85vh] overflow-hidden"
       >
         {/* 🚀 CABECERA FIJA */}
-        <div className="p-5 md:p-6 border-b border-slate-200 flex justify-between items-center bg-white sticky top-0 z-30 shrink-0">
+        <div className="p-5 md:p-6 border-b border-slate-200 bg-white flex justify-between items-center sticky top-0 z-30 shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-full hidden md:flex items-center justify-center">
               <Package className="w-5 h-5" />
@@ -253,7 +258,7 @@ export const AlbaranEditModal = ({
           {/* BANNER GRABACIÓN */}
           <AnimatePresence>
             {isRecordingState && (
-              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="bg-rose-500 text-white p-4 rounded-2xl flex items-center gap-3 shadow-lg shadow-rose-500/20">
+              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="bg-rose-500 text-white p-4 rounded-2xl flex items-center gap-3 shadow-lg shadow-rose-500/20 overflow-hidden">
                 <div className="w-3 h-3 bg-white rounded-full animate-pulse shrink-0" />
                 <div>
                   <p className="text-xs font-black uppercase tracking-widest">Escuchando cambios...</p>
@@ -267,17 +272,17 @@ export const AlbaranEditModal = ({
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
               <p className="text-[9px] font-black text-slate-400 uppercase mb-1.5">Proveedor</p>
-              <input value={editForm.prov} onChange={e => setEditForm(prev => prev ? {...prev, prov: e.target.value} : null)} className="w-full bg-slate-50 border border-slate-100 rounded-xl p-2.5 text-sm font-bold outline-none focus:border-indigo-400 focus:bg-white transition" />
+              <input value={editForm.prov || ''} onChange={e => setEditForm(prev => prev ? {...prev, prov: e.target.value} : null)} className="w-full bg-slate-50 border border-slate-100 rounded-xl p-2.5 text-sm font-bold outline-none focus:border-indigo-400 focus:bg-white transition" />
             </div>
             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
               <p className="text-[9px] font-black text-slate-400 uppercase mb-1.5">Fecha</p>
-              <input type="date" value={editForm.date} onChange={e => setEditForm(prev => prev ? {...prev, date: e.target.value} : null)} className="w-full bg-slate-50 border border-slate-100 rounded-xl p-2.5 text-sm font-bold outline-none focus:border-indigo-400 focus:bg-white transition" />
+              <input type="date" value={editForm.date || ''} onChange={e => setEditForm(prev => prev ? {...prev, date: e.target.value} : null)} className="w-full bg-slate-50 border border-slate-100 rounded-xl p-2.5 text-sm font-bold outline-none focus:border-indigo-400 focus:bg-white transition" />
             </div>
             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
               <p className="text-[9px] font-black text-slate-400 uppercase mb-1.5">Responsable Pago</p>
               <select value={editForm.socio || "Arume"} onChange={(e) => setEditForm(prev => prev ? { ...prev, socio: e.target.value } : null)} className="w-full bg-slate-50 border border-slate-100 rounded-xl p-2.5 text-sm font-bold outline-none focus:border-indigo-400 focus:bg-white transition cursor-pointer">
                 <option value="Arume">Arume (Empresa)</option>
-                {sociosReales.map((s: any) => <option key={s.id || s.n} value={s.n}>{s.n}</option>)}
+                {safeSociosReales.map((s: any) => <option key={s.id || s.n} value={s.n}>{s.n}</option>)}
               </select>
             </div>
             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
@@ -296,7 +301,7 @@ export const AlbaranEditModal = ({
             <div className="flex justify-between items-end px-1">
               <div>
                 <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest">Desglose de Líneas</p>
-                <p className="text-[9px] text-slate-400 font-bold mt-0.5">Calculadora IVA automática (Auditoría V2)</p>
+                <p className="text-[9px] text-slate-400 font-bold mt-0.5">Calculadora IVA automática</p>
               </div>
               <div className="flex gap-2">
                 {undoRef.current.length > 0 && (
@@ -324,11 +329,11 @@ export const AlbaranEditModal = ({
               </div>
 
               <AnimatePresence>
-                {editForm.items?.map((it: any, i: number) => {
+                {(editForm.items || []).map((it: any, i: number) => {
                   
                   // 🧠 IA AUDITORÍA: Validar si el IVA puesto coincide con lo que esperamos
-                  const predicted = predictVat(it.n, learnedVatRules, 10);
-                  const hasVatMismatch = it.rate !== predicted.expected && it.n.trim() !== '' && it.t > 0;
+                  const predicted = predictVat(it.n || '', learnedVatRules, 10);
+                  const hasVatMismatch = it.rate !== predicted.expected && (it.n || '').trim() !== '' && it.t > 0;
 
                   return (
                     <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9 }} key={`item-${i}`} className="flex flex-col gap-2">
@@ -336,7 +341,7 @@ export const AlbaranEditModal = ({
                         
                         {/* Cantidad + Unidad */}
                         <div className="col-span-4 md:col-span-2 flex items-center gap-1">
-                          <input data-idx={i} type="number" step="0.01" inputMode="decimal" value={it.q} onChange={e => handleItemChange(i, 'q', Number(e.target.value)||0)} onBlur={e => handleItemChange(i, 'q', Num.round2(e.currentTarget.value))} className="w-full bg-white border border-slate-200 rounded-lg p-2 font-bold text-center outline-none focus:border-indigo-500 text-xs shadow-sm" aria-label={`Cantidad línea ${i+1}`} />
+                          <input data-idx={i} type="number" step="0.01" inputMode="decimal" value={it.q ?? 0} onChange={e => handleItemChange(i, 'q', Number(e.target.value)||0)} onBlur={e => handleItemChange(i, 'q', Num.round2(e.currentTarget.value))} className="w-full bg-white border border-slate-200 rounded-lg p-2 font-bold text-center outline-none focus:border-indigo-500 text-xs shadow-sm" aria-label={`Cantidad línea ${i+1}`} />
                           <select value={it.u || 'uds'} onChange={e => handleItemChange(i, 'u', e.target.value)} className="bg-white border border-slate-200 rounded-lg p-2 text-xs font-bold text-slate-600 focus:border-indigo-500 outline-none cursor-pointer">
                             <option value="uds">uds</option><option value="kg">kg</option><option value="g">g</option><option value="l">l</option><option value="ml">ml</option>
                           </select>
@@ -344,7 +349,7 @@ export const AlbaranEditModal = ({
                         
                         {/* Concepto */}
                         <div className="col-span-8 md:col-span-4">
-                          <input data-idx={i} type="text" placeholder="Producto..." value={it.n} onChange={e => handleItemChange(i, 'n', e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg p-2 font-bold outline-none focus:border-indigo-500 text-xs shadow-sm" aria-label={`Producto línea ${i+1}`} />
+                          <input data-idx={i} type="text" placeholder="Producto..." value={it.n || ''} onChange={e => handleItemChange(i, 'n', e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg p-2 font-bold outline-none focus:border-indigo-500 text-xs shadow-sm" aria-label={`Producto línea ${i+1}`} />
                         </div>
 
                         {/* % IVA */}
@@ -361,7 +366,7 @@ export const AlbaranEditModal = ({
 
                         {/* Total Línea */}
                         <div className="col-span-4 md:col-span-1 mt-2 md:mt-0 relative">
-                          <input data-idx={i} type="number" step="0.01" inputMode="decimal" value={it.t} onChange={e => handleItemChange(i, 't', Number(e.target.value)||0)} onBlur={e => handleItemChange(i, 't', Num.round2(e.currentTarget.value))} className="w-full bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-lg p-2 font-black text-right outline-none focus:border-indigo-500 text-xs shadow-sm" />
+                          <input data-idx={i} type="number" step="0.01" inputMode="decimal" value={it.t ?? 0} onChange={e => handleItemChange(i, 't', Number(e.target.value)||0)} onBlur={e => handleItemChange(i, 't', Num.round2(e.currentTarget.value))} className="w-full bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-lg p-2 font-black text-right outline-none focus:border-indigo-500 text-xs shadow-sm" />
                         </div>
 
                         {/* Acciones */}
@@ -371,15 +376,15 @@ export const AlbaranEditModal = ({
                         </div>
                       </div>
 
-                      {/* 🧠 ALERTAS IVA (Aparecen debajo de la línea si no cuadra la normativa) */}
+                      {/* 🧠 ALERTAS IVA */}
                       {hasVatMismatch && (
                         <div className="ml-2 mr-2 mb-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-[10px]">
                           <div className="flex items-center gap-2 text-amber-700 font-bold">
                             <AlertCircle className="w-4 h-4 shrink-0" />
-                            <span>La normativa/IA sugiere aplicar <strong>{predicted.expected}% IVA</strong> ({predicted.reason}).</span>
+                            <span>IA sugiere aplicar <strong>{predicted.expected}% IVA</strong> ({predicted.reason}).</span>
                           </div>
                           <div className="flex gap-2 w-full sm:w-auto">
-                            <button type="button" onClick={() => handleItemChange(i, 'rate', predicted.expected)} className="bg-white border border-amber-300 text-amber-700 px-3 py-1.5 rounded-lg font-black hover:bg-amber-100 transition shadow-sm flex-1 sm:flex-none">Aplicar Solo Aquí</button>
+                            <button type="button" onClick={() => handleItemChange(i, 'rate', predicted.expected)} className="bg-white border border-amber-300 text-amber-700 px-3 py-1.5 rounded-lg font-black hover:bg-amber-100 transition shadow-sm flex-1 sm:flex-none">Aplicar Aquí</button>
                             <button type="button" onClick={() => handleLearnVat(i, it.n, it.rate)} className="bg-amber-600 text-white px-3 py-1.5 rounded-lg font-black hover:bg-amber-700 transition shadow-sm flex items-center justify-center gap-1 flex-1 sm:flex-none"><Bot className="w-3 h-3"/> Enseñar a la IA</button>
                           </div>
                         </div>
@@ -418,11 +423,11 @@ export const AlbaranEditModal = ({
             
             <div className="flex w-full md:w-auto items-center justify-between md:justify-end gap-4">
               <label className="flex items-center gap-2 cursor-pointer bg-slate-800 px-4 py-3 rounded-xl transition hover:bg-slate-700 border border-slate-700">
-                <input type="checkbox" checked={editForm.paid} onChange={e => setEditForm(prev => prev ? {...prev, paid: e.target.checked} : null)} className="w-5 h-5 accent-emerald-500 rounded bg-slate-900 border-slate-600" />
+                <input type="checkbox" checked={editForm.paid || false} onChange={e => setEditForm(prev => prev ? {...prev, paid: e.target.checked} : null)} className="w-5 h-5 accent-emerald-500 rounded bg-slate-900 border-slate-600" />
                 <span className="text-xs font-black uppercase tracking-wider text-white">MARCAR PAGADO</span>
               </label>
               
-              <button type="button" onClick={() => onDelete(editForm.id)} className="flex items-center justify-center w-12 h-12 bg-rose-500/10 text-rose-500 rounded-xl hover:bg-rose-500 hover:text-white transition" title="Borrar Factura">
+              <button type="button" onClick={() => onDelete(editForm.id)} className="flex items-center justify-center w-12 h-12 bg-rose-500/10 text-rose-500 rounded-xl hover:bg-rose-500 hover:text-white transition" title="Borrar Documento">
                 <Trash2 className="w-5 h-5" />
               </button>
             </div>
