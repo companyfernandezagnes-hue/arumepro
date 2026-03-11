@@ -27,23 +27,15 @@ const GLOBAL_VAT_CATALOG = {
   packaging: [/ENVASE/i, /ENVAS/i, /EMBALA/i, /PACK/i, /BANDEJA/i, /CAJA/i, /BOLSA/i, /TAPA/i, /VASO/i]
 };
 
-// Intenta predecir el IVA en base al nombre (Heurística legal AEAT)
 const predictVat = (name: string, learnedMemory: Record<string, number>, defaultVat = 10) => {
   const normName = (name || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
-  
-  // 1. Si el usuario ya nos ha enseñado este IVA, manda la memoria
-  if (learnedMemory[normName] !== undefined) {
-    return { expected: learnedMemory[normName], reason: 'Memoria (Lo cambiaste tú antes)' };
-  }
+  if (learnedMemory[normName] !== undefined) return { expected: learnedMemory[normName], reason: 'Memoria (Lo cambiaste tú antes)' };
 
-  // 2. Si no, tiramos del catálogo global de la AEAT (Alcohol y Azucarados al 21%)
   const hit = (arr: RegExp[]) => arr.some(rx => rx.test(name));
-  
   if (hit(GLOBAL_VAT_CATALOG.alcohol)) return { expected: 21, reason: 'Catálogo (Alcohol -> 21%)' };
   if (hit(GLOBAL_VAT_CATALOG.softSugared)) return { expected: 21, reason: 'Catálogo (Refrescos Azucarados -> 21%)' };
   if (hit(GLOBAL_VAT_CATALOG.packaging)) return { expected: 21, reason: 'Catálogo (Envases -> 21%)' };
 
-  // 3. Fallback por defecto (Hostelería = 10%)
   return { expected: defaultVat, reason: 'IVA General Hostelería' };
 };
 
@@ -54,19 +46,16 @@ const predictVat = (name: string, learnedMemory: Record<string, number>, default
 export const AlbaranEditModal = ({ 
   editForm, sociosReales, setEditForm, onClose, onSave, onDelete, recordingMode, startVoiceRecording 
 }: AlbaranEditModalProps) => {
-
-  // 🛡️ PROTECCIÓN CRÍTICA: Si el formulario es null, no renderizamos nada para evitar el crash
-  if (!editForm) return null;
+  
+  if (!editForm) return null; // 🛡️ Protección contra crash
 
   const [saving, setSaving] = useState(false);
-  const undoRef = useRef<any[]>([]); // Memoria de Deshacer
+  const undoRef = useRef<any[]>([]); 
   
-  // Simulación de "Memoria Persistida" (En producción debería ir al onSave o LocalStorage)
   const [learnedVatRules, setLearnedVatRules] = useState<Record<string, number>>(() => {
     try { return JSON.parse(localStorage.getItem('arume_vat_rules') || '{}'); } catch { return {}; }
   });
 
-  // Guardar en la "pila" de deshacer antes de cada gran cambio
   const pushUndo = (state: any) => {
     undoRef.current = [JSON.parse(JSON.stringify(state)), ...undoRef.current].slice(0, 10);
   };
@@ -77,7 +66,7 @@ export const AlbaranEditModal = ({
   };
 
   /* =======================================================
-   * 🧮 FUNCIONES MATEMÁTICAS ESTRICTAS (Anti-Crash)
+   * 🧮 FUNCIONES MATEMÁTICAS ESTRICTAS
    * ======================================================= */
   const clampNum = (n: any, min = 0, max = Number.POSITIVE_INFINITY) => 
     Number.isFinite(Number(n)) ? Math.min(Math.max(Number(n), min), max) : 0;
@@ -108,8 +97,6 @@ export const AlbaranEditModal = ({
   const handleItemChange = useCallback((index: number, field: string, value: any) => {
     setEditForm(prev => {
       if (!prev || !prev.items) return prev;
-      
-      // Guardamos para Undo si el cambio es sustancial
       if (['rate', 'u'].includes(field)) pushUndo(prev);
 
       const items = [...prev.items];
@@ -156,30 +143,45 @@ export const AlbaranEditModal = ({
     });
   };
 
-  // 🚀 Aprender IVA Manualmente
   const handleLearnVat = (index: number, name: string, rate: number) => {
     const normName = (name || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
     if (!normName) return;
-    
     const newRules = { ...learnedVatRules, [normName]: rate };
     setLearnedVatRules(newRules);
     localStorage.setItem('arume_vat_rules', JSON.stringify(newRules)); 
-    
     handleItemChange(index, 'rate', rate);
   };
 
   /* =======================================================
-   * ⌨️ ATAJOS DE TECLADO (UX Pro)
+   * ⌨️ ATAJOS DE TECLADO Y FIX DE GUARDADO
    * ======================================================= */
+  // ✅ FIX 1: Handler de Guardado Simplificado (Ignora recordingMode)
+  const onSaveClick = async (e?: React.MouseEvent | KeyboardEvent) => {
+    e?.preventDefault?.(); // Llama a preventDefault solo si el evento existe
+    if (saving) return; // Solo bloqueamos si YA estamos guardando
+    
+    setSaving(true);
+    try { 
+      if (onSave) await onSave(e as any); 
+    } catch (err) {
+      console.error("Error guardando:", err);
+    } finally { 
+      setSaving(false); 
+    }
+  };
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (recordingMode) return; 
       if (e.key === 'Escape') { e.preventDefault(); onClose(); }
+      
+      // ✅ Guardado Rápido Ctrl+Enter
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'enter') { 
         e.preventDefault(); 
-        onSaveClick(e as any); 
+        onSaveClick(); 
       }
       
+      // Cmd/Ctrl + D -> Clonar línea activa
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
         const active = document.activeElement as HTMLElement | null;
         const idx = Number(active?.getAttribute('data-idx') ?? -1);
@@ -201,15 +203,8 @@ export const AlbaranEditModal = ({
     return () => window.removeEventListener('keydown', onKey);
   }, [recordingMode, onClose, onSave, setEditForm]);
 
-  const onSaveClick = async (e: React.MouseEvent) => {
-    e.preventDefault();
-    if (recordingMode || saving) return;
-    setSaving(true);
-    try { await onSave(e); } finally { setSaving(false); }
-  };
-
   const isRecordingState = recordingMode === 'edit';
-  const safeSociosReales = Array.isArray(sociosReales) ? sociosReales : []; // 🛡️ Protección de Array
+  const safeSociosReales = Array.isArray(sociosReales) ? sociosReales : []; 
 
   return (
     <div className="fixed inset-0 z-[200] flex justify-center items-start pt-4 md:items-center md:pt-0 p-0 md:p-4">
@@ -220,12 +215,13 @@ export const AlbaranEditModal = ({
         className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" 
       />
       
-      {/* 🛡️ FIX FRAMER: Quitado el objeto en 'initial' que rompía React */}
+      {/* ✅ FIX 2: onClick detiene la propagación y evita que se cierre sin querer. FIX 3: animaciones arregladas */}
       <motion.div 
         initial={{ y: 100, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         exit={{ y: 100, opacity: 0 }}
         transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+        onClick={(e) => e.stopPropagation()} 
         className="bg-[#F8FAFC] w-full max-w-4xl rounded-t-[2.5rem] md:rounded-[2.5rem] shadow-2xl relative z-10 flex flex-col h-[90dvh] md:max-h-[85vh] overflow-hidden"
       >
         {/* 🚀 CABECERA FIJA */}
@@ -241,11 +237,11 @@ export const AlbaranEditModal = ({
           </div>
           
           <div className="flex items-center gap-2">
-            <button type="button" disabled={recordingMode !== null || saving} onClick={onClose} className="p-2 md:px-4 bg-slate-50 text-slate-600 rounded-xl font-bold text-xs hover:bg-slate-100 transition border border-slate-200 disabled:opacity-50">
+            <button type="button" disabled={saving} onClick={onClose} className="p-2 md:px-4 bg-slate-50 text-slate-600 rounded-xl font-bold text-xs hover:bg-slate-100 transition border border-slate-200 disabled:opacity-50">
               <span className="hidden md:inline">Cancelar</span>
               <X className="w-5 h-5 md:hidden" />
             </button>
-            <button type="button" disabled={recordingMode !== null || saving} onClick={onSaveClick} className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-black text-xs hover:bg-indigo-700 transition flex items-center gap-2 shadow-lg shadow-indigo-200 active:scale-95 disabled:opacity-50">
+            <button type="button" disabled={saving} onClick={onSaveClick} className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-black text-xs hover:bg-indigo-700 transition flex items-center gap-2 shadow-lg shadow-indigo-200 active:scale-95 disabled:opacity-50">
               <Save className="w-4 h-4" />
               <span>{saving ? 'Guardando...' : 'Guardar'}</span>
             </button>
@@ -330,8 +326,6 @@ export const AlbaranEditModal = ({
 
               <AnimatePresence>
                 {(editForm.items || []).map((it: any, i: number) => {
-                  
-                  // 🧠 IA AUDITORÍA: Validar si el IVA puesto coincide con lo que esperamos
                   const predicted = predictVat(it.n || '', learnedVatRules, 10);
                   const hasVatMismatch = it.rate !== predicted.expected && (it.n || '').trim() !== '' && it.t > 0;
 
@@ -339,7 +333,6 @@ export const AlbaranEditModal = ({
                     <motion.div layout initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9 }} key={`item-${i}`} className="flex flex-col gap-2">
                       <div className="grid grid-cols-12 gap-2 items-center bg-slate-50 p-2 md:p-1.5 rounded-xl border border-slate-100 group">
                         
-                        {/* Cantidad + Unidad */}
                         <div className="col-span-4 md:col-span-2 flex items-center gap-1">
                           <input data-idx={i} type="number" step="0.01" inputMode="decimal" value={it.q ?? 0} onChange={e => handleItemChange(i, 'q', Number(e.target.value)||0)} onBlur={e => handleItemChange(i, 'q', Num.round2(e.currentTarget.value))} className="w-full bg-white border border-slate-200 rounded-lg p-2 font-bold text-center outline-none focus:border-indigo-500 text-xs shadow-sm" aria-label={`Cantidad línea ${i+1}`} />
                           <select value={it.u || 'uds'} onChange={e => handleItemChange(i, 'u', e.target.value)} className="bg-white border border-slate-200 rounded-lg p-2 text-xs font-bold text-slate-600 focus:border-indigo-500 outline-none cursor-pointer">
@@ -347,36 +340,30 @@ export const AlbaranEditModal = ({
                           </select>
                         </div>
                         
-                        {/* Concepto */}
                         <div className="col-span-8 md:col-span-4">
                           <input data-idx={i} type="text" placeholder="Producto..." value={it.n || ''} onChange={e => handleItemChange(i, 'n', e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg p-2 font-bold outline-none focus:border-indigo-500 text-xs shadow-sm" aria-label={`Producto línea ${i+1}`} />
                         </div>
 
-                        {/* % IVA */}
                         <div className="col-span-4 md:col-span-2 mt-2 md:mt-0">
                           <select data-idx={i} value={it.rate || 10} onChange={e => handleItemChange(i, 'rate', Number(e.target.value))} className={cn("w-full bg-white rounded-lg p-2 font-bold text-center outline-none text-xs shadow-sm cursor-pointer", hasVatMismatch ? "border-2 border-amber-400 text-amber-700" : "border border-slate-200 text-slate-600 focus:border-indigo-500")}>
                             <option value={0}>0%</option><option value={4}>4%</option><option value={10}>10%</option><option value={21}>21%</option>
                           </select>
                         </div>
 
-                        {/* Precio Unitario */}
                         <div className="col-span-4 md:col-span-2 mt-2 md:mt-0">
                           <input data-idx={i} type="number" step="0.0001" inputMode="decimal" value={it.unitPrice ?? (it.q ? Num.round2((it.t || 0)/it.q) : 0)} onChange={e => handleItemChange(i, 'unitPrice', Number(e.target.value))} onBlur={e => handleItemChange(i, 'unitPrice', Num.round2(e.currentTarget.value))} className="w-full bg-white border border-slate-200 rounded-lg p-2 font-bold text-right outline-none focus:border-indigo-500 text-xs shadow-sm" placeholder="€/ud" />
                         </div>
 
-                        {/* Total Línea */}
                         <div className="col-span-4 md:col-span-1 mt-2 md:mt-0 relative">
                           <input data-idx={i} type="number" step="0.01" inputMode="decimal" value={it.t ?? 0} onChange={e => handleItemChange(i, 't', Number(e.target.value)||0)} onBlur={e => handleItemChange(i, 't', Num.round2(e.currentTarget.value))} className="w-full bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-lg p-2 font-black text-right outline-none focus:border-indigo-500 text-xs shadow-sm" />
                         </div>
 
-                        {/* Acciones */}
                         <div className="col-span-12 md:col-span-1 flex justify-end mt-2 md:mt-0 gap-1">
                           <button type="button" onClick={() => { pushUndo(editForm); const items = [...(editForm.items||[])]; items.splice(i+1, 0, {...items[i]}); setEditForm({...editForm, items, ...recalcTotals(items)}); }} className="text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 transition p-2 rounded-lg" title="Clonar línea (Ctrl+D)"><Plus className="w-3.5 h-3.5" /></button>
                           <button type="button" onClick={() => deleteItemFromEdit(i)} className="text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition p-2 rounded-lg" title="Eliminar línea"><Trash2 className="w-3.5 h-3.5" /></button>
                         </div>
                       </div>
 
-                      {/* 🧠 ALERTAS IVA */}
                       {hasVatMismatch && (
                         <div className="ml-2 mr-2 mb-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-[10px]">
                           <div className="flex items-center gap-2 text-amber-700 font-bold">
@@ -413,24 +400,37 @@ export const AlbaranEditModal = ({
 
         </div>
         
-        {/* 📌 FOOTER FIJO DE TOTALES Y ACCIONES */}
+        {/* 📌 FOOTER FIJO DE TOTALES Y ACCIONES (CON EL BOTÓN EXTRA) */}
         <div className="bg-slate-900 shrink-0 relative z-20 pb-safe">
           <div className="p-5 md:p-6 flex flex-col md:flex-row justify-between items-center gap-4">
+            
             <div className="w-full md:w-auto flex justify-between items-center md:block">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Documento</p>
               <p className="text-3xl md:text-4xl font-black text-emerald-400 tracking-tighter">{Num.fmt(editForm.total || 0)}</p>
             </div>
             
-            <div className="flex w-full md:w-auto items-center justify-between md:justify-end gap-4">
-              <label className="flex items-center gap-2 cursor-pointer bg-slate-800 px-4 py-3 rounded-xl transition hover:bg-slate-700 border border-slate-700">
+            <div className="flex w-full md:w-auto items-center justify-between md:justify-end gap-3">
+              <label className="flex items-center gap-2 cursor-pointer bg-slate-800 px-3 py-2.5 rounded-xl transition hover:bg-slate-700 border border-slate-700">
                 <input type="checkbox" checked={editForm.paid || false} onChange={e => setEditForm(prev => prev ? {...prev, paid: e.target.checked} : null)} className="w-5 h-5 accent-emerald-500 rounded bg-slate-900 border-slate-600" />
-                <span className="text-xs font-black uppercase tracking-wider text-white">MARCAR PAGADO</span>
+                <span className="text-[10px] font-black uppercase tracking-wider text-white">MARCAR PAGADO</span>
               </label>
               
-              <button type="button" onClick={() => onDelete(editForm.id)} className="flex items-center justify-center w-12 h-12 bg-rose-500/10 text-rose-500 rounded-xl hover:bg-rose-500 hover:text-white transition" title="Borrar Documento">
+              {/* ✅ BOTÓN DE GUARDAR EN EL FOOTER (NUEVO) */}
+              <button 
+                type="button" 
+                disabled={saving} 
+                onClick={onSaveClick} 
+                className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-black text-xs hover:bg-indigo-700 transition flex items-center gap-2 shadow-lg shadow-indigo-200 active:scale-95 disabled:opacity-50"
+              >
+                <Save className="w-4 h-4" />
+                <span className="hidden sm:inline">{saving ? 'Guardando...' : 'Guardar'}</span>
+              </button>
+
+              <button type="button" onClick={() => onDelete(editForm.id)} className="flex items-center justify-center w-11 h-11 bg-rose-500/10 text-rose-500 rounded-xl hover:bg-rose-500 hover:text-white transition" title="Borrar Documento">
                 <Trash2 className="w-5 h-5" />
               </button>
             </div>
+
           </div>
         </div>
 
