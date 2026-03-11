@@ -150,7 +150,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
    * 🛡️ DRAG & DROP WATCHDOG SUPREMO (Cero Pantallas Azules)
    * ======================================================= */
   useEffect(() => {
-    // Si el overlay se queda pillado, un click o teclear cualquier cosa lo apagará
     const forceReset = () => {
       if (isDragging) {
         dragCounter.current = 0;
@@ -378,16 +377,28 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       const q = superNorm(deferredSearch);
 
       albaranesSeguros.forEach(a => {
+        // 1. Descartar si ya está facturado o no tiene fecha válida
         const aDate = a?.date || '';
         if (a?.invoiced || typeof aDate !== 'string' || !aDate.startsWith(year.toString())) return;
         
+        // 2. Filtro por Unidad de Negocio
         const itemUnit = (a as any).unitId || 'REST';
         if (selectedUnit !== 'ALL' && itemUnit !== selectedUnit) return;
         
+        // 3. Determinar el "Dueño" (Proveedor o Socio)
         const owner = (mode === 'proveedor' ? a?.prov : a?.socio) || 'Arume';
-        if (q && !superNorm(owner).includes(q) && !superNorm(a?.num || '').includes(q)) return;
+        
+        // 4. EL FILTRO DE BÚSQUEDA CORREGIDO:
+        // Si hay texto en el buscador ('q'), comprobamos si coincide con dueño o número.
+        // Si NO coincide, usamos 'return' para saltarnos este albarán.
+        if (q) {
+            const matchOwner = superNorm(owner).includes(q);
+            const matchNum = superNorm(a?.num || '').includes(q);
+            if (!matchOwner && !matchNum) return; // Se oculta si no hace match
+        }
 
-        const mk = typeof aDate === 'string' && aDate.length >= 7 ? aDate.substring(0, 7) : null; 
+        // 5. Agrupación por Mes
+        const mk = aDate.length >= 7 ? aDate.substring(0, 7) : null; 
         if (!mk) return;
 
         if (!byMonth[mk]) {
@@ -397,12 +408,18 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           const names = ["","Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
           byMonth[mk] = { name: `${names[m] || 'Mes'} ${y}`, groups: {} };
         }
+
+        // 6. Agrupación final por Dueño y Unidad
         const groupKey = `${superNorm(owner)}_${itemUnit}`;
-        if (!byMonth[mk].groups[groupKey]) byMonth[mk].groups[groupKey] = { label: owner, unitId: itemUnit, t: 0, ids: [], count: 0 };
+        if (!byMonth[mk].groups[groupKey]) {
+            byMonth[mk].groups[groupKey] = { label: owner, unitId: itemUnit, t: 0, ids: [], count: 0 };
+        }
+        
         byMonth[mk].groups[groupKey].t += (Num.parse(a?.total) || 0); 
         byMonth[mk].groups[groupKey].count += 1; 
         byMonth[mk].groups[groupKey].ids.push(a?.id);
       });
+
       return Object.entries(byMonth).sort((a, b) => b[0].localeCompare(a[0]));
     } catch (error) {
       console.error("Error agrupando albaranes:", error);
