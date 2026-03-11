@@ -19,7 +19,15 @@ export const CASH_UNITS: { id: CashBusinessUnit; name: string; icon: any; color:
   { id: 'SHOP', name: 'Tienda Sake', icon: ShoppingBag, color: 'text-emerald-600', bg: 'bg-emerald-50' }
 ];
 
-const COMISIONES = { glovo: 0.0, uber: 0.0, apperStreet: 0.0, madisa: 0.0 };
+/* =======================================================
+ * 🛡️ CONFIGURACIÓN DE COMISIONES (Actualizado)
+ * ======================================================= */
+const COMISIONES = { 
+  glovo: 0.30,       // 30%
+  uber: 0.30,        // 30%
+  apperStreet: 0.0,  // 0%
+  madisa: 0.0        // 0%
+};
 
 interface CashViewProps {
   data: AppData;
@@ -31,10 +39,8 @@ interface CashViewProps {
  * ======================================================= */
 const asNum = (v: any, d = 0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
 
-// Fechas a prueba de fallos
 const getSafeDate = () => new Date().toLocaleDateString('sv-SE');
 
-// Extracción de JSON infalible mediante Regex
 const safeJSON = (str: string) => {
   try {
     const match = str.match(/\{[\s\S]*\}/);
@@ -59,7 +65,7 @@ function upsertFactura(list: any[], item: any, key: string = 'num') {
 }
 
 /* =======================================================
- * 🧠 HOOK: CÁLCULOS FINANCIEROS (Rendimiento x3)
+ * 🧠 HOOK: CÁLCULOS FINANCIEROS NETOS
  * ======================================================= */
 function useCashCalculations(form: any, fondoCaja: number) {
   const totalTarjetas = useMemo(() => Num.parse(form.tpv1) + Num.parse(form.tpv2) + Num.parse(form.amex), [form.tpv1, form.tpv2, form.amex]);
@@ -69,14 +75,15 @@ function useCashCalculations(form: any, fondoCaja: number) {
   const appsNetas = useMemo(() => {
     const g = Num.parse(form.glovo) * (1 - COMISIONES.glovo);
     const u = Num.parse(form.uber) * (1 - COMISIONES.uber);
-    return Num.round2(g + u + (Num.parse(form.madisa) + Num.parse(form.apperStreet)));
+    const m = Num.parse(form.madisa) * (1 - COMISIONES.madisa);
+    const a = Num.parse(form.apperStreet) * (1 - COMISIONES.apperStreet);
+    return Num.round2(g + u + m + a);
   }, [form.glovo, form.uber, form.madisa, form.apperStreet]);
 
   const totalCalculadoBruto = useMemo(() => Num.parse(form.efectivo) + totalTarjetas + appsBrutas, [form.efectivo, totalTarjetas, appsBrutas]);
   const totalTienda = useMemo(() => Num.parse(form.tienda), [form.tienda]);
   const totalRestauranteNeto = useMemo(() => (Num.parse(form.efectivo) + totalTarjetas + appsNetas) - totalTienda, [form.efectivo, totalTarjetas, appsNetas, totalTienda]);
 
-  // LA REGLA DEL SOBRE: Caja Física - (Efectivo TPV + Fondo de Caja Fijo)
   const descuadreVivo = useMemo(() => {
     if (form.cajaFisica === '' || form.efectivo === '') return null;
     return Num.round2(Num.parse(form.cajaFisica) - (Num.parse(form.efectivo) + fondoCaja));
@@ -108,7 +115,6 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   const [gastosCaja, setGastosCaja] = useState<{ concepto: string; importe: string; iva: 4|10|21; unidad: CashBusinessUnit }[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Extraemos cálculos al Hook
   const calc = useCashCalculations(form, fondoCaja);
 
   // 🎙️ ESTADOS IA VOZ Y VOSK
@@ -119,7 +125,6 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   const speechRecRef = useRef<any>(null);
   const nativeTranscriptRef = useRef<string>('');
 
-  // --- KPIS MEMOIZADOS ---
   const kpis = useMemo(() => {
     const cierresMes = (data.cierres || []).filter(c => c.date.startsWith(currentFilterDate));
     const total = cierresMes.reduce((acc, c) => acc + (Num.parse(c.totalVenta) || 0), 0);
@@ -138,8 +143,16 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   };
 
   /* =======================================================
-   * 🤖 MOTOR DE IA DUAL (GEMINI + VOSK FALLBACK)
+   * 🤖 MOTOR DE IA DUAL + COMANDOS DE VOZ EN VIVO
    * ======================================================= */
+  
+  // Extrae números basándose en una palabra clave ("efectivo 300" -> 300)
+  const extractVoiceCommand = (text: string, keyword: string) => {
+    const regex = new RegExp(`${keyword}\\s*(\\d+(?:[,.]\\d+)?)`, 'i');
+    const match = text.match(regex);
+    return match ? match[1].replace(',', '.') : null;
+  };
+
   const toggleRecording = async () => {
     if (isRecording) {
       mediaRecorderRef.current?.stop();
@@ -164,6 +177,22 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
           const text = Array.from(e.results).map((r: any) => r[0].transcript).join('');
           nativeTranscriptRef.current = text;
           setLiveTranscript(text); 
+
+          // 🔥 MAGIA: Autocompletado en Vivo
+          const efec = extractVoiceCommand(text, 'efectivo');
+          const tpv1 = extractVoiceCommand(text, 'tpv 1|tpv uno|datáfono uno');
+          const glovo = extractVoiceCommand(text, 'glovo');
+          const uber = extractVoiceCommand(text, 'uber');
+          const fisico = extractVoiceCommand(text, 'caja física|físico|sobre');
+
+          setForm(prev => ({
+            ...prev,
+            efectivo: efec || prev.efectivo,
+            tpv1: tpv1 || prev.tpv1,
+            glovo: glovo || prev.glovo,
+            uber: uber || prev.uber,
+            cajaFisica: fisico || prev.cajaFisica
+          }));
         };
         speechRecRef.current = recognition; recognition.start();
       }
@@ -188,7 +217,6 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     try {
       if (!apiKey) throw new Error("No API Key");
       
-      // INTENTO 1: GOOGLE GEMINI
       const b64 = await new Promise<string>(res => { const fr = new FileReader(); fr.onload = () => res((fr.result as string).split(',')[1]); fr.readAsDataURL(blob); });
       const ai = new GoogleGenAI({ apiKey });
       const prompt = `Transcribe y extrae. Devuelve SOLO JSON estricto: { "efectivo":0, "tpv1":0, "tpv2":0, "amex":0, "glovo":0, "uber":0, "apperStreet":0, "sobre_cash":0, "tienda":0 }`;
@@ -205,23 +233,18 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
 
     } catch (e) {
       console.warn("⚠️ Gemini Falló. Activando VOSK Local...");
-      
-      // INTENTO 2: FALLBACK VOSK LOCAL
       try {
         const formData = new FormData();
         formData.append("file", blob, "audio.webm");
-        const voskUrl = "http://localhost:2700/transcribe"; // Tu endpoint de Vosk / n8n
+        const voskUrl = "http://localhost:2700/transcribe"; 
         const voskRes = await fetch(voskUrl, { method: "POST", body: formData });
         if (!voskRes.ok) throw new Error("Vosk no responde");
         
         const voskData = await voskRes.json();
         setForm(prev => ({ ...prev, notas: prev.notas + "\n🤖 [VOSK]: " + (voskData.text || "") }));
         setScanStatus('success');
-        alert("⚠️ Gemini sin saldo. Tu servidor VOSK local ha transcrito el audio en notas.");
       } catch (voskErr) {
-        // INTENTO 3: NAVEGADOR NATIVO (Ya guardado en notas en toggleRecording)
         setScanStatus('error');
-        alert("⚠️ IA caída y Vosk apagado. Revisa tus notas.");
       }
     } finally { setTimeout(() => setScanStatus('idle'), 4000); }
   };
@@ -247,7 +270,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   const actualizarFormConIA = useCallback((rawJson: any) => {
     setForm(prev => ({
       ...prev, 
-      date: rawJson.fecha ? normalizeDate(rawJson.fecha) : prev.date,
+      date: rawJson.fecha ? rawJson.fecha : prev.date,
       efectivo: String(asNum(rawJson.efectivo) || prev.efectivo), 
       tpv1: String(asNum(rawJson.tpv1) || prev.tpv1),
       tpv2: String(asNum(rawJson.tpv2) || prev.tpv2), 
@@ -274,7 +297,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
       if (!newData.facturas) newData.facturas = []; 
       if (!newData.banco) newData.banco = [];
 
-      // 1. Gastos de caja (Salen de la caja física, son facturas pagadas)
+      // 1. Gastos de caja
       gastosCaja.forEach((g, idx) => {
         const imp = Num.parse(g.importe); const base = Num.round2(imp / (1 + g.iva / 100));
         newData.facturas.unshift({
@@ -284,7 +307,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         });
       });
 
-      // 2. Ingreso a banco (El sobre que mandas al cajero automático)
+      // 2. Ingreso a banco
       if (Num.parse(depositoBanco) > 0) {
         newData.banco.unshift({ id: `dep-${Date.now()}`, date: fecha, desc: "Ingreso efectivo caja", amount: Num.parse(depositoBanco), status: "pending" });
       }
@@ -297,13 +320,12 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
       };
       upsertFactura(newData.cierres, cierreRest, 'id');
       
-      // Factura espejo (Para que sume en los beneficios)
       upsertFactura(newData.facturas, { 
           id: `f-zr-${fecha}`, tipo: 'caja', num: cierreId, date: fecha, 
           prov: "Z DIARIO", total: calc.totalRestauranteNeto, paid: false, reconciled: false, unidad_negocio: 'REST' 
       }, 'num');
 
-      // 4. Cierre Tienda Sake (Si aplica)
+      // 4. Cierre Tienda Sake
       if (Num.parse(form.tienda) > 0) {
         const shopId = `ZS-${fecha.replace(/-/g, '')}`;
         upsertFactura(newData.cierres, { id: shopId, date: fecha, totalVenta: Num.parse(form.tienda), efectivo: 0, tarjeta: 0, apps: 0, descuadre: 0, notas: 'Venta separada', unitId: 'SHOP' }, 'id');
@@ -342,12 +364,12 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   return (
     <div className={cn("animate-fade-in space-y-6 pb-24", scanStatus === 'loading' && "transition-none")}>
       
-      {/* 🚀 OVERLAY GRABACIÓN VOZ */}
+      {/* 🚀 OVERLAY GRABACIÓN VOZ EN VIVO */}
       <AnimatePresence>
         {isRecording && (
           <motion.div initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -50, opacity: 0 }} className="fixed top-4 left-1/2 -translate-x-1/2 z-[400] w-11/12 max-w-md bg-slate-900 text-white p-4 rounded-3xl shadow-2xl border-2 border-indigo-500 cursor-pointer flex flex-col items-center gap-2" onClick={toggleRecording}>
             <div className="flex items-center gap-3"><div className="w-3 h-3 bg-rose-500 rounded-full animate-pulse"></div><span className="text-xs font-black uppercase tracking-widest">Escuchando... (Toca para parar)</span></div>
-            <p className="text-xs text-slate-300 text-center italic line-clamp-3 w-full">{liveTranscript || "Lee el ticket Z en voz alta..."}</p>
+            <p className="text-xs text-slate-300 text-center italic line-clamp-3 w-full">{liveTranscript || "Di 'Efectivo 300' o 'Glovo 50'..."}</p>
           </motion.div>
         )}
       </AnimatePresence>
@@ -449,8 +471,31 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
                 </div>
             </div>
 
+            {/* SECCIÓN DELIVERIES */}
             <div className="mt-6 border-t border-slate-100 pt-6">
-              <p className="text-[10px] font-black text-amber-500 uppercase mb-3">3. Gastos Pagados con Dinero del Sobre</p>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block">3. Apps Delivery (Cálculo Neto)</label>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div className="bg-orange-50/50 p-2 rounded-xl border border-orange-100">
+                  <span className="text-[8px] font-bold text-orange-400 block mb-1">GLOVO (-30%)</span>
+                  <input type="number" value={form.glovo} onChange={e=>setForm({...form, glovo:e.target.value})} className="w-full bg-transparent font-black text-orange-700 outline-none" placeholder="Bruto" />
+                </div>
+                <div className="bg-indigo-50/50 p-2 rounded-xl border border-indigo-100">
+                  <span className="text-[8px] font-bold text-indigo-400 block mb-1">UBER (-30%)</span>
+                  <input type="number" value={form.uber} onChange={e=>setForm({...form, uber:e.target.value})} className="w-full bg-transparent font-black text-indigo-700 outline-none" placeholder="Bruto" />
+                </div>
+                <div className="bg-teal-50/50 p-2 rounded-xl border border-teal-100">
+                  <span className="text-[8px] font-bold text-teal-400 block mb-1">APPERSTREET (-0%)</span>
+                  <input type="number" value={form.apperStreet} onChange={e=>setForm({...form, apperStreet:e.target.value})} className="w-full bg-transparent font-black text-teal-700 outline-none" placeholder="Bruto" />
+                </div>
+                <div className="bg-rose-50/50 p-2 rounded-xl border border-rose-100">
+                  <span className="text-[8px] font-bold text-rose-400 block mb-1">MADISA (-0%)</span>
+                  <input type="number" value={form.madisa} onChange={e=>setForm({...form, madisa:e.target.value})} className="w-full bg-transparent font-black text-rose-700 outline-none" placeholder="Bruto" />
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 border-t border-slate-100 pt-6">
+              <p className="text-[10px] font-black text-amber-500 uppercase mb-3">4. Gastos Pagados con Dinero del Sobre</p>
               <GastoCajaEditor gastos={gastosCaja} onAdd={(g) => setGastosCaja(prev => [...prev, g])} onDelete={(i) => setGastosCaja(prev => prev.filter((_,idx) => idx !== i))} />
             </div>
 
@@ -467,8 +512,8 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
 
         <div className="space-y-6">
            <CashHistoryList 
-              cierres={kpis.cierresMes} // 🚀 CORRECCIÓN: El prop esperado por tu CashHistoryList
-              onDelete={handleDeleteCierre} 
+             cierres={kpis.cierresMes} 
+             onDelete={handleDeleteCierre} 
            />
         </div>
       </div>
