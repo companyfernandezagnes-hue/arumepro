@@ -75,6 +75,68 @@ const normalizeUnitPrice = (q: number, u: string | undefined, unitPrice: number)
 };
 
 /* =======================================================
+ * 🚀 HELPER DE CO-PILOT: PROMOCIÓN AUTOMÁTICA A FACTURAS
+ * ======================================================= */
+const normProv = (s?: string) =>
+  (s || '').toLowerCase().normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\b(s\.?l\.?|s\.?a\.?|s\.?l\.?u\.?|s\.?c\.?p\.?)\b/gi, '')
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
+
+function upsertFacturaFromAlbaran(data: AppData, alb: Albaran) {
+  if (!Array.isArray(data.facturas)) data.facturas = [];
+
+  const provKey = normProv(alb.prov);
+  const yymm = (alb.date || DateUtil.today()).slice(0, 7);
+
+  // Buscar factura candidata (compra, mismo proveedor y mes, no conciliada)
+  const idx = data.facturas.findIndex((f: any) =>
+    f?.tipo === 'compra' &&
+    normProv(f?.prov) === provKey &&
+    (f?.date || '').startsWith(yymm) &&
+    !f?.reconciled
+  );
+
+  // Cálculos del albarán (con fallback 10% si faltara)
+  const t = Num.parse(alb.total) || 0;
+  const b = Num.parse(alb.base)  || Num.round2(t / 1.10);
+  const i = Num.parse(alb.taxes) || Num.round2(t - b);
+
+  if (idx >= 0) {
+    // Sumar a factura existente
+    const F = data.facturas[idx];
+    F.total = Num.round2((Num.parse(F.total) || 0) + t);
+    F.base  = Num.round2((Num.parse(F.base)  || 0) + b);
+    F.tax   = Num.round2((Num.parse(F.tax)   || 0) + i);
+    F.albaranIdsArr = Array.from(new Set([...(F.albaranIdsArr || []), alb.id]));
+  } else {
+    // Crear nueva factura del mes/proveedor
+    const newFac = {
+      id: `fac-auto-${Date.now()}`,
+      tipo: 'compra',
+      num: `AUTO-${alb.num || 'SN'}`,
+      date: alb.date || DateUtil.today(),
+      prov: alb.prov,
+      total: t, base: b, tax: i,
+      paid: false,
+      reconciled: false,
+      status: 'approved',
+      unidad_negocio: alb.unitId || 'REST',
+      albaranIdsArr: [alb.id],
+      source: 'auto-from-albaran'
+    } as any;
+    data.facturas.unshift(newFac);
+  }
+
+  // Marcar albarán como facturado
+  const ai = data.albaranes.findIndex(a => a.id === alb.id);
+  if (ai >= 0) {
+    data.albaranes[ai] = { ...data.albaranes[ai], invoiced: true };
+  }
+}
+
+/* =======================================================
  * 🧠 2. MOTOR DE PARSEO V2 INTEGRADO
  * ======================================================= */
 function useAlbaranEnginePRO(text: string) {
@@ -273,7 +335,7 @@ function PriceInspector({ priceHistory, albaranesLite, proveedores, suggestionsB
  * 🏦 4. COMPONENTE PRINCIPAL (VISTA)
  * ======================================================= */
 export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
-  const safeData = data || { albaranes: [], socios: [] };
+  const safeData = data || { albaranes: [], facturas: [], socios: [] };
   const albaranesSeguros = Array.isArray(safeData.albaranes) ? safeData.albaranes : [];
   const sociosReales = (Array.isArray(safeData.socios) && safeData.socios.length > 0) ? safeData.socios.filter(s => s?.active) : [{ id: "s1", n: "ARUME" }];
 
@@ -379,6 +441,44 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   };
 
   /* =======================================================
+   * 🎙️ MOTOR VOSK (Restaurado)
+   * ======================================================= */
+  const toggleRecording = async () => {
+    if (isRecording) { mediaRecorderRef.current?.stop(); setIsRecording(false); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      mediaRecorderRef.current = mr; audioChunksRef.current = [];
+      mr.ondataavailable = (e) => audioChunksRef.current.push(e.data);
+      mr.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        stream.getTracks().forEach(t => t.stop());
+        await processAudioWithVosk(audioBlob);
+      };
+      mr.start(); setIsRecording(true);
+      setTimeout(() => { if (mr.state === 'recording') toggleRecording(); }, 30000); 
+    } catch (err) { alert("⚠️ Necesitas dar permiso al micrófono."); }
+  };
+
+  const processAudioWithVosk = async (blob: Blob) => {
+    setIsScanning(true); 
+    try {
+      const formData = new FormData(); formData.append("file", blob, "albaran.webm");
+      const voskRes = await fetch("http://localhost:2700/transcribe", { method: "POST", body: formData });
+      if (!voskRes.ok) throw new Error("Vosk no responde");
+      const voskData = await voskRes.json();
+      const txt = voskData.text || "";
+      
+      setForm(prev => ({
+        ...prev,
+        text: prev.text ? `${prev.text}\n${txt}` : txt
+      }));
+      alert("🎙️ Audio procesado correctamente.");
+    } catch (e) { alert("⚠️ Error conectando con servidor VOSK local."); } 
+    finally { setIsScanning(false); }
+  };
+
+  /* =======================================================
    * 💾 GUARDADO CON PRICE INTELLIGENCE Y DUPLICADOS
    * ======================================================= */
   const handleQuickAdd = () => {
@@ -411,7 +511,11 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
        if (!window.confirm("⚠️ Posible duplicado (mismo proveedor, nº y fecha). ¿Guardar igualmente?")) return;
     }
 
-    const newData = { ...safeData, albaranes: [...albaranesSeguros], priceHistory: [...(safeData.priceHistory || [])] };
+    // 🚀 Usamos JSON.parse para hacer un deep clone y poder tocar facturas sin romper el estado inmutable
+    const newData = JSON.parse(JSON.stringify(safeData)) as AppData;
+    if (!newData.facturas) newData.facturas = [];
+    if (!newData.priceHistory) newData.priceHistory = [];
+
     const robustId = `alb-${form.date.replace(/-/g,'')}-${Date.now().toString().slice(-6)}-${form.unitId}`;
     let alerts: string[] = [];
 
@@ -435,6 +539,10 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     };
 
     newData.albaranes.unshift(newAlbaran);
+
+    // ✅ Promoción automática a Facturas (Sugerencia Copilot)
+    upsertFacturaFromAlbaran(newData, newAlbaran);
+
     await onSave(newData);
     
     if (alerts.length > 0) alert("⚠️ ALERTA DE COSTES (Desviaciones detectadas)\n\n" + alerts.join("\n\n") + "\n\nRevisa si es por temporada o si el proveedor ha subido tarifas.");
@@ -443,12 +551,20 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
   const handleSaveEdits = async (e?: React.MouseEvent) => {
     if (e) e.preventDefault(); if (!editForm) return;
-    const newData = JSON.parse(JSON.stringify(safeData));
+    
+    const newData = JSON.parse(JSON.stringify(safeData)) as AppData;
+    if (!newData.albaranes) newData.albaranes = [];
+    if (!newData.facturas) newData.facturas = [];
+
     const index = newData.albaranes.findIndex((a: Albaran) => a.id === editForm.id);
     if (index === -1) return alert("⚠️ Error crítico: No se encontró el albarán.");
 
     const sanitizedAlbaran = { ...editForm, prov: editForm.prov?.trim().toUpperCase() || "DESCONOCIDO", socio: editForm.socio || "Arume", unitId: editForm.unitId || "REST", total: Num.parse(editForm.total), base: Num.parse(editForm.base), taxes: Num.parse(editForm.taxes) };
     newData.albaranes[index] = sanitizedAlbaran;
+    
+    // ✅ Promoción automática a Facturas al Editar
+    upsertFacturaFromAlbaran(newData, sanitizedAlbaran);
+
     await onSave(newData);
     setEditForm(null); 
   };
@@ -619,8 +735,11 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                 <div className="flex justify-between items-center mb-5">
                   <h3 className="text-sm font-black text-slate-800 flex items-center gap-2"><ListPlus className="w-5 h-5 text-indigo-500" /> Nuevo Albarán</h3>
                   
-                  {/* BOTÓN OCR PDF DIRECTO */}
+                  {/* BOTÓN OCR PDF DIRECTO Y VOSK RESTAURADO */}
                   <div className="flex items-center gap-2">
+                    <button onClick={toggleRecording} className={cn("p-2 rounded-xl transition", isRecording ? "bg-rose-100 text-rose-600 animate-pulse" : "bg-indigo-50 text-indigo-600 hover:bg-indigo-100")} title="Dictar Albarán (Vosk)">
+                      {isRecording ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                    </button>
                     <input type="file" ref={fileInputRef} className="hidden" accept="application/pdf, image/*" onChange={(e) => { if (e.target.files && e.target.files[0]) { processLocalFile(e.target.files[0]); e.target.value = ''; } }} />
                     <button onClick={() => fileInputRef.current?.click()} className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 transition" title="Autorellenar con Foto/PDF"><Camera className="w-4 h-4"/></button>
                   </div>
