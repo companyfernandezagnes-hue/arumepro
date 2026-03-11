@@ -75,7 +75,7 @@ const normalizeUnitPrice = (q: number, u: string | undefined, unitPrice: number)
 };
 
 /* =======================================================
- * 🚀 HELPER DE CO-PILOT: PROMOCIÓN AUTOMÁTICA A FACTURAS
+ * 🚀 CEREBRO FACTURACIÓN: PROMOCIÓN AUTOMÁTICA A FACTURAS
  * ======================================================= */
 const normProv = (s?: string) =>
   (s || '').toLowerCase().normalize("NFD")
@@ -84,56 +84,82 @@ const normProv = (s?: string) =>
     .replace(/[^a-z0-9]/g, '')
     .trim();
 
-function upsertFacturaFromAlbaran(data: AppData, alb: Albaran) {
-  if (!Array.isArray(data.facturas)) data.facturas = [];
+const groupKey = (alb: Albaran) => `${normProv(alb.prov)}__${(alb.date || DateUtil.today()).slice(0, 7)}`;
 
-  const provKey = normProv(alb.prov);
+const findFacturaIdx = (data: AppData, alb: Albaran) => {
+  const key = normProv(alb.prov);
   const yymm = (alb.date || DateUtil.today()).slice(0, 7);
-
-  // Buscar factura candidata (compra, mismo proveedor y mes, no conciliada)
-  const idx = data.facturas.findIndex((f: any) =>
+  return (data.facturas || []).findIndex((f: any) =>
     f?.tipo === 'compra' &&
-    normProv(f?.prov) === provKey &&
+    normProv(f?.prov) === key &&
     (f?.date || '').startsWith(yymm) &&
     !f?.reconciled
   );
+};
 
-  // Cálculos del albarán (con fallback 10% si faltara)
+const facturaHasAlb = (f: any, albId: string) => Array.isArray(f?.albaranIdsArr) && f.albaranIdsArr.includes(albId);
+
+// Si cambian proveedor/mes al editar, desvincula de la factura previa
+function detachFromPreviousFacturaIfMoved(data: AppData, before: Albaran, after: Albaran) {
+  if (groupKey(before) === groupKey(after)) return;
+
+  const idx = (data.facturas || []).findIndex((f: any) =>
+    Array.isArray(f.albaranIdsArr) && f.albaranIdsArr.includes(before.id)
+  );
+  if (idx < 0) return;
+
+  const F = data.facturas[idx] as any;
+  const tb = Num.parse(before.total) || 0;
+  const bb = Num.parse(before.base)  || Num.round2(tb / 1.10);
+  const ib = Num.parse(before.taxes) || Num.round2(tb - bb);
+
+  F.total = String(Num.round2((Num.parse(F.total) || 0) - tb));
+  F.base  = String(Num.round2((Num.parse(F.base)  || 0) - bb));
+  F.tax   = String(Num.round2((Num.parse(F.tax)   || 0) - ib));
+  F.albaranIdsArr = F.albaranIdsArr.filter((id: string) => id !== before.id);
+
+  if ((F.albaranIdsArr || []).length === 0 && !F.reconciled) {
+    data.facturas.splice(idx, 1);
+  }
+}
+
+// Inserta/suma el albarán en la factura de su grupo (prov+mes) e idempotencia
+function upsertFacturaFromAlbaran(data: AppData, alb: Albaran) {
+  if (!Array.isArray(data.facturas)) data.facturas = [];
+  const idx = findFacturaIdx(data, alb);
+
   const t = Num.parse(alb.total) || 0;
   const b = Num.parse(alb.base)  || Num.round2(t / 1.10);
   const i = Num.parse(alb.taxes) || Num.round2(t - b);
 
   if (idx >= 0) {
-    // Sumar a factura existente
-    const F = data.facturas[idx];
-    F.total = Num.round2((Num.parse(F.total) || 0) + t);
-    F.base  = Num.round2((Num.parse(F.base)  || 0) + b);
-    F.tax   = Num.round2((Num.parse(F.tax)   || 0) + i);
-    F.albaranIdsArr = Array.from(new Set([...(F.albaranIdsArr || []), alb.id]));
+    const F = data.facturas[idx] as any;
+    if (!facturaHasAlb(F, alb.id)) {
+      F.total = String(Num.round2((Num.parse(F.total) || 0) + t));
+      F.base  = String(Num.round2((Num.parse(F.base)  || 0) + b));
+      F.tax   = String(Num.round2((Num.parse(F.tax)   || 0) + i));
+      F.albaranIdsArr = Array.from(new Set([...(F.albaranIdsArr || []), alb.id]));
+    }
   } else {
-    // Crear nueva factura del mes/proveedor
-    const newFac = {
+    const newF = {
       id: `fac-auto-${Date.now()}`,
       tipo: 'compra',
       num: `AUTO-${alb.num || 'SN'}`,
       date: alb.date || DateUtil.today(),
       prov: alb.prov,
-      total: t, base: b, tax: i,
+      total: String(t), base: String(b), tax: String(i),
       paid: false,
       reconciled: false,
       status: 'approved',
       unidad_negocio: alb.unitId || 'REST',
       albaranIdsArr: [alb.id],
-      source: 'auto-from-albaran'
+      source: 'auto-from-albaran',
     } as any;
-    data.facturas.unshift(newFac);
+    data.facturas.unshift(newF);
   }
 
-  // Marcar albarán como facturado
-  const ai = data.albaranes.findIndex(a => a.id === alb.id);
-  if (ai >= 0) {
-    data.albaranes[ai] = { ...data.albaranes[ai], invoiced: true };
-  }
+  const ai = (data.albaranes || []).findIndex(a => a.id === alb.id);
+  if (ai >= 0) data.albaranes[ai] = { ...data.albaranes[ai], invoiced: true };
 }
 
 /* =======================================================
@@ -201,7 +227,7 @@ function useAlbaranEnginePRO(text: string) {
 }
 
 /* =======================================================
- * 📈 3. PRICE INSPECTOR (Incrustado para evitar errores de Build)
+ * 📈 3. PRICE INSPECTOR (Incrustado)
  * ======================================================= */
 function smaN(values: number[], n=30) {
   const out: number[] = [];
@@ -363,9 +389,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
   const { analyzedItems, liveTotals } = useAlbaranEnginePRO(form.text);
 
-  /* =======================================================
-   * 📲 TELEGRAM BOT INTEGRATION
-   * ======================================================= */
   const handleTelegramSync = async () => {
     setIsSyncingTelegram(true);
     setTimeout(() => {
@@ -374,9 +397,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     }, 2000);
   };
 
-  /* =======================================================
-   * 📅 FILTROS DE FECHA
-   * ======================================================= */
   const inRange = (iso: string, from?: string, to?: string) => {
     if (!iso) return false; const d = iso.slice(0,10);
     if (from && d < from) return false; if (to && d > to) return false;
@@ -386,9 +406,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const presetLast7d = () => { const end = new Date(); const start = new Date(Date.now() - 6*86400000); setDateFrom(`${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`); setDateTo(`${end.getFullYear()}-${String(end.getMonth()+1).padStart(2,'0')}-${String(end.getDate()).padStart(2,'0')}`); };
   const presetToday = () => { const t = new Date().toISOString().slice(0,10); setDateFrom(t); setDateTo(t); };
 
-  /* =======================================================
-   * 🔎 DATA PARA EL INSPECTOR DE PRECIOS
-   * ======================================================= */
   const albaranesLiteRanged = useMemo(() => {
     return albaranesSeguros.filter(a => (!dateFrom && !dateTo) ? true : inRange(a.date||'', dateFrom, dateTo)).map(a => ({
         date: (a.date||'').slice(0,10), prov: (a.prov||'').toUpperCase(),
@@ -479,7 +496,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   };
 
   /* =======================================================
-   * 💾 GUARDADO CON PRICE INTELLIGENCE Y DUPLICADOS
+   * 💾 GUARDADO CON PRICE INTELLIGENCE Y CEREBRO FACTURACIÓN
    * ======================================================= */
   const handleQuickAdd = () => {
     const t = Num.parse(quickCalc.total);
@@ -511,10 +528,11 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
        if (!window.confirm("⚠️ Posible duplicado (mismo proveedor, nº y fecha). ¿Guardar igualmente?")) return;
     }
 
-    // 🚀 Usamos JSON.parse para hacer un deep clone y poder tocar facturas sin romper el estado inmutable
-    const newData = JSON.parse(JSON.stringify(safeData)) as AppData;
+    // 🚀 Usamos JSON.parse para hacer Deep Clone de toda la DB
+    const newData = JSON.parse(JSON.stringify(data)) as AppData;
     if (!newData.facturas) newData.facturas = [];
     if (!newData.priceHistory) newData.priceHistory = [];
+    if (!newData.albaranes) newData.albaranes = [];
 
     const robustId = `alb-${form.date.replace(/-/g,'')}-${Date.now().toString().slice(-6)}-${form.unitId}`;
     let alerts: string[] = [];
@@ -540,7 +558,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
     newData.albaranes.unshift(newAlbaran);
 
-    // ✅ Promoción automática a Facturas (Sugerencia Copilot)
+    // 🚀 PROMOCIÓN AUTOMÁTICA
     upsertFacturaFromAlbaran(newData, newAlbaran);
 
     await onSave(newData);
@@ -552,17 +570,24 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const handleSaveEdits = async (e?: React.MouseEvent) => {
     if (e) e.preventDefault(); if (!editForm) return;
     
-    const newData = JSON.parse(JSON.stringify(safeData)) as AppData;
+    const newData = JSON.parse(JSON.stringify(data)) as AppData;
     if (!newData.albaranes) newData.albaranes = [];
     if (!newData.facturas) newData.facturas = [];
 
     const index = newData.albaranes.findIndex((a: Albaran) => a.id === editForm.id);
     if (index === -1) return alert("⚠️ Error crítico: No se encontró el albarán.");
 
-    const sanitizedAlbaran = { ...editForm, prov: editForm.prov?.trim().toUpperCase() || "DESCONOCIDO", socio: editForm.socio || "Arume", unitId: editForm.unitId || "REST", total: Num.parse(editForm.total), base: Num.parse(editForm.base), taxes: Num.parse(editForm.taxes) };
+    const before = JSON.parse(JSON.stringify(newData.albaranes[index])) as Albaran;
+
+    const sanitizedAlbaran = { 
+      ...editForm, prov: editForm.prov?.trim().toUpperCase() || "DESCONOCIDO", socio: editForm.socio || "Arume", unitId: editForm.unitId || "REST", 
+      total: Num.parse(editForm.total), base: Num.parse(editForm.base), taxes: Num.parse(editForm.taxes) 
+    };
+
     newData.albaranes[index] = sanitizedAlbaran;
     
-    // ✅ Promoción automática a Facturas al Editar
+    // 🚀 MOVIMIENTO INTELIGENTE
+    detachFromPreviousFacturaIfMoved(newData, before, sanitizedAlbaran);
     upsertFacturaFromAlbaran(newData, sanitizedAlbaran);
 
     await onSave(newData);
@@ -571,7 +596,17 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
   const handleDelete = async (id: string) => {
     if (!window.confirm("¿Eliminar este albarán permanentemente?")) return;
-    await onSave({ ...safeData, albaranes: albaranesSeguros.filter(a => a.id !== id) });
+    
+    const newData = JSON.parse(JSON.stringify(data)) as AppData;
+    const albaranToDelete = newData.albaranes.find(a => a.id === id);
+    
+    // Si estaba en una factura, lo quitamos antes de borrar
+    if (albaranToDelete) {
+       detachFromPreviousFacturaIfMoved(newData, albaranToDelete, { ...albaranToDelete, prov: 'DELETED_MOCK', date: '1970-01-01' } as any);
+    }
+    
+    newData.albaranes = newData.albaranes.filter(a => a.id !== id);
+    await onSave(newData);
     setEditForm(null);
   };
 
@@ -625,9 +660,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     XLSX.writeFile(wb, `Albaranes_${dateFrom || 'ALL'}.xlsx`);
   };
 
-  /* =======================================================
-   * ⌨️ ATAJOS DE TECLADO RÁPIDOS
-   * ======================================================= */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const active = document.activeElement as HTMLElement;
@@ -653,13 +685,12 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       </AnimatePresence>
       
       {/* 🚀 HEADER CON ACCIONES PRO */}
-      <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-white p-6 md:p-8 rounded-[3rem] shadow-sm border border-slate-100 gap-6">
+      <header className="bg-white p-6 md:p-8 rounded-[3rem] shadow-sm border border-slate-100 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
         <div>
           <h2 className="text-3xl font-black text-slate-800 tracking-tighter">Albaranes & Compras</h2>
           <p className="text-xs text-indigo-500 font-bold uppercase tracking-widest mt-1">Con Inteligencia de Precios</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {/* BOTÓN TELEGRAM SYNC */}
           <button onClick={handleTelegramSync} disabled={isSyncingTelegram} className="px-5 py-3 rounded-2xl font-black text-xs uppercase bg-[#229ED9] text-white shadow-md hover:bg-[#1E8CC0] transition flex items-center gap-2">
             {isSyncingTelegram ? <Loader2 className="w-4 h-4 animate-spin"/> : <Smartphone className="w-4 h-4"/>} Telegram Sync
           </button>
@@ -702,7 +733,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
               <input value={searchQ} onChange={(e) => setSearchQ(e.target.value)} type="text" placeholder="Buscar prov, producto, ref..." className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:ring-2 ring-indigo-500/20 transition" />
             </div>
             
-            {/* CONTADOR DE LISTA RÁPIDA */}
             <div className="hidden lg:flex flex-col items-end text-[10px] text-slate-500 font-bold px-2 border-l border-slate-200 pl-3">
               <span>{filteredForList.length} albaranes filtrados</span>
               <span className="text-sm text-slate-900 font-black tracking-tighter">{Num.fmt(sumFiltered)}</span>
@@ -712,10 +742,8 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         </div>
       </div>
 
-      {/* 🧩 LAYOUT DE DOS COLUMNAS (Formulario / Inspector | Lista) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 relative z-10">
         
-        {/* 📝 COLUMNA IZQUIERDA: Formulario o Inspector */}
         <aside className="lg:col-span-4 space-y-4">
           <AnimatePresence mode="wait">
             {showInspector ? (
@@ -763,7 +791,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                   </div>
                 </div>
 
-                {/* Calculadora Rápida */}
                 <div className="flex items-center gap-1 mb-3 bg-indigo-50/50 p-2 rounded-xl border border-indigo-100">
                   <input type="text" value={quickCalc.name} onChange={(e) => setQuickCalc({ ...quickCalc, name: e.target.value })} placeholder="Producto rápido..." className="w-1/2 p-2 bg-white rounded-lg text-xs font-bold outline-none" />
                   <input type="number" value={quickCalc.total} onChange={(e) => setQuickCalc({ ...quickCalc, total: e.target.value })} placeholder="Total €" className="w-1/4 p-2 bg-white rounded-lg text-xs font-bold outline-none text-right" />
@@ -802,7 +829,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
           </AnimatePresence>
         </aside>
 
-        {/* 📚 COLUMNA DERECHA: Lista de Albaranes Aislada (Rendimiento) */}
         <section className="lg:col-span-8">
           <AlbaranesList 
             albaranes={filteredForList} 
@@ -814,7 +840,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         </section>
       </div>
 
-      {/* 🚀 MODAL DE EDICIÓN PRO */}
       {editForm && (
         <AlbaranEditModal 
           editForm={editForm} 
