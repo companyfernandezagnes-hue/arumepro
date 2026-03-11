@@ -13,8 +13,12 @@ import { GoogleGenAI } from "@google/genai";
 import { AppData, Factura, Albaran, Socio } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
-// 🚀 IMPORTAMOS TU CLIENTE OFICIAL DE SUPABASE
-import { supabase } from '../services/api'; 
+// 🚀 CREAMOS EL CLIENTE DE SUPABASE AQUÍ MISMO PARA EVITAR ERRORES DE EXPORTACIÓN
+import { createClient } from '@supabase/supabase-js';
+
+const SUPABASE_URL = "https://awbgboucnbsuzojocbuy.supabase.co"; 
+const SUPABASE_ANON_KEY = "sb_publishable_drOQ5PsFA8eox_aRTXNATQ_5kibM6ST";
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // 🚀 COMPONENTES HIJOS
 import { InvoicesList } from './InvoicesList';
@@ -37,7 +41,6 @@ export type FacturaExtended = Factura & {
   emailMeta?: any; 
 };
 
-// 🌟 TIPO ACTUALIZADO PARA INCLUIR BASE64
 type EmailDraft = {
   id: string;
   from: string;
@@ -66,7 +69,7 @@ export interface InvoicesViewProps {
  * ======================================================= */
 const TOLERANCIA = 0.50; 
 
-// 🐛 EL BUG ESTABA AQUÍ: Ahora si 's' está vacío, devuelve '' (vacío) en vez de 'desconocido'
+// 🐛 BUG DEL BUSCADOR ARREGLADO
 export const superNorm = (s: string | undefined | null) => {
   if (!s) return ''; 
   if (typeof s !== 'string') return 'desconocido';
@@ -134,7 +137,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportQuarter, setExportQuarter] = useState(Math.floor(new Date().getMonth() / 3) + 1);
   
-  // 🛡️ D&D States
   const [isSyncing, setIsSyncing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -146,7 +148,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [emailInbox, setEmailInbox] = useState<EmailDraft[]>([]);
 
   /* =======================================================
-   * 🛡️ FIX DRAG & DROP: Ahora en el body, 100% seguro
+   * 🛡️ DRAG & DROP SEGURO
    * ======================================================= */
   useEffect(() => {
     let dragCounter = 0;
@@ -305,12 +307,11 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   };
 
   /* =======================================================
-   * 📧 LECTOR DE GMAIL DESDE SUPABASE (API NATIVA)
+   * 📧 LECTOR GMAIL DESDE SUPABASE 
    * ======================================================= */
   const handleFetchEmails = async () => {
     setIsSyncing(true);
     try {
-      // 1. Usamos tu cliente importado para leer la tabla
       const { data: correosBD, error } = await supabase
         .from('inbox_gmail')
         .select('*');
@@ -339,7 +340,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         alert("📭 No hay correos nuevos con facturas en este momento.");
       }
     } catch (e: any) {
-      console.error(e);
+      console.error("Error leyendo inbox_gmail:", e);
       alert(`⚠️ Error conectando con Supabase: ${e.message || 'Desconocido'}`);
     } finally {
       setIsSyncing(false);
@@ -387,7 +388,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
       await onSave({ ...safeData, facturas: [nuevaFacturaIA, ...facturasSeguras] });
       
-      // 2. Eliminamos de Supabase al procesarlo para que no vuelva a salir
       const { error: deleteError } = await supabase
         .from('inbox_gmail')
         .delete()
@@ -440,7 +440,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const pendingGroups = useMemo(() => {
     try {
       const byMonth: Record<string, { name: string; groups: Record<string, any> }> = {};
-      const q = deferredSearch ? superNorm(deferredSearch) : ''; // 🛡️ Ahora es infalible
+      const q = deferredSearch ? superNorm(deferredSearch) : '';
 
       albaranesSeguros.forEach(a => {
         const aDate = a?.date || '';
@@ -451,7 +451,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         
         const owner = (mode === 'proveedor' ? a?.prov : a?.socio) || 'Arume';
         
-        // CORRECCIÓN DEL BUSCADOR: Si no buscas nada (q=''), esto no bloquea
         if (q) {
             const matchOwner = superNorm(owner).includes(q);
             const matchNum = superNorm(a?.num || '').includes(q);
