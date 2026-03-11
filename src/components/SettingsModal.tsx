@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Save, Key, Eye, EyeOff, Bot, Link as LinkIcon, 
   Building2, Users, Smartphone, Sparkles, CheckCircle2, X, RefreshCw
@@ -7,7 +7,7 @@ import {
 import { AppData } from '../types';
 import { cn } from '../lib/utils';
 import { NotificationService } from '../services/notifications';
-import { ExportTools } from './ExportTools'; // 🚀 Herramienta de exportación recuperada
+import { ExportTools } from './ExportTools'; 
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -18,7 +18,7 @@ interface SettingsModalProps {
 }
 
 export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsModalProps) => {
-  // Estado local para no tocar la BD hasta que no se pulse "Guardar"
+  // Estado local seguro, con fallback si db.config no existe
   const [config, setConfig] = useState(db?.config || {});
   
   // Estado para la clave IA (Memoria del navegador)
@@ -54,10 +54,10 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
       localStorage.removeItem('gemini_api_key');
     }
 
-    // 2. Guardamos en BD
-    const newData = { ...db, config: { ...db.config, ...config } };
-    setDb(newData); // Actualiza estado en vivo
-    onSave(newData); // Escribe en archivo/nube
+    // 2. Guardamos en BD (Asegurando que existe la rama config)
+    const newData = { ...db, config: { ...(db.config || {}), ...config } };
+    setDb(newData); 
+    onSave(newData); 
 
     setIsSaved(true);
     setTimeout(() => {
@@ -253,7 +253,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
             {/* BLOQUE 5: INDICADORES Y EXPORTACIÓN */}
             <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
               
-              {/* Indicadores de Salud (Los de Github) */}
+              {/* Indicadores de Salud */}
               <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col justify-center">
                 <div className="grid grid-cols-2 gap-3 mb-4">
                   <div className={cn("p-3 rounded-2xl border flex items-center gap-2", config.n8nUrlIA ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700')}>
@@ -272,9 +272,8 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
                 </button>
               </div>
 
-              {/* Herramientas de Backup Originales */}
+              {/* Herramientas de Backup */}
               <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex items-center justify-center">
-                 {/* 🚀 Recuperado el componente ExportTools */}
                  <ExportTools db={db} onSave={onSave} />
               </div>
 
