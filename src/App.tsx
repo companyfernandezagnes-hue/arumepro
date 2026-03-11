@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
   LayoutDashboard, Package, Wallet, ChefHat, Users, Settings, Search,
-  TrendingUp, AlertCircle, X, Download, RefreshCw, FileText, Truck, 
-  Scale, Zap, Building2, PieChart, Lock, Import, Sparkles, WifiOff
+  TrendingUp, X, RefreshCw, FileText, Truck, Scale, Zap, Building2, 
+  PieChart, Lock, Import, Sparkles, WifiOff
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -132,7 +132,7 @@ function useSwipeUpToReveal(onReveal: () => void) {
  * ======================================================= */
 type DockItemDef<T extends string> = { key: T; label: string; icon: any; group?: 'main'|'fin'|'ops'; };
 
-function AutoHideDock<T extends string>({ items, activeKey, onChange, isOffline, isSyncing }: { items: DockItemDef<T>[], activeKey: T, onChange: (k:T)=>void, isOffline?: boolean, isSyncing?: boolean }) {
+function AutoHideDock<T extends string>({ items, activeKey, onChange }: { items: DockItemDef<T>[], activeKey: T, onChange: (k:T)=>void, isOffline?: boolean, isSyncing?: boolean }) {
   const [visible, setVisible] = useState(false);
   const [hoveringDock, setHoveringDock] = useState(false);
   const hideTimerRef = useRef<number | null>(null);
