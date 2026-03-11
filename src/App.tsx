@@ -29,10 +29,12 @@ import { CierreContableView } from './components/CierreContableView';
 import { StockView } from './components/StockView';
 import { DashboardView } from './components/DashboardView';
 import { AIConsultant } from './components/AIConsultant'; 
-import { NavButton } from './components/NavButton';
 import { SettingsModal } from './components/SettingsModal';
 
-// 🛡️ TIPOS Y CONSTANTES
+// 🚀 NUEVA INTERFAZ PRO
+import { AutoHideDock, DockItem } from './components/AutoHideDock';
+import { CommandPalette, CmdItem } from './components/CommandPalette';
+
 type TabKey = 
   | 'dashboard' | 'ia' | 'diario' | 'importador' 
   | 'facturas' | 'albaranes' | 'tesoreria' | 'liquidez' 
@@ -44,10 +46,7 @@ const TAB_LABELS: Record<TabKey, string> = {
   banco: 'Banco', fixed: 'Gastos Fijos', informes: 'Informes', menus: 'Menús', stock: 'Stock', cierre: 'Cierre Contable'
 };
 
-// 🛡️ JSON SAFE CLONE
-const jsonSafeClone = <T,>(obj: T): T => {
-  try { return JSON.parse(JSON.stringify(obj)); } catch { return obj; }
-};
+const jsonSafeClone = <T,>(obj: T): T => { try { return JSON.parse(JSON.stringify(obj)); } catch { return obj; } };
 
 export default function App() {
   const { data: db, loading, saveData, setData, reloadData } = useArumeData();
@@ -55,72 +54,76 @@ export default function App() {
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  
+  // 🧠 ESTADO PARA EL BUSCADOR RAPIDO
+  const [isCmdOpen, setIsCmdOpen] = useState(false);
 
-  // 1. 📡 DETECTOR OFFLINE
   useEffect(() => {
-    const onOnline = () => setIsOffline(false);
-    const onOffline = () => setIsOffline(true);
-    window.addEventListener('online', onOnline);
-    window.addEventListener('offline', onOffline);
+    const onOnline = () => setIsOffline(false); const onOffline = () => setIsOffline(true);
+    window.addEventListener('online', onOnline); window.addEventListener('offline', onOffline);
     return () => { window.removeEventListener('online', onOnline); window.removeEventListener('offline', onOffline); };
   }, []);
 
-  // 2. 🔄 SINCRONIZACIÓN SUPABASE (Reforzada)
   useEffect(() => {
-    const channel = supabase
-      .channel('arume-changes', { config: { broadcast: { self: false } } })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'arume_data' }, () => {
-        // console.debug('[Supabase] Sync triggered');
-        reloadData();
-      })
-      .subscribe((status) => {
-        if (status !== 'SUBSCRIBED' && status !== 'TIMED_OUT') console.warn('[Supabase] Status:', status);
-      });
+    const channel = supabase.channel('arume-changes', { config: { broadcast: { self: false } } }).on('postgres_changes', { event: '*', schema: 'public', table: 'arume_data' }, () => { reloadData(); }).subscribe();
     return () => { try { supabase.removeChannel(channel); } catch { /* noop */ } };
   }, [reloadData]);
 
-  // 3. 🏗️ SETUP INICIAL (Optimizada sin re-renders fantasma)
   const REQUIRED: (keyof AppData)[] = ['banco','platos','recetas','ingredientes','ventas_menu','cierres','facturas','albaranes','gastos_fijos'];
   useEffect(() => {
     if (!db || Object.keys(db).length === 0) return;
-    const next = jsonSafeClone(db);
-    let changed = false;
-    for (const k of REQUIRED) {
-      if (!Array.isArray(next[k])) { (next as any)[k] = []; changed = true; }
-    }
+    const next = jsonSafeClone(db); let changed = false;
+    for (const k of REQUIRED) { if (!Array.isArray(next[k])) { (next as any)[k] = []; changed = true; } }
     if (!next.config) { next.config = { objetivoMensual: 45000, n8nUrlBanco: "", n8nUrlIA: "" }; changed = true; }
     if (changed) setData(next);
   }, [db, setData]);
 
-  // 4. 💾 GUARDADO MAESTRO (Con Cola de Espera)
   const isSyncingRef = useRef(false);
   const lastPayloadRef = useRef<AppData | null>(null);
 
   const handleSave = useCallback(async (newData: AppData) => {
     lastPayloadRef.current = jsonSafeClone(newData);
     if (isSyncingRef.current) return;
-
-    isSyncingRef.current = true;
-    setIsSyncing(true);
-    
+    isSyncingRef.current = true; setIsSyncing(true);
     try {
       while (lastPayloadRef.current) {
-        const payload = lastPayloadRef.current;
-        lastPayloadRef.current = null;
-        
-        setData(payload); // 1. Actualiza UI Inmediatamente
-        localStorage.setItem('arume_backup_last', JSON.stringify(payload)); // 2. Blindaje local
-        if (!isOffline) await saveData(payload); // 3. A la nube si hay red
+        const payload = lastPayloadRef.current; lastPayloadRef.current = null;
+        setData(payload); 
+        localStorage.setItem('arume_backup_last', JSON.stringify(payload)); 
+        if (!isOffline) await saveData(payload); 
       }
-    } catch (error) {
-      console.error("Error crítico al guardar:", error);
-    } finally {
-      isSyncingRef.current = false;
-      setIsSyncing(false);
-    }
+    } catch (error) { console.error("Error crítico al guardar:", error); } 
+    finally { isSyncingRef.current = false; setIsSyncing(false); }
   }, [saveData, setData, isOffline]);
 
-  // 5. 🧠 RENDERIZADO MEMOIZADO
+  // ⌨️ ATAJO PARA ABRIR BUSCADOR: Ctrl + K o Cmd + K
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); setIsCmdOpen(v => !v); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
+  // 🗺️ DEFINICIÓN DEL MENÚ (Sirve para el Dock y el Buscador)
+  const navItems = useMemo<DockItem<TabKey>[]>(() => ([
+    { key: 'dashboard',  label: 'Dash',       icon: LayoutDashboard, group: 'main' },
+    { key: 'ia',         label: 'IA',         icon: Sparkles,        group: 'main' },
+    { key: 'diario',     label: 'Caja',       icon: Wallet,          group: 'main' },
+    { key: 'importador', label: 'Subir',      icon: Import,          group: 'main' },
+    { key: 'facturas',   label: 'Facturas',   icon: FileText,        group: 'fin'  },
+    { key: 'albaranes',  label: 'Albaranes',  icon: Truck,           group: 'fin'  },
+    { key: 'tesoreria',  label: 'Tesorería',  icon: TrendingUp,      group: 'fin'  },
+    { key: 'liquidez',   label: 'Liquidez',   icon: Scale,           group: 'fin'  },
+    { key: 'banco',      label: 'Banco',      icon: Building2,       group: 'fin'  },
+    { key: 'fixed',      label: 'Fijos',      icon: Zap,             group: 'fin'  },
+    { key: 'informes',   label: 'Informes',   icon: PieChart,        group: 'ops'  },
+    { key: 'menus',      label: 'Menús',      icon: ChefHat,         group: 'ops'  },
+    { key: 'stock',      label: 'Stock',      icon: Package,         group: 'ops'  },
+    { key: 'cierre',     label: 'Cierre',     icon: Lock,            group: 'ops'  },
+  ]), []);
+
   const content = useMemo(() => {
     const props = { data: db, onSave: handleSave };
     switch (activeTab) {
@@ -142,7 +145,6 @@ export default function App() {
     }
   }, [activeTab, db, handleSave]);
 
-  // --- PANTALLAS DE CARGA ---
   if (loading) return (
     <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center">
       <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full mb-4" />
@@ -151,9 +153,8 @@ export default function App() {
   );
 
   return (
-    <div id="app-root-container" className="min-h-screen bg-[#F8FAFC] flex flex-col font-sans">
+    <div id="app-root-container" className="min-h-screen bg-[#F8FAFC] flex flex-col font-sans relative overflow-x-hidden">
       
-      {/* HEADER DINÁMICO */}
       <header className="sticky top-0 z-[110] bg-white/80 backdrop-blur-md border-b border-slate-200 px-6 py-4 flex justify-between items-center shadow-sm">
         <div>
           <h1 className="text-xl font-black text-slate-900 tracking-tighter flex items-center gap-2">
@@ -163,6 +164,11 @@ export default function App() {
         </div>
         
         <div className="flex items-center gap-3">
+          {/* Botón visual para abrir el buscador por si no saben usar Ctrl+K */}
+          <button onClick={() => setIsCmdOpen(true)} className="hidden sm:flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200 hover:text-slate-700 transition font-black text-[10px] uppercase tracking-widest">
+            <Search className="w-4 h-4" /> Buscar Módulo (⌘K)
+          </button>
+
           {isOffline && (
             <div className="flex items-center gap-1 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg">
                <WifiOff className="w-3 h-3 text-amber-500" />
@@ -170,60 +176,41 @@ export default function App() {
             </div>
           )}
           {isSyncing && !isOffline && <RefreshCw className="w-4 h-4 text-indigo-500 animate-spin" />}
-          <button 
-            onClick={() => setIsConfigOpen(true)}
-            aria-label="Configuración"
-            className="w-10 h-10 bg-slate-50 border border-slate-200 rounded-full flex items-center justify-center hover:bg-white text-xl shadow-sm transition"
-          >
+          <button onClick={() => setIsConfigOpen(true)} aria-label="Configuración" className="w-10 h-10 bg-slate-50 border border-slate-200 rounded-full flex items-center justify-center hover:bg-white text-xl shadow-sm transition">
             ⚙️
           </button>
         </div>
       </header>
 
-      {/* ÁREA DE CONTENIDO (Animación suave) */}
+      {/* ÁREA DE CONTENIDO: Ocupa toda la pantalla */}
       <main className="flex-1 overflow-y-auto">
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="p-4 lg:p-8 max-w-[1600px] mx-auto pb-32"
+            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.15, ease: 'easeOut' }}
+            className="p-4 lg:p-8 max-w-[1600px] mx-auto pb-10" // Ya no necesita un pb-32 enorme
           >
             {content}
           </motion.div>
         </AnimatePresence>
       </main>
 
-      {/* NAVBAR (Con scroll táctil iOS optimizado) */}
-      <nav id="navbar-container" className="fixed bottom-0 left-0 right-0 z-[120] bg-white/90 backdrop-blur-xl border-t border-slate-200 flex justify-center items-center">
-        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar max-w-full px-4 py-3" style={{ WebkitOverflowScrolling: 'touch' }}>
-          {/* GRUPO PRINCIPAL */}
-          <NavButton icon={LayoutDashboard} label="Dash" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} className="min-w-[64px]" />
-          <NavButton icon={Sparkles} label="IA" active={activeTab === 'ia'} onClick={() => setActiveTab('ia')} className="min-w-[64px]" />
-          <NavButton icon={Wallet} label="Caja" active={activeTab === 'diario'} onClick={() => setActiveTab('diario')} className="min-w-[64px]" />
-          <NavButton icon={Import} label="Subir" active={activeTab === 'importador'} onClick={() => setActiveTab('importador')} className="min-w-[64px]" />
-          
-          <div className="w-px h-6 bg-slate-200 mx-2 shrink-0" />
+      {/* 🚀 EL NUEVO DOCK INVISIBLE */}
+      <AutoHideDock 
+        items={navItems} 
+        activeKey={activeTab} 
+        onChange={(k) => setActiveTab(k)} 
+        isOffline={isOffline} 
+        isSyncing={isSyncing} 
+      />
 
-          {/* GRUPO FINANZAS */}
-          <NavButton icon={FileText} label="Factur" active={activeTab === 'facturas'} onClick={() => setActiveTab('facturas')} className="min-w-[64px]" />
-          <NavButton icon={Truck} label="Albar" active={activeTab === 'albaranes'} onClick={() => setActiveTab('albaranes')} className="min-w-[64px]" />
-          <NavButton icon={TrendingUp} label="Tesor" active={activeTab === 'tesoreria'} onClick={() => setActiveTab('tesoreria')} className="min-w-[64px]" />
-          <NavButton icon={Scale} label="Liqui" active={activeTab === 'liquidez'} onClick={() => setActiveTab('liquidez')} className="min-w-[64px]" />
-          <NavButton icon={Building2} label="Banco" active={activeTab === 'banco'} onClick={() => setActiveTab('banco')} className="min-w-[64px]" />
-          <NavButton icon={Zap} label="Fijos" active={activeTab === 'fixed'} onClick={() => setActiveTab('fixed')} className="min-w-[64px]" />
-
-          <div className="w-px h-6 bg-slate-200 mx-2 shrink-0" />
-
-          {/* GRUPO OPERACIONES */}
-          <NavButton icon={PieChart} label="Info" active={activeTab === 'informes'} onClick={() => setActiveTab('informes')} className="min-w-[64px]" />
-          <NavButton icon={ChefHat} label="Menu" active={activeTab === 'menus'} onClick={() => setActiveTab('menus')} className="min-w-[64px]" />
-          <NavButton icon={Package} label="Stock" active={activeTab === 'stock'} onClick={() => setActiveTab('stock')} className="min-w-[64px]" />
-          <NavButton icon={Lock} label="Cierre" active={activeTab === 'cierre'} onClick={() => setActiveTab('cierre')} className="min-w-[64px]" />
-        </div>
-      </nav>
+      {/* 🚀 LA COMMAND PALETTE DE BÚSQUEDA */}
+      <CommandPalette 
+        open={isCmdOpen} 
+        onClose={() => setIsCmdOpen(false)} 
+        items={navItems.map(n => ({ key: n.key, label: TAB_LABELS[n.key], group: n.group, icon: n.icon }))} 
+        onSelect={(key) => { setActiveTab(key); setIsCmdOpen(false); }} 
+      />
 
       <SettingsModal isOpen={isConfigOpen} onClose={() => setIsConfigOpen(false)} db={db} setDb={setData} onSave={handleSave} />
     </div>
