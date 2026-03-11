@@ -13,7 +13,7 @@ import { GoogleGenAI } from "@google/genai";
 import { AppData, Factura, Albaran, Socio } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
-import { proxyFetch } from '../services/api';
+// import { proxyFetch } from '../services/api'; // Ya no lo necesitamos para Gmail
 
 // 🚀 COMPONENTES HIJOS
 import { InvoicesList } from './InvoicesList';
@@ -36,6 +36,7 @@ export type FacturaExtended = Factura & {
   emailMeta?: any; 
 };
 
+// 🌟 TIPO ACTUALIZADO PARA INCLUIR BASE64
 type EmailDraft = {
   id: string;
   from: string;
@@ -43,6 +44,8 @@ type EmailDraft = {
   date: string;
   hasAttachment: boolean;
   status: 'new' | 'parsed';
+  fileBase64?: string;
+  fileName?: string;
 };
 
 const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string; bg: string }[] = [
@@ -107,7 +110,6 @@ const matchAlbaranesToFactura = (factura: FacturaExtended, albaranes: Albaran[],
  * 🏦 COMPONENTE PRINCIPAL
  * ======================================================= */
 export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
-  // 🔥 FIX 1: Protección extrema de los arrays base
   const safeData = data || {};
   const facturasSeguras = Array.isArray(safeData.facturas) ? safeData.facturas as FacturaExtended[] : [];
   const albaranesSeguros = Array.isArray(safeData.albaranes) ? safeData.albaranes : [];
@@ -132,78 +134,68 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   // 🛡️ D&D States
   const [isSyncing, setIsSyncing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const dragCounter = useRef(0);
 
   const [selectedGroup, setSelectedGroup] = useState<{ label: string; ids: string[], unitId: BusinessUnit } | null>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<FacturaExtended | null>(null);
   const [modalForm, setModalForm] = useState({ num: '', date: DateUtil.today(), selectedAlbs: [] as string[], unitId: 'REST' as BusinessUnit });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-
-  const [emailInbox, setEmailInbox] = useState<EmailDraft[]>([
-    { id: 'm1', from: 'ventas@makro.es', subject: 'Factura F-2026/012 (Demo)', date: DateUtil.today(), hasAttachment: true, status: 'new' }
-  ]);
+  const [emailInbox, setEmailInbox] = useState<EmailDraft[]>([]);
 
   /* =======================================================
-   * 🛡️ DRAG & DROP WATCHDOG SUPREMO (Cero Pantallas Azules)
+   * 🛡️ FIX DRAG & DROP: Ahora en el body, 100% seguro
    * ======================================================= */
   useEffect(() => {
-    const forceReset = () => {
-      if (isDragging) {
-        dragCounter.current = 0;
-        setIsDragging(false);
+    let dragCounter = 0;
+
+    const handleDragEnter = (e: DragEvent) => {
+      if (!hasRealFiles(e)) return;
+      e.preventDefault();
+      dragCounter++;
+      if (dragCounter === 1) setIsDragging(true);
+    };
+
+    const handleDragLeave = (e: DragEvent) => {
+      if (!hasRealFiles(e)) return;
+      e.preventDefault();
+      dragCounter--;
+      if (dragCounter === 0) setIsDragging(false);
+    };
+
+    const handleDragOver = (e: DragEvent) => {
+      if (!hasRealFiles(e)) return;
+      e.preventDefault();
+    };
+
+    const handleDropGlobal = async (e: DragEvent) => {
+      e.preventDefault();
+      dragCounter = 0;
+      setIsDragging(false);
+
+      const dt = e.dataTransfer;
+      if (!dt?.files?.length) return;
+      if (dt.files.length > 1) return alert("Sube 1 solo documento para evitar errores.");
+      
+      const file = dt.files[0]; 
+      if (file.type === 'application/pdf' || file.type.startsWith('image/')) {
+        await processLocalFile(file); 
+      } else {
+        alert("⚠️ Solo se permiten archivos PDF o imágenes.");
       }
     };
 
-    window.addEventListener("click", forceReset);
-    window.addEventListener("keydown", forceReset);
-    window.addEventListener('dragend', forceReset);
-    window.addEventListener('mouseleave', forceReset); 
+    document.body.addEventListener('dragenter', handleDragEnter);
+    document.body.addEventListener('dragleave', handleDragLeave);
+    document.body.addEventListener('dragover', handleDragOver);
+    document.body.addEventListener('drop', handleDropGlobal);
 
     return () => {
-      window.removeEventListener("click", forceReset);
-      window.removeEventListener("keydown", forceReset);
-      window.removeEventListener('dragend', forceReset);
-      window.removeEventListener('mouseleave', forceReset); 
+      document.body.removeEventListener('dragenter', handleDragEnter);
+      document.body.removeEventListener('dragleave', handleDragLeave);
+      document.body.removeEventListener('dragover', handleDragOver);
+      document.body.removeEventListener('drop', handleDropGlobal);
     };
-  }, [isDragging]);
-
-  const handleDragEnter = useCallback((e: React.DragEvent) => { 
-    if (!hasRealFiles(e)) return; 
-    e.preventDefault(); e.stopPropagation();
-    dragCounter.current++; 
-    if (!isDragging) setIsDragging(true); 
-  }, [isDragging]);
-
-  const handleDragOver = useCallback((e: React.DragEvent) => { 
-    if (!hasRealFiles(e)) return; 
-    e.preventDefault(); 
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent) => { 
-    if (!hasRealFiles(e)) return; 
-    e.preventDefault(); e.stopPropagation();
-    dragCounter.current--; 
-    if (dragCounter.current <= 0) { setIsDragging(false); dragCounter.current = 0; } 
-  }, []);
-
-  const handleDrop = useCallback(async (e: React.DragEvent) => { 
-    e.preventDefault(); e.stopPropagation();
-    setIsDragging(false); dragCounter.current = 0; 
-    
-    const dt = e.dataTransfer;
-    if (!dt?.files?.length) return;
-    if (dt.files.length > 1) return alert("Sube 1 solo documento para evitar errores.");
-    
-    const file = dt.files[0]; 
-    if (file.type === 'application/pdf' || file.type.startsWith('image/')) {
-      await processLocalFile(file); 
-    } else {
-      alert("⚠️ Solo se permiten archivos PDF o imágenes.");
-    }
-  }, []); 
+  }, [facturasSeguras]); // Dependencia necesaria para processLocalFile
 
   /* =======================================================
    * ⌨️ ATAJOS DE TECLADO RÁPIDOS
@@ -310,33 +302,108 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   };
 
   /* =======================================================
-   * 📧 SIMULADOR EMAIL PARSER
+   * 📧 LECTOR DE SUPABASE Y PARSER DE IA (REAL)
    * ======================================================= */
+  const SUPABASE_URL = "[https://awbgboucnbsuzojocbuy.supabase.co](https://awbgboucnbsuzojocbuy.supabase.co)"; 
+  const SUPABASE_ANON_KEY = "sb_publishable_drOQ5PsFA8eox_aRTXNATQ_5kibM6ST";
+
   const handleFetchEmails = async () => {
     setIsSyncing(true);
     try {
-      const webhookURL = localStorage.getItem('gmail_webhook_url');
-      if (!webhookURL) {
-        alert("⚠️ Configura la URL del Webhook de n8n en ajustes para descargar correos reales.");
-        setTimeout(() => setIsSyncing(false), 1500);
-        return;
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/inbox_gmail?select=*`, {
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+        }
+      });
+
+      if (!res.ok) throw new Error("Error leyendo Supabase");
+      
+      const correosBD = await res.json();
+      
+      if (correosBD && correosBD.length > 0) {
+        const nuevosCorreos: EmailDraft[] = correosBD.map((fila: any) => ({
+          id: fila.id,
+          from: fila.remitente,
+          subject: fila.asunto,
+          date: fila.fecha.slice(0, 10),
+          hasAttachment: true,
+          status: 'new',
+          fileBase64: fila.archivo_base64,
+          fileName: fila.archivo_nombre
+        }));
+
+        setEmailInbox(prev => {
+          const idsExistentes = new Set(prev.map(p => p.id));
+          const unicos = nuevosCorreos.filter(m => !idsExistentes.has(m.id));
+          return [...unicos, ...prev];
+        });
+        alert(`✅ ¡Encontradas ${correosBD.length} facturas nuevas en Gmail!`);
+      } else {
+        alert("📭 No hay correos nuevos con facturas en este momento.");
       }
-      const res = await proxyFetch(webhookURL, { method: "POST" });
-      const newMails = await res.json();
-      if (newMails && newMails.length > 0) {
-        setEmailInbox(prev => [...newMails, ...prev]);
-      }
-      alert("✅ Correos sincronizados.");
     } catch (e) {
-      alert("⚠️ Error conectando con el servidor de correo.");
+      console.error(e);
+      alert("⚠️ Error conectando con Supabase. Revisa la consola.");
     } finally {
       setIsSyncing(false);
     }
   };
 
-  const handleParseEmail = (emailId: string) => {
-    setEmailInbox(prev => prev.filter(e => e.id !== emailId));
-    alert("📥 Correo procesado. El PDF adjunto ha pasado a la bandeja de Conciliación.");
+  const handleParseEmail = async (emailId: string) => {
+    const correo = emailInbox.find(e => e.id === emailId);
+    if (!correo || !correo.fileBase64) return;
+
+    setIsSyncing(true);
+    try {
+      const apiKey = localStorage.getItem('gemini_api_key');
+      if (!apiKey) throw new Error("NO_API_KEY");
+
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = `Actúa como un OCR contable. Extrae de esta factura y devuelve SOLO un JSON estricto: { "proveedor": "Nombre de la empresa", "num": "Número de factura", "fecha": "YYYY-MM-DD", "total": 0, "base": 0, "iva": 0 }`;
+      
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: correo.fileBase64, mimeType: "application/pdf" } }] }],
+        config: { responseMimeType: "application/json", temperature: 0.1 }
+      });
+
+      const cleanText = (response.text || "").replace(/(?:json)?/gi, '').replace(/```/g, '').trim();
+      const rawJson = safeJSON(cleanText);
+
+      const nuevaFacturaIA: FacturaExtended = {
+        id: 'draft-email-' + Date.now(), 
+        tipo: 'compra', 
+        num: rawJson.num || 'S/N', 
+        date: rawJson.fecha || correo.date, 
+        prov: rawJson.proveedor || correo.from,
+        total: String(rawJson.total || 0), 
+        base: String(rawJson.base || 0), 
+        tax: String(rawJson.iva || 0),
+        paid: false, 
+        reconciled: false, 
+        source: 'gmail-sync', 
+        status: 'draft', 
+        unidad_negocio: 'REST', 
+        file_base64: `data:application/pdf;base64,${correo.fileBase64}`, 
+        attachmentSha: correo.id 
+      };
+
+      await onSave({ ...safeData, facturas: [nuevaFacturaIA, ...facturasSeguras] });
+      
+      await fetch(`${SUPABASE_URL}/rest/v1/inbox_gmail?id=eq.${emailId}`, {
+        method: 'DELETE',
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
+      });
+
+      setEmailInbox(prev => prev.filter(e => e.id !== emailId));
+      alert("✅ Factura extraída y enviada a Borradores.");
+    } catch (e) {
+      console.error(e);
+      alert("⚠️ Error al procesar el PDF del correo. Es posible que no tengas la API KEY configurada o el PDF sea muy pesado.");
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   /* =======================================================
@@ -370,34 +437,28 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     await onSave({ ...safeData, facturas: facturasSeguras.filter(f => f.id !== id) });
   };
 
-  // 📦 Agrupación manual de albaranes optimizada (Protegido contra strings vacíos)
+  // 📦 Agrupación manual de albaranes optimizada
   const pendingGroups = useMemo(() => {
     try {
       const byMonth: Record<string, { name: string; groups: Record<string, any> }> = {};
       const q = superNorm(deferredSearch);
 
       albaranesSeguros.forEach(a => {
-        // 1. Descartar si ya está facturado o no tiene fecha válida
         const aDate = a?.date || '';
         if (a?.invoiced || typeof aDate !== 'string' || !aDate.startsWith(year.toString())) return;
         
-        // 2. Filtro por Unidad de Negocio
         const itemUnit = (a as any).unitId || 'REST';
         if (selectedUnit !== 'ALL' && itemUnit !== selectedUnit) return;
         
-        // 3. Determinar el "Dueño" (Proveedor o Socio)
         const owner = (mode === 'proveedor' ? a?.prov : a?.socio) || 'Arume';
         
-        // 4. EL FILTRO DE BÚSQUEDA CORREGIDO:
-        // Si hay texto en el buscador ('q'), comprobamos si coincide con dueño o número.
-        // Si NO coincide, usamos 'return' para saltarnos este albarán.
+        // CORRECCIÓN DEL BUSCADOR
         if (q) {
             const matchOwner = superNorm(owner).includes(q);
             const matchNum = superNorm(a?.num || '').includes(q);
-            if (!matchOwner && !matchNum) return; // Se oculta si no hace match
+            if (!matchOwner && !matchNum) return;
         }
 
-        // 5. Agrupación por Mes
         const mk = aDate.length >= 7 ? aDate.substring(0, 7) : null; 
         if (!mk) return;
 
@@ -409,7 +470,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           byMonth[mk] = { name: `${names[m] || 'Mes'} ${y}`, groups: {} };
         }
 
-        // 6. Agrupación final por Dueño y Unidad
         const groupKey = `${superNorm(owner)}_${itemUnit}`;
         if (!byMonth[mk].groups[groupKey]) {
             byMonth[mk].groups[groupKey] = { label: owner, unitId: itemUnit, t: 0, ids: [], count: 0 };
@@ -555,10 +615,8 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
    * 🎨 RENDER PRINCIPAL
    * ======================================================= */
   return (
-    <div 
-      className="dropzone-area animate-fade-in space-y-6 pb-24 min-h-screen relative max-w-[1600px] mx-auto"
-      onDragEnter={handleDragEnter} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
-    >
+    <div className="animate-fade-in space-y-6 pb-24 min-h-screen relative max-w-[1600px] mx-auto">
+      
       {/* OVERLAY DE DROP PROTEGIDO Y NO BLOQUEANTE */}
       <AnimatePresence>
         {isDragging && (
