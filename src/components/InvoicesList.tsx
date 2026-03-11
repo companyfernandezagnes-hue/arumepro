@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { FileText, CheckCircle2, Clock, Trash2, Link as LinkIcon, AlertCircle, Building2, User, Sparkles, Package } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-// 🛡️ Mantenemos el tipado estricto (Asegúrate de exportarlos en InvoicesView)
+// 🛡️ Tipados importados del padre
 import { FacturaExtended, BusinessUnit } from './InvoicesView'; 
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
@@ -23,7 +23,6 @@ interface InvoicesListProps {
 
 /* =======================================================
  * 🧠 HOOK DE FILTRADO: LÓGICA DE SUPERVIVENCIA EXTREMA
- * Nunca asume que un dato existe. Si falta, aplica un fallback.
  * ======================================================= */
 function useInvoicesFilters(
   facturas: FacturaExtended[], 
@@ -37,43 +36,35 @@ function useInvoicesFilters(
 ) {
   return useMemo(() => {
     try {
-      // Si por algún motivo facturas no es un array, devolvemos array vacío para evitar crash
       if (!Array.isArray(facturas)) return [];
 
       const searchN = searchQ ? superNorm(searchQ) : '';
       const normalizedSocios = Array.isArray(sociosReales) ? sociosReales.map(s => superNorm(s)) : [];
+      const yearStr = year ? year.toString() : '';
 
       const list = facturas.filter(f => {
         // 1. Descartar basura o borradores IA
         if (!f || typeof f !== 'object') return false;
         if (f.status === 'draft') return false;
 
-        // 2. Filtro de Año Seguro (Evita fallos de strings rotos)
-        if (f.date) {
-          const y = new Date(f.date).getFullYear();
-          if (year && !isNaN(y) && y !== year) return false;
-        }
+        // 2. Filtro de Año Seguro (Usando startsWith evita errores de zona horaria)
+        const fDate = f.date || '';
+        if (yearStr && !fDate.startsWith(yearStr)) return false;
 
-        // 3. Filtro Unidad Seguro (Asume 'REST' si la factura es antigua y no tiene)
+        // 3. Filtro Unidad Seguro
         const unitToCompare = f.unidad_negocio || 'REST';
         if (selectedUnit !== 'ALL' && unitToCompare !== selectedUnit) return false;
         
-        // 4. JAMÁS mostrar cajas o bancos (Basura en la lista de compras)
+        // 4. JAMÁS mostrar cajas o bancos
         if (f.tipo === 'caja' || (f as any).tipo === 'banco') return false;
 
-        // 5. Evaluar Proveedor vs Socio (Optimizado y Seguro)
+        // 5. Evaluar Proveedor vs Socio
         const normCliente = superNorm(f.cliente);
         const normProv = superNorm(f.prov);
-        const esSocioPorNombre = normalizedSocios.some(socio => socio && (normCliente.includes(socio) || normProv.includes(socio)));
+        const isSocio = normalizedSocios.some(socio => socio && (normCliente.includes(socio) || normProv.includes(socio)));
         
-        // Si una factura antigua no tiene 'tipo', asumimos que es 'compra' para no ocultarla
-        const isCompra = f.tipo ? f.tipo === 'compra' : true;
-
-        if (mode === 'proveedor') {
-          if (!isCompra || esSocioPorNombre) return false; 
-        } else if (mode === 'socio') {
-          if (!esSocioPorNombre) return false;
-        }
+        if (mode === 'proveedor' && isSocio) return false;
+        if (mode === 'socio' && !isSocio) return false;
 
         // 6. Estados de pago y conciliación
         if (filterStatus === 'pending' && f.paid) return false;
@@ -82,22 +73,25 @@ function useInvoicesFilters(
 
         // 7. Búsqueda por texto segura
         if (searchN) {
-          if (!normProv.includes(searchN) && !normCliente.includes(searchN) && !superNorm(f.num || '').includes(searchN)) return false;
+          const matchProv = normProv.includes(searchN);
+          const matchClient = normCliente.includes(searchN);
+          const matchNum = superNorm(f.num || '').includes(searchN);
+          if (!matchProv && !matchClient && !matchNum) return false;
         }
         
         return true;
       });
 
-      // Ordenación segura: Si la fecha falla, asume 0 para no romper el sort
+      // Ordenación segura: Las más recientes primero
       return list.sort((a, b) => {
-        const timeA = a.date ? new Date(a.date).getTime() : 0;
-        const timeB = b.date ? new Date(b.date).getTime() : 0;
-        return (isNaN(timeB) ? 0 : timeB) - (isNaN(timeA) ? 0 : timeA);
+        const dateA = a.date || '';
+        const dateB = b.date || '';
+        return dateB.localeCompare(dateA); // localeCompare es más seguro que new Date() para ISO strings
       });
 
     } catch (e) {
       console.error("Error crítico en el filtrado de InvoicesList:", e);
-      return []; // Si todo falla, devolvemos vacío pero NO crasheamos React
+      return []; 
     }
   }, [facturas, year, filterStatus, searchQ, selectedUnit, mode, sociosReales, superNorm]);
 }
@@ -132,7 +126,6 @@ export const InvoicesList = React.memo(({
     <div className="space-y-3">
       <AnimatePresence mode="popLayout">
         {historyList.map(f => {
-          // Buscamos la unidad con paracaídas por si businessUnits no está listo
           const unitConfig = Array.isArray(businessUnits) 
             ? businessUnits.find(u => u.id === (f.unidad_negocio || 'REST')) 
             : null;
@@ -165,7 +158,7 @@ export const InvoicesList = React.memo(({
                     </span>
                   )}
 
-                  {f.source === 'email-ia' || f.source === 'dropzone' ? (
+                  {f.source === 'gmail-sync' || f.source === 'dropzone' || f.source === 'email-ia' ? (
                     <span className="text-[9px] font-black text-purple-600 bg-purple-50 px-2.5 py-1 rounded-full border border-purple-200"><Sparkles className="w-3 h-3 inline mr-1"/> IA</span>
                   ) : (
                     <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200"><Package className="w-3 h-3 inline mr-1"/> MANUAL</span>
