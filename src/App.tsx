@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { 
   LayoutDashboard, Package, Wallet, ChefHat, Users, Settings, Search,
   TrendingUp, X, RefreshCw, FileText, Truck, Scale, Zap, Building2, 
-  PieChart, Lock, Import, Sparkles, WifiOff
+  PieChart, Lock, Import, Sparkles, WifiOff, AlertTriangle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -45,6 +45,28 @@ const TAB_LABELS: Record<TabKey, string> = {
 };
 
 const jsonSafeClone = <T,>(obj: T): T => { try { return JSON.parse(JSON.stringify(obj)); } catch { return obj; } };
+
+/* =======================================================
+ * 🛡️ PARACAÍDAS ANTI-PANTALLAZO AZUL (ErrorBoundary)
+ * ======================================================= */
+class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean}> {
+  constructor(props: any) { super(props); this.state = { hasError: false }; }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(error: any, info: any) { console.error('UI Crash Interceptado:', error, info); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center h-[60vh] bg-white rounded-[3rem] shadow-sm border border-slate-100">
+          <AlertTriangle className="w-16 h-16 text-rose-400 mb-4" />
+          <h2 className="text-xl font-black text-slate-800">Esta pestaña ha fallado</h2>
+          <p className="text-sm text-slate-500 mt-2">No te preocupes, el resto de la app sigue funcionando.</p>
+          <button onClick={() => this.setState({hasError: false})} className="mt-6 px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition">Intentar recargar vista</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 /* =======================================================
  * 🧭 1. BUSCADOR RÁPIDO (CMD + K)
@@ -243,13 +265,31 @@ export default function App() {
   }, [reloadData]);
 
   const REQUIRED: (keyof AppData)[] = ['banco','platos','recetas','ingredientes','ventas_menu','cierres','facturas','albaranes','gastos_fijos'];
+  
   useEffect(() => {
-    if (!db || Object.keys(db).length === 0) return;
-    const next = jsonSafeClone(db); let changed = false;
-    for (const k of REQUIRED) { if (!Array.isArray(next[k])) { (next as any)[k] = []; changed = true; } }
-    if (!next.config) { next.config = { objetivoMensual: 45000, n8nUrlBanco: "", n8nUrlIA: "" }; changed = true; }
-    if (changed) setData(next);
-  }, [db, setData]);
+    // 🛡️ EL ESCUDO: Si la base de datos está cargando o es nula, NO TOCAMOS NADA para no borrar tus datos.
+    if (loading || !db) return; 
+    
+    let changed = false;
+    const next = { ...db };
+    
+    // Solo rellenamos arrays si realmente no existen en tu base de datos actual.
+    for (const k of REQUIRED) { 
+      if (!next[k] || !Array.isArray(next[k])) { 
+        (next as any)[k] = []; 
+        changed = true; 
+      } 
+    }
+    
+    if (!next.config) { 
+      next.config = { objetivoMensual: 45000, n8nUrlBanco: "", n8nUrlIA: "" }; 
+      changed = true; 
+    }
+    
+    if (changed) {
+      setData(next);
+    }
+  }, [db, loading, setData]);
 
   const isSyncingRef = useRef(false);
   const lastPayloadRef = useRef<AppData | null>(null);
@@ -363,7 +403,10 @@ export default function App() {
       <main className="flex-1 overflow-y-auto">
         <AnimatePresence mode="wait">
           <motion.div key={activeTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.15, ease: 'easeOut' }} className="p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto pb-10">
-            {content}
+            {/* 🛡️ El ErrorBoundary evita que un fallo en una pestaña rompa toda la App */}
+            <ErrorBoundary key={activeTab}>
+              {content}
+            </ErrorBoundary>
           </motion.div>
         </AnimatePresence>
       </main>
