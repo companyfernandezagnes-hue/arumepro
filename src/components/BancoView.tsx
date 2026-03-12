@@ -16,10 +16,154 @@ import { proxyFetch } from '../services/api';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import * as XLSX from 'xlsx';
 
-// 🚀 IMPORTAMOS LA LÓGICA DESDE TU NUEVO ARCHIVO
-import { findMatches, executeLink, fingerprint, isSuspicious, daysBetween, normalizeDesc } from '../services/bancoLogic';
-// 🚀 IMPORTAMOS EL COMPONENTE SWIPE
-import { SwipeReconciler } from './SwipeReconciler';
+// ============================================================================
+// 🧠 BLOQUE 1: CEREBRO LÓGICO Y MOTOR DE BÚSQUEDA (INTEGRADO PARA EVITAR ERRORES)
+// ============================================================================
+
+function normalizeDesc(s = '') {
+  return s.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[\u00A0\u202F\s]+/g, ' ').trim();
+}
+
+function fingerprint(date: string, amount: number, desc: string) {
+  return `${date}|${Number(amount || 0).toFixed(2)}|${normalizeDesc(desc)}`;
+}
+
+function daysBetween(a: string, b: string) {
+  const A = new Date(a).getTime(), B = new Date(b).getTime();
+  return Math.abs(A - B) / 86400000;
+}
+
+const SUSP_PATTERNS = ['COMISION', 'FEE', 'INTERES', 'INTERESES', 'CARGO', 'GASTO BANCO', 'RETENCION', 'ANULACION', 'AJUSTE'];
+
+function isSuspicious(desc: string) {
+  const d = normalizeDesc(desc);
+  return SUSP_PATTERNS.some(p => d.includes(p));
+}
+
+function findMatches(item: BankMovement, data: AppData) {
+  if (!item) return [];
+  const amt = Math.abs(Num.parse(item.amount));
+  const descNorm = normalizeDesc(item.desc);
+  const results: any[] = [];
+  
+  const TOLERANCIA_FIJA = 1.00; 
+  const TOLERANCIA_NOMBRE = 10.00; 
+  const MAX_COMISION_TPV = 0.035; 
+
+  if (Num.parse(item.amount) > 0) {
+    data.cierres?.forEach((c: any) => {
+      if (!c.conciliado_banco) {
+        const tpvDeclarado = Num.parse(c.tarjeta);
+        const diferencia = tpvDeclarado - amt; 
+        const porcentajeDiferencia = tpvDeclarado > 0 ? diferencia / tpvDeclarado : 0;
+
+        if (diferencia >= -0.5 && porcentajeDiferencia <= MAX_COMISION_TPV) {
+          results.push({ 
+            type: 'TPV CAJA', id: c.id, date: c.date, 
+            title: `Cierre ${c.date} (Comisión: ${Num.fmt(diferencia)})`, 
+            amount: tpvDeclarado, realAmount: amt, comision: diferencia, color: 'emerald' 
+          });
+        }
+      }
+    });
+
+    data.facturas?.forEach((f: any) => {
+      if (f.cliente !== "Z DIARIO" && !f.reconciled && Num.parse(f.total) > 0) {
+        const matchImporte = Math.abs(Num.parse(f.total) - amt) <= TOLERANCIA_FIJA;
+        const matchNombre = descNorm.includes(normalizeDesc(f.cliente));
+        if (matchImporte || (matchNombre && Math.abs(Num.parse(f.total) - amt) <= TOLERANCIA_NOMBRE)) {
+          results.push({ type: 'FACTURA CLIENTE', id: f.id, date: f.date, title: `Fac ${f.num} (${f.cliente})`, amount: Num.parse(f.total), color: 'teal' });
+        }
+      }
+    });
+  } else {
+    data.albaranes?.forEach((a: any) => {
+      if (!a.reconciled && Num.parse(a.total) > 0) {
+        const matchImporte = Math.abs(Num.parse(a.total) - amt) <= TOLERANCIA_FIJA;
+        const matchNombre = descNorm.includes(normalizeDesc(a.prov));
+        if (matchImporte || (matchNombre && Math.abs(Num.parse(a.total) - amt) <= TOLERANCIA_NOMBRE)) {
+          results.push({ type: 'ALBARÁN SUELTO', id: a.id, date: a.date, title: `${a.prov} (${a.num})`, amount: Num.parse(a.total), color: 'indigo' });
+        }
+      }
+    });
+
+    data.facturas?.forEach((f: any) => {
+      if (Num.parse(f.total) > 0 && !f.reconciled) {
+        const matchImporte = Math.abs(Num.parse(f.total) - amt) <= TOLERANCIA_FIJA;
+        const matchNombre = descNorm.includes(normalizeDesc(f.prov));
+        if (matchImporte || (matchNombre && Math.abs(Num.parse(f.total) - amt) <= TOLERANCIA_NOMBRE)) {
+          results.push({ type: 'FACTURA PROV', id: f.id, date: f.date, title: `Fac ${f.num} (${f.prov})`, amount: Num.parse(f.total), color: 'rose' });
+        }
+      }
+    });
+
+    data.gastos_fijos?.forEach((g: any) => {
+      if (g.active !== false && Math.abs(Num.parse(g.amount) - amt) <= TOLERANCIA_FIJA) {
+        results.push({ type: 'GASTO FIJO/NÓMINA', id: g.id, date: item.date, title: g.name, amount: Num.parse(g.amount), color: 'amber' });
+      }
+    });
+  }
+
+  return results.sort((a, b) => Math.abs(a.amount - amt) - Math.abs(b.amount - amt));
+}
+
+function executeLink(newData: AppData, bankId: string, matchType: string, docId: string, comision: number = 0) {
+  const bItem: any = newData.banco?.find((b: any) => b.id === bankId);
+  if (!bItem) return;
+
+  if (matchType.includes('ALBARÁN')) {
+    const alb = newData.albaranes?.find((a: any) => a.id === docId);
+    if (alb) { alb.reconciled = true; alb.paid = true; alb.status = 'paid'; }
+    bItem.link = { type: 'ALBARAN', id: docId }; 
+  } else if (matchType.includes('FACTURA')) {
+    const fac = newData.facturas?.find((f: any) => f.id === docId);
+    if (fac) { 
+      fac.reconciled = true; fac.paid = true; fac.status = 'reconciled';
+      if (fac.albaranIdsArr?.length) {
+        newData.albaranes?.forEach((a: any) => {
+          if (fac.albaranIdsArr.includes(a.id)) { a.reconciled = true; a.paid = true; }
+        });
+      }
+    }
+    bItem.link = { type: 'FACTURA', id: docId }; 
+  } else if (matchType.includes('GASTO FIJO')) {
+    const d = new Date(bItem.date);
+    const monthKey = `pagos_${d.getFullYear()}_${d.getMonth() + 1}`;
+    if (!newData.control_pagos) newData.control_pagos = {};
+    if (!newData.control_pagos[monthKey]) newData.control_pagos[monthKey] = [];
+    if (!newData.control_pagos[monthKey].includes(docId)) newData.control_pagos[monthKey].push(docId);
+    bItem.link = { type: 'FIXED_EXPENSE', id: docId };
+  } else if (matchType.includes('TPV CAJA')) {
+    const cierre = newData.cierres?.find((c: any) => c.id === docId);
+    if (cierre) {
+      cierre.conciliado_banco = true;
+      if (comision > 0) {
+        if (!newData.gastos_fijos) newData.gastos_fijos = [];
+        const comisionId = 'gf-comision-' + Date.now();
+        newData.gastos_fijos.push({
+          id: comisionId, name: `Comisión TPV/Plataforma (${cierre.date})`, amount: Num.round2(comision), 
+          freq: 'puntual', dia_pago: new Date(bItem.date).getDate(), cat: 'varios', active: false
+        });
+        const d = new Date(bItem.date);
+        const monthKey = `pagos_${d.getFullYear()}_${d.getMonth() + 1}`;
+        if (!newData.control_pagos) newData.control_pagos = {};
+        if (!newData.control_pagos[monthKey]) newData.control_pagos[monthKey] = [];
+        newData.control_pagos[monthKey].push(comisionId);
+      }
+      const zNum = `Z-${cierre.date.replace(/-/g, '')}`;
+      const fZ = newData.facturas?.find((f: any) => f.num === zNum);
+      if (fZ) { fZ.reconciled = true; fZ.paid = true; fZ.status = 'reconciled'; }
+    }
+    bItem.link = { type: 'TPV', id: docId };
+  }
+
+  bItem.status = 'matched';
+}
+
+
+// ============================================================================
+// 🏦 BLOQUE 2: VISTA PRINCIPAL DEL BANCO
+// ============================================================================
 
 interface BancoViewProps {
   data: AppData;
@@ -42,11 +186,8 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const n8nUrl = data.config?.n8nUrlBanco || "https://ia.permatunnelopen.org/webhook/1085406f-324c-42f7-b50f-22f211f445cd";
 
-  // --- STATS Y FLUJO ---
   const cashFlowData = useMemo(() => {
-    const days = 30;
-    const result = [];
-    const now = new Date();
+    const days = 30; const result = []; const now = new Date();
     for (let i = days; i >= 0; i--) {
       const d = new Date(); d.setDate(now.getDate() - i);
       const dateStr = d.toISOString().split('T')[0];
@@ -81,13 +222,11 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
 
   const prevPagos = useMemo(() => {
     const now = new Date(); const target = new Date(now); target.setDate(now.getDate() + 7);
-    const items = (data.gastos_fijos || [])
-      .filter((g: any) => g.active !== false && g.freq && g.dia_pago)
-      .map((g: any) => {
+    const items = (data.gastos_fijos || []).filter((g: any) => g.active !== false && g.freq && g.dia_pago).map((g: any) => {
         const due = new Date(now.getFullYear(), now.getMonth(), Number(g.dia_pago) || 1);
         if (due < now) due.setMonth(due.getMonth() + 1);
         return { amount: Num.parse(g.amount), within: due <= target };
-      }).filter((x: any) => x.within);
+    }).filter((x: any) => x.within);
     return items.reduce((acc: number, x: any) => acc + x.amount, 0);
   }, [data.gastos_fijos]);
 
@@ -108,19 +247,14 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
 
   const selectedItem = useMemo(() => data.banco?.find((b: any) => b.id === selectedBankId), [data.banco, selectedBankId]);
 
-  // 🚀 LLAMADA AL CEREBRO EXTERNO PARA BUSCAR COINCIDENCIAS
   const matches = useMemo(() => {
     if (!selectedItem) return [];
     return findMatches(selectedItem, data);
   }, [selectedItem, data]);
 
-  // --- ACCIONES ---
   const handleApiSync = async () => {
     setIsApiSyncing(true);
-    try {
-      await new Promise(r => setTimeout(r, 2000));
-      alert("✅ Sincronización bancaria API iniciada (Conectando a PSD2).");
-    } finally { setIsApiSyncing(false); }
+    try { await new Promise(r => setTimeout(r, 2000)); alert("✅ Sincronización bancaria API iniciada."); } finally { setIsApiSyncing(false); }
   };
 
   const handleAnalyze = async () => {
@@ -141,8 +275,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
       if (n.reviewed === undefined) n.reviewed = false;
       return n;
     });
-    await onSave(newData);
-    alert('📊 Análisis completado: Sospechosos y duplicados detectados.');
+    await onSave(newData); alert('📊 Análisis completado: Sospechosos y duplicados detectados.');
   };
 
   const toggleReviewed = async (id: string, val: boolean) => {
@@ -161,7 +294,6 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
     await onSave(newData);
   };
 
-  // 🚀 LLAMADA AL MOTOR EXTERNO PARA ENLAZAR
   const handleLink = async (bankId: string, matchType: string, docId: string, comision: number = 0) => {
     const newData = JSON.parse(JSON.stringify(data));
     executeLink(newData, bankId, matchType, docId, comision); 
@@ -266,16 +398,13 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
     if (!confirm("⚠️ ¿LIMPIEZA AUTOMÁTICA?")) return;
     const newData = JSON.parse(JSON.stringify(data));
     let eliminados = 0;
-    
     const initialAlbs = (newData.albaranes || []).length;
     newData.albaranes = (newData.albaranes || []).filter((a: any) => !(a.id.startsWith('auto-') || a.id.startsWith('ia-') || a.prov === 'BANCO' || a.prov?.includes('(IA)')));
     eliminados += (initialAlbs - newData.albaranes.length);
-
     const initialFacs = (newData.facturas || []).length;
     newData.facturas = (newData.facturas || []).filter((f: any) => !(f.id.startsWith('auto-fac') || f.id.startsWith('fac-ia-') || f.id.startsWith('fac-z-auto') || f.cliente === 'Z DIARIO AUTO' || f.cliente === 'Ingreso Banco'));
     eliminados += (initialFacs - newData.facturas.length);
-
-    await onSave(newData); alert(`✨ Limpieza exitosa: ${eliminados} documentos fantasma eliminados.`);
+    await onSave(newData); alert(`✨ Limpieza exitosa: ${eliminados} documentos eliminados.`);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -324,7 +453,6 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
 
   return (
     <div className="animate-fade-in space-y-6 pb-24 max-w-[1600px] mx-auto">
-      {/* 🚀 HEADER Y BOTONERA */}
       <header className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 relative overflow-hidden">
         <div className="flex justify-between items-start relative z-10">
           <div>
@@ -356,7 +484,6 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
         </div>
       </header>
 
-      {/* 🚀 LAYOUT GRID */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-5 space-y-4">
           <div className="bg-white p-2 rounded-2xl border border-slate-100 flex items-center gap-2 shadow-sm sticky top-0 z-10">
@@ -382,11 +509,9 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
           </div>
         </div>
 
-        {/* Right Panel */}
         <div className="lg:col-span-7">
           <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 h-[600px] flex flex-col shadow-xl relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 to-purple-500"></div>
-            
             <AnimatePresence mode="wait">
               {selectedItem ? (
                 <motion.div key={selectedItem.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="flex-1 flex flex-col">
@@ -424,10 +549,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
                           <p className="text-emerald-700 font-black uppercase text-xs">Conciliado Correctamente</p>
                         </div>
                       ) : (
-                        <div className="text-center opacity-40 py-10">
-                          <Search className="w-10 h-10 mx-auto mb-2 text-slate-400" />
-                          <p className="text-xs font-black uppercase tracking-widest">No hay sugerencias exactas</p>
-                        </div>
+                        <div className="text-center opacity-40 py-10"><Search className="w-10 h-10 mx-auto mb-2 text-slate-400" /><p className="text-xs font-black uppercase tracking-widest">No hay sugerencias exactas</p></div>
                       )
                     )}
 
@@ -463,7 +585,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
         </div>
       </div>
 
-      {/* 🚀 MODAL SWIPE IMPORTADO DESDE FUERA */}
+      {/* 🚀 MODAL SWIPE INTEGRADO */}
       <AnimatePresence>
         {isSwipeMode && (
           <SwipeReconciler 
@@ -473,6 +595,155 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
           />
         )}
       </AnimatePresence>
+    </div>
+  );
+};
+
+// ============================================================================
+// 👆 BLOQUE 3: SWIPE RECONCILER (El "Tinder" Bancario integrado)
+// ============================================================================
+
+interface SwipeReconcilerProps {
+  data: AppData;
+  onSave: (newData: AppData) => Promise<void>;
+  onClose: () => void;
+}
+
+const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, onClose }) => {
+  const pendingMovements = useMemo(() => {
+    return (data.banco || []).filter((b: any) => b.status === 'pending');
+  }, [data.banco]);
+
+  const [currentIndex, setCurrentIndex] = useState(0);
+  
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') next();
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [currentIndex, pendingMovements.length]);
+
+  const next = () => setCurrentIndex(prev => prev + 1);
+
+  if (pendingMovements.length === 0 || currentIndex >= pendingMovements.length) {
+    return (
+      <div className="fixed inset-0 z-[1000] flex justify-center items-center p-4">
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-slate-900/95 backdrop-blur-xl" />
+        <motion.div initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="relative z-10 flex flex-col items-center text-center">
+          <div className="w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center mb-6 shadow-[0_0_60px_-10px_rgba(16,185,129,0.5)]">
+            <CheckCircle2 className="w-12 h-12 text-white" />
+          </div>
+          <h2 className="text-4xl font-black text-white tracking-tighter mb-2">¡Todo al día!</h2>
+          <p className="text-emerald-400 font-bold uppercase tracking-widest mb-8">No hay más movimientos pendientes</p>
+          <button onClick={onClose} className="bg-white text-slate-900 px-8 py-4 rounded-full font-black text-sm hover:scale-105 transition shadow-xl">
+            VOLVER AL PANEL
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  const currentItem = pendingMovements[currentIndex];
+
+  const matches = useMemo(() => {
+    return findMatches(currentItem, data);
+  }, [currentItem, data]);
+
+  const handleLinkLocal = async (matchType: string, docId: string, comision: number = 0) => {
+    const newData = JSON.parse(JSON.stringify(data));
+    executeLink(newData, currentItem.id, matchType, docId, comision); 
+    await onSave(newData);
+  };
+
+  const progressPercent = Math.round((currentIndex / pendingMovements.length) * 100);
+
+  return (
+    <div className="fixed inset-0 z-[1000] flex justify-center items-center p-4 overflow-hidden">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-slate-900/95 backdrop-blur-xl" />
+      
+      <div className="relative z-10 w-full max-w-lg flex flex-col items-center">
+        <div className="w-full flex justify-between items-center mb-6 px-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center shadow-lg"><Sparkles className="w-5 h-5 text-white" /></div>
+            <div>
+              <h3 className="text-white font-black text-lg leading-none">Swipe Mode</h3>
+              <p className="text-indigo-400 text-[10px] font-black uppercase tracking-widest mt-1">{pendingMovements.length - currentIndex} RESTANTES</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-white/40 hover:text-white hover:rotate-90 transition-all"><CloseIcon className="w-8 h-8" /></button>
+        </div>
+
+        <AnimatePresence mode="popLayout">
+          <motion.div 
+            key={currentItem.id}
+            initial={{ scale: 0.9, opacity: 0, y: 50 }} animate={{ scale: 1, opacity: 1, y: 0, x: 0, rotate: 0 }} exit={{ scale: 0.9, opacity: 0, x: -200, rotate: -10 }} 
+            transition={{ type: "spring", stiffness: 300, damping: 25 }}
+            drag="x" dragConstraints={{ left: 0, right: 0 }} dragElastic={0.7}
+            onDragEnd={(e, { offset, velocity }) => { if (offset.x < -50 || velocity.x < -500) next(); }}
+            className="w-full bg-white rounded-[3rem] p-8 shadow-2xl flex flex-col min-h-[500px] cursor-grab active:cursor-grabbing"
+          >
+            <div className="text-center mb-8 pointer-events-none">
+              <span className={cn("text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest mb-4 inline-block", Num.parse(currentItem.amount) > 0 ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700")}>
+                {Num.parse(currentItem.amount) > 0 ? 'Ingreso detectado' : 'Gasto detectado'}
+              </span>
+              <h2 className="text-2xl font-black text-slate-800 leading-tight mb-2 line-clamp-2">{currentItem.desc}</h2>
+              <p className="text-5xl font-black text-slate-900 tracking-tighter">{Num.fmt(currentItem.amount)}</p>
+              <p className="text-[10px] text-slate-400 font-bold mt-3 uppercase tracking-widest bg-slate-50 inline-block px-3 py-1 rounded-lg">Fecha: {currentItem.date}</p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 mb-6">
+              {matches.length > 0 ? (
+                <div className="space-y-3">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 text-center">Coincidencias (Tap para enlazar)</p>
+                  {matches.map((m: any, idx: number) => (
+                    <motion.div 
+                      key={idx} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                      onClick={() => handleLinkLocal(m.type, m.id, m.comision || 0)}
+                      className={cn("flex justify-between items-center p-4 rounded-2xl border-2 cursor-pointer transition-all shadow-sm hover:shadow-md",
+                        m.color === 'emerald' ? "bg-emerald-50 border-emerald-100 hover:border-emerald-300" : 
+                        m.color === 'teal' ? "bg-teal-50 border-teal-100 hover:border-teal-300" :
+                        m.color === 'amber' ? "bg-amber-50 border-amber-100 hover:border-amber-300" :
+                        m.color === 'indigo' ? "bg-indigo-50 border-indigo-100 hover:border-indigo-300" : "bg-rose-50 border-rose-100 hover:border-rose-300"
+                      )}
+                    >
+                      <div className="text-left">
+                        <span className={cn("text-[8px] font-black uppercase tracking-widest",
+                          m.color === 'emerald' ? "text-emerald-700" : m.color === 'teal' ? "text-teal-700" :
+                          m.color === 'amber' ? "text-amber-700" : m.color === 'indigo' ? "text-indigo-700" : "text-rose-700"
+                        )}>{m.type}</span>
+                        <p className="text-xs font-black text-slate-800 mt-1">{m.title}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-black text-sm text-slate-800">{Num.fmt(m.amount)}</p>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-center opacity-30 py-10 pointer-events-none">
+                  <Search className="w-12 h-12 mb-4" />
+                  <p className="text-xs font-black uppercase tracking-widest">No hay coincidencias claras</p>
+                  <p className="text-[10px] font-bold mt-1">Sáltalo o usa la lista manual</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-4 mt-auto">
+              <button onClick={next} className="flex-1 bg-slate-100 text-slate-400 py-5 rounded-[2rem] font-black text-xs uppercase tracking-widest hover:bg-slate-200 hover:text-slate-600 transition flex items-center justify-center gap-2">
+                <ArrowDownLeft className="w-4 h-4 rotate-45" /> SALTAR
+              </button>
+            </div>
+          </motion.div>
+        </AnimatePresence>
+
+        <div className="mt-8 w-full px-8">
+          <div className="h-1.5 w-full bg-white/10 rounded-full overflow-hidden">
+            <motion.div initial={{ width: 0 }} animate={{ width: `${progressPercent}%` }} className="h-full bg-indigo-500 rounded-full" />
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
