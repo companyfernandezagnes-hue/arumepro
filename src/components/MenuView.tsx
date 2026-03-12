@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   ChefHat, TrendingUp, PieChart, ChevronLeft, ChevronRight, 
   Zap, Plus, Search, AlertTriangle, CheckCircle2, TableProperties, 
-  Scale, Target, Calculator, Receipt, Camera, Loader2, FileSpreadsheet, X
+  Scale, Target, Calculator, Receipt, Camera, Loader2, FileText, X
 } from 'lucide-react';
 import { AppData, Plato } from '../types';
 import { Num, DateUtil } from '../services/engine';
@@ -23,7 +23,6 @@ type ViewTab = 'matrix' | 'table' | 'omnes' | 'financials' | 'simulator';
 /* =======================================================
  * 🛡️ FUNCIONES BASE A PRUEBA DE CRASHEOS (Null Safety)
  * ======================================================= */
-// ¡ESTO ES LO QUE PROVOCABA EL PANTALLAZO AZUL! Ahora está protegido.
 const getIva = (cat?: string) => (String(cat || '').toLowerCase().match(/bebida|alcohol|vino/)) ? 0.21 : 0.10;
 const getNetPrice = (price: number, iva: number) => price > 0 ? Num.round2(price / (1 + iva)) : 0;
 const norm = (s?: string) => String(s || '').toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, '');
@@ -448,7 +447,7 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
           </div>
           
           <button onClick={() => setEditingPlato({ id: 'p-' + Date.now(), name: '', price: 0, cost: 0, category: 'General', iva: 10, merma: 0 })} className="bg-slate-800 text-white p-2 rounded-xl shadow-sm hover:bg-slate-700 transition" title="Añadir Plato"><Plus className="w-4 h-4" /></button>
-          <label className="bg-emerald-500 text-white p-2 rounded-xl shadow-sm hover:bg-emerald-600 transition cursor-pointer" title="Subir Excel TPV"><FileSpreadsheet className="w-4 h-4" /><input type="file" ref={fileInputRef} onChange={handleImportExcel} className="hidden" accept=".csv, .xlsx, .xls" /></label>
+          <label className="bg-emerald-500 text-white p-2 rounded-xl shadow-sm hover:bg-emerald-600 transition cursor-pointer" title="Subir Excel TPV"><FileText className="w-4 h-4" /><input type="file" ref={fileInputRef} onChange={handleImportExcel} className="hidden" accept=".csv, .xlsx, .xls" /></label>
           <label className="bg-indigo-600 text-white p-2 rounded-xl shadow-sm hover:bg-indigo-700 transition cursor-pointer" title="Leer Ticket Z con IA"><Camera className="w-4 h-4" /><input type="file" ref={iaInputRef} onChange={handleUploadIA} className="hidden" accept=".pdf, image/*" /></label>
         </div>
       </div>
