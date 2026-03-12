@@ -1,11 +1,26 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { AppData } from '../types';
 
 // 1. Conexión con TUS credenciales exactas (URL y Clave Pública)
 const SUPABASE_URL = "https://awbgboucnbsuzojocbuy.supabase.co";
 const SUPABASE_KEY = "sb_publishable_drOQ5PsFA8eox_aRTXNATQ_5kibM6ST";
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+// 🛡️ FIX: PATRÓN SINGLETON PARA EVITAR MULTIPLES INSTANCIAS (Evita pantallazos azules)
+let supabaseInstance: SupabaseClient | null = null;
+
+export const supabase = (() => {
+  if (!supabaseInstance) {
+    supabaseInstance = createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: {
+        storageKey: 'arume-auth-token-v2', // Clave única para evitar conflictos
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: false
+      }
+    });
+  }
+  return supabaseInstance;
+})();
 
 // 2. SOLO para desarrollo (Para poder hacer pruebas desde la consola si hace falta)
 if (typeof window !== 'undefined') {
