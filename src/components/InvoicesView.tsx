@@ -18,8 +18,8 @@ import { cn } from '../lib/utils';
 import { getOfficialProvName, basicNorm, linkAlbaranesToFactura } from '../services/invoicing'; 
 import { createClient } from '@supabase/supabase-js';
 
-const SUPABASE_URL = "https://awbgboucnbsuzojocbuy.supabase.co"; 
-const SUPABASE_ANON_KEY = "sb_publishable_drOQ5PsFA8eox_aRTXNATQ_5kibM6ST";
+const SUPABASE_URL = "https://bgtelulbiaugawyrhvwt.supabase.co"; 
+const SUPABASE_ANON_KEY = "sb_publishable_jagYegyG8gGMijzpLEY9BQ_iWfL1MU4";
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 import { InvoicesList } from './InvoicesList';
