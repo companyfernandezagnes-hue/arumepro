@@ -498,37 +498,37 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     } catch(e) { alert("Error al descargar el archivo"); }
   };
 
+  // 📦 RENDER DE ALBARANES COMPACTADO
   const renderPendingGroups = () => {
     if (!pendingGroups || pendingGroups.length === 0) {
       return (
-        <div className="py-24 flex flex-col items-center justify-center bg-white rounded-[3rem] border border-slate-100 shadow-sm text-center">
-          <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-6"><Package className="w-10 h-10 text-slate-300" /></div>
-          <p className="text-slate-400 font-black text-sm uppercase tracking-widest">Todo al día</p>
-          <p className="text-[11px] font-bold text-slate-400 mt-2">No hay albaranes sueltos en este periodo.</p>
+        <div className="py-20 flex flex-col items-center justify-center bg-white rounded-3xl border border-slate-200 shadow-sm text-center">
+          <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4"><Package className="w-8 h-8 text-slate-300" /></div>
+          <p className="text-slate-500 font-bold text-sm uppercase tracking-widest">Todo al día</p>
+          <p className="text-xs text-slate-400 mt-1">No hay albaranes sueltos en este periodo.</p>
         </div>
       );
     }
     
     return pendingGroups.map(([mk, dataGroup]) => (
-      <div key={mk} className="mb-8 animate-fade-in bg-white p-6 md:p-8 rounded-[2.5rem] shadow-sm border border-slate-100">
-        <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
-          <Clock className="w-4 h-4 text-indigo-400" /> Mes de {dataGroup.name}
+      <div key={mk} className="mb-6 animate-fade-in bg-white p-5 rounded-3xl shadow-sm border border-slate-200">
+        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+          <Clock className="w-4 h-4 text-indigo-400" /> {dataGroup.name}
         </h3>
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {Object.values(dataGroup.groups || {}).map((g: any) => {
             const unitConfig = BUSINESS_UNITS.find(u => u.id === g.unitId);
             return (
-              <div key={g.label + g.unitId} onClick={() => { setSelectedGroup({ label: g.label, ids: g.ids, unitId: g.unitId }); setModalForm({ num: '', date: DateUtil.today(), selectedAlbs: [...g.ids], unitId: g.unitId }); }} className="flex justify-between items-center p-5 md:p-6 bg-slate-50 rounded-[2rem] border border-slate-200 hover:border-indigo-400 hover:shadow-lg transition cursor-pointer group">
-                <div className="min-w-0 pr-4">
-                  <p className="font-black text-slate-800 text-lg md:text-xl group-hover:text-indigo-600 transition truncate">{g.label}</p>
-                  <div className="flex items-center gap-2 mt-2">
-                    {unitConfig && <span className={cn("text-[9px] px-3 py-1 rounded-lg uppercase tracking-widest font-black shadow-sm", unitConfig.bg, unitConfig.color)}>{unitConfig.name}</span>}
-                    <span className="px-3 py-1 bg-white text-slate-500 rounded-lg text-[9px] font-black uppercase border border-slate-200">{g.count} Albaranes</span>
+              <div key={g.label + g.unitId} onClick={() => { setSelectedGroup({ label: g.label, ids: g.ids, unitId: g.unitId }); setModalForm({ num: '', date: DateUtil.today(), selectedAlbs: [...g.ids], unitId: g.unitId }); }} className="flex justify-between items-center p-3.5 bg-slate-50 rounded-2xl border border-slate-200 hover:border-indigo-400 hover:bg-white transition cursor-pointer group">
+                <div className="min-w-0 pr-3">
+                  <p className="font-bold text-slate-800 text-sm group-hover:text-indigo-600 transition truncate">{g.label}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    {unitConfig && <span className={cn("text-[9px] px-2 py-0.5 rounded font-bold uppercase", unitConfig.bg, unitConfig.color)}>{unitConfig.name.split(' ')[0]}</span>}
+                    <span className="text-[10px] font-medium text-slate-500">{g.count} albs</span>
                   </div>
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="font-black text-slate-900 text-2xl md:text-3xl tracking-tighter">{Num.fmt(g.t)}</p>
-                  <p className="text-[10px] font-bold text-indigo-400 group-hover:text-indigo-600 group-hover:underline mt-2 flex items-center justify-end gap-1 uppercase tracking-widest">AGRUPAR <ArrowRight className="w-3 h-3" /></p>
+                  <p className="font-bold text-slate-900 text-base">{Num.fmt(g.t)}</p>
                 </div>
               </div>
             );
@@ -538,141 +538,131 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     ));
   };
 
-  /* =======================================================
-   * 🎨 RENDER PRINCIPAL
-   * ======================================================= */
   return (
-    <div className="animate-fade-in space-y-6 pb-24 min-h-screen relative max-w-[1600px] mx-auto">
+    <div className="animate-fade-in space-y-4 pb-24 min-h-screen relative max-w-[1600px] mx-auto">
       
-      {/* OVERLAY DRAG & DROP PREMIUM */}
+      {/* OVERLAY DRAG & DROP SUTIL */}
       <AnimatePresence>
         {isDragging && (
-          <motion.div data-test-id="drop-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[999] pointer-events-none flex items-center justify-center">
-            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" />
-            <div className="relative z-10 w-full max-w-2xl mx-4 border-[6px] border-dashed border-white/50 rounded-[4rem] flex flex-col items-center justify-center bg-indigo-500/20 aspect-video shadow-2xl overflow-hidden">
-              <div className="absolute inset-0 bg-gradient-to-t from-indigo-600/40 to-transparent"></div>
-              <motion.div animate={{ y: [0, -15, 0] }} transition={{ repeat: Infinity, duration: 2 }} className="bg-white p-10 rounded-full shadow-2xl relative z-10 mb-8">
-                <FileDown className="w-20 h-20 text-indigo-600" />
-              </motion.div>
-              <h2 className="text-5xl font-black text-white tracking-tighter drop-shadow-md relative z-10">Suelta tu Factura</h2>
-              <p className="text-sm font-bold text-indigo-100 uppercase tracking-[0.3em] mt-4 relative z-10">La IA se encarga del resto</p>
+          <motion.div data-test-id="drop-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[999] pointer-events-none flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
+            <div className="relative z-10 w-full max-w-lg mx-4 border-2 border-dashed border-white rounded-3xl flex flex-col items-center justify-center bg-indigo-600 p-12 shadow-2xl">
+              <FileDown className="w-16 h-16 text-white mb-4 animate-bounce" />
+              <h2 className="text-2xl font-bold text-white tracking-tight">Suelta tu Factura</h2>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
       
-      {/* CABECERA */}
-      <header className="bg-white rounded-[3rem] border border-slate-100 shadow-sm p-8 flex flex-col xl:flex-row justify-between gap-6 relative z-10 items-center">
+      {/* CABECERA COMPACTA */}
+      <header className="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-5 md:p-6 flex flex-col xl:flex-row justify-between gap-4 relative z-10 items-center">
         <div className="flex items-center gap-4">
-          <div className="w-14 h-14 bg-indigo-600 rounded-[1.5rem] flex items-center justify-center shadow-lg shadow-indigo-200">
-            <FileSpreadsheet className="w-7 h-7 text-white" />
+          <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center border border-indigo-100">
+            <FileSpreadsheet className="w-6 h-6 text-indigo-600" />
           </div>
           <div>
-            <h2 className="text-3xl font-black text-slate-800 tracking-tighter">Buzón & Facturas</h2>
-            <p className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.2em] mt-1">Conciliación 3-Way Match</p>
+            <h2 className="text-xl md:text-2xl font-bold text-slate-800 tracking-tight">Buzón de Facturas</h2>
+            <p className="text-xs font-medium text-slate-500 mt-0.5">Gestión y 3-Way Match</p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <button onClick={handleFetchEmails} disabled={isSyncing} className="px-6 py-4 rounded-2xl text-[11px] font-black bg-blue-50 text-blue-600 hover:bg-blue-100 hover:shadow-md transition flex items-center gap-2 border border-blue-200">
-            {isSyncing ? <Loader2 className="w-4 h-4 animate-spin"/> : <Inbox className="w-4 h-4" />} VER CORREOS IMAP
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={handleFetchEmails} disabled={isSyncing} className="px-4 py-2.5 rounded-xl text-xs font-bold bg-blue-50 text-blue-600 hover:bg-blue-100 transition flex items-center gap-2 border border-blue-200">
+            {isSyncing ? <Loader2 className="w-4 h-4 animate-spin"/> : <Inbox className="w-4 h-4" />} LEER CORREOS
           </button>
-          
           <input type="file" ref={fileInputRef} className="hidden" accept="application/pdf, image/*" onChange={(e) => { if (e.target.files && e.target.files[0]) { processLocalFile(e.target.files[0]); e.target.value = ''; } }} />
-          <button onClick={() => fileInputRef.current?.click()} disabled={isSyncing} className="px-6 py-4 rounded-2xl text-[11px] font-black bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-lg transition flex items-center gap-2">
+          <button onClick={() => fileInputRef.current?.click()} disabled={isSyncing} className="px-4 py-2.5 rounded-xl text-xs font-bold bg-slate-900 text-white hover:bg-slate-800 transition flex items-center gap-2">
             {isSyncing ? <Loader2 className="w-4 h-4 animate-spin"/> : <UploadCloud className="w-4 h-4" />} SUBIR PDF
           </button>
-          
-          <button onClick={() => setIsExportModalOpen(true)} className="px-6 py-4 rounded-2xl text-[11px] font-black bg-emerald-600 text-white hover:bg-emerald-700 hover:shadow-lg transition flex items-center gap-2">
+          <button onClick={() => setIsExportModalOpen(true)} className="px-4 py-2.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 transition flex items-center gap-2 border border-slate-200">
             <Download className="w-4 h-4" /> EXPORTAR
           </button>
         </div>
       </header>
 
-      {/* CONTROLES STICKY */}
-      <div className="sticky top-4 z-40">
-        <div className="bg-white/90 backdrop-blur-xl px-5 py-4 rounded-[2.5rem] shadow-xl border border-slate-200 flex flex-col xl:flex-row items-center justify-between gap-4">
+      {/* CONTROLES STICKY COMPACTOS */}
+      <div className="sticky top-2 z-40">
+        <div className="bg-white/95 backdrop-blur-md px-4 py-3 rounded-2xl shadow-sm border border-slate-200 flex flex-col xl:flex-row items-center justify-between gap-3">
           
-          <div className="flex items-center bg-slate-100 p-1.5 rounded-[1.5rem] w-full xl:w-auto overflow-x-auto no-scrollbar">
-            <button onClick={() => setActiveTab('pend')} className={cn("flex-1 px-6 py-3 rounded-xl text-[11px] font-black uppercase tracking-widest transition", activeTab === 'pend' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-400 hover:text-slate-600")}>
+          <div className="flex items-center bg-slate-100 p-1 rounded-xl w-full xl:w-auto">
+            <button onClick={() => setActiveTab('pend')} className={cn("flex-1 px-4 py-2 rounded-lg text-xs font-semibold transition", activeTab === 'pend' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
               📦 Albaranes Sueltos
             </button>
-            <button onClick={() => setActiveTab('hist')} className={cn("flex-1 px-6 py-3 rounded-xl text-[11px] font-black uppercase tracking-widest transition", activeTab === 'hist' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-400 hover:text-slate-600")}>
+            <button onClick={() => setActiveTab('hist')} className={cn("flex-1 px-4 py-2 rounded-lg text-xs font-semibold transition", activeTab === 'hist' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
               💰 Histórico Facturas
             </button>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto">
-            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200">
-              <button onClick={() => setMode('proveedor')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition", mode === 'proveedor' ? "bg-white text-slate-800 shadow-sm" : "text-slate-400 hover:text-slate-600")}>Prov</button>
-              <button onClick={() => setMode('socio')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition", mode === 'socio' ? "bg-white text-slate-800 shadow-sm" : "text-slate-400 hover:text-slate-600")}>Socio</button>
+          <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+              <button onClick={() => setMode('proveedor')} className={cn("px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition", mode === 'proveedor' ? "bg-white text-slate-800 shadow-sm" : "text-slate-500")}>Prov</button>
+              <button onClick={() => setMode('socio')} className={cn("px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase transition", mode === 'socio' ? "bg-white text-slate-800 shadow-sm" : "text-slate-500")}>Socio</button>
             </div>
-
-            <select value={selectedUnit} onChange={e => setSelectedUnit(e.target.value as any)} className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 text-[11px] font-black uppercase tracking-widest outline-none text-slate-600 focus:ring-2 ring-indigo-200 transition">
+            <select value={selectedUnit} onChange={e => setSelectedUnit(e.target.value as any)} className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold outline-none text-slate-700 shadow-sm">
               <option value="ALL">Todas las unidades</option>
               <option value="REST">Restaurante</option>
               <option value="DLV">Catering</option>
               <option value="SHOP">Tienda</option>
               <option value="CORP">Socios/Corp</option>
             </select>
-
-            <div className="flex items-center bg-slate-50 border border-slate-200 rounded-2xl">
-              <button className="p-3 text-indigo-600 hover:bg-indigo-100 rounded-l-2xl transition" onClick={() => setYear(y => y - 1)}><ChevronLeft className="w-4 h-4"/></button>
-              <span className="px-3 text-sm font-black text-slate-700">{year}</span>
-              <button className="p-3 text-indigo-600 hover:bg-indigo-100 rounded-r-2xl transition" onClick={() => setYear(y => y + 1)}><ChevronRight className="w-4 h-4"/></button>
+            <div className="flex items-center bg-white border border-slate-200 rounded-xl shadow-sm">
+              <button className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-l-xl transition" onClick={() => setYear(y => y - 1)}><ChevronLeft className="w-4 h-4"/></button>
+              <span className="px-2 text-xs font-bold text-slate-700">{year}</span>
+              <button className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-r-xl transition" onClick={() => setYear(y => y + 1)}><ChevronRight className="w-4 h-4"/></button>
             </div>
-
-            <div className="relative flex-1 md:w-80">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Buscar proveedor o Ref..." className="w-full pl-11 pr-4 py-3 rounded-2xl bg-slate-50 border border-slate-200 text-xs font-bold outline-none focus:bg-white focus:ring-2 ring-indigo-200 transition" />
+            <div className="relative flex-1 md:w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Buscar proveedor o Ref..." className="w-full pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-200 text-xs outline-none focus:border-indigo-400 shadow-sm transition" />
             </div>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 relative z-10">
-        {/* COLUMNA IZQUIERDA: CONTENIDO PRINCIPAL */}
-        <section className="xl:col-span-8 space-y-6">
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 relative z-10">
+        
+        {/* COLUMNA IZQ: LISTADOS */}
+        <section className="xl:col-span-8 space-y-4">
           {activeTab === 'hist' && (
-            <div className="flex flex-wrap gap-2 px-2">
+            <div className="flex flex-wrap gap-2 px-1">
               {[
                 { id: 'all', label: 'Todas las facturas', color: 'text-slate-500' },
                 { id: 'pending', label: '⏳ Pendientes', color: 'text-amber-600' },
-                { id: 'paid', label: '✔️ Pagadas Efectivo', color: 'text-emerald-600' },
-                { id: 'reconciled', label: '🔗 Banco', color: 'text-blue-600' }
+                { id: 'paid', label: '✔️ Pagadas', color: 'text-emerald-600' },
+                { id: 'reconciled', label: '🔗 En Banco', color: 'text-blue-600' }
               ].map(chip => (
-                <button type="button" key={chip.id} onClick={() => setFilterStatus(chip.id as any)} className={cn("px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border-2 transition-all", filterStatus === chip.id ? "bg-indigo-600 text-white border-indigo-600" : cn("bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300", chip.color))}>{chip.label}</button>
+                <button type="button" key={chip.id} onClick={() => setFilterStatus(chip.id as any)} className={cn("px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide border transition-all", filterStatus === chip.id ? "bg-indigo-600 text-white border-indigo-600" : cn("bg-white border-slate-200 hover:bg-slate-50", chip.color))}>{chip.label}</button>
               ))}
             </div>
           )}
 
           {activeTab === 'pend' ? renderPendingGroups() : (
-            <InvoicesList facturas={facturasSeguras} searchQ={deferredSearch} selectedUnit={selectedUnit} mode={mode} filterStatus={filterStatus} year={year} businessUnits={BUSINESS_UNITS} sociosReales={SOCIOS_REALES_NAMES} superNorm={superNorm} onOpenDetail={setSelectedInvoice as any} onTogglePago={handleTogglePago} onDelete={handleDeleteFactura} />
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-4">
+               <InvoicesList facturas={facturasSeguras} searchQ={deferredSearch} selectedUnit={selectedUnit} mode={mode} filterStatus={filterStatus} year={year} businessUnits={BUSINESS_UNITS} sociosReales={SOCIOS_REALES_NAMES} superNorm={superNorm} onOpenDetail={setSelectedInvoice as any} onTogglePago={handleTogglePago} onDelete={handleDeleteFactura} />
+            </div>
           )}
         </section>
 
-        {/* COLUMNA DERECHA: SIDEBAR DE BANDEJAS */}
+        {/* COLUMNA DER: BANDEJAS DENSIFICADAS */}
         <aside className="xl:col-span-4">
-          <div className="sticky top-32 space-y-6">
+          <div className="sticky top-24 space-y-4">
             
-            {/* BANDEJA IMAP */}
+            {/* IMAP COMPACTO */}
             {emailInbox.length > 0 && (
-              <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-blue-500"></div>
-                <h4 className="text-base font-black text-slate-800 mb-1 flex items-center gap-2"><Inbox className="w-5 h-5 text-blue-500"/> Correos Recibidos</h4>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-5">PDFs pendientes de abrir</p>
-                <div className="space-y-3">
+              <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm">
+                <div className="flex justify-between items-center mb-3 border-b border-slate-100 pb-2">
+                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-1.5"><Inbox className="w-4 h-4 text-blue-500"/> Correos ({emailInbox.length})</h4>
+                </div>
+                <div className="space-y-2 max-h-[250px] overflow-y-auto custom-scrollbar pr-1">
                   {emailInbox.map(mail => (
-                    <div key={mail.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl hover:border-blue-300 transition group">
+                    <div key={mail.id} className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl hover:border-blue-300 transition flex flex-col gap-2">
                       <div className="flex justify-between items-start">
                         <div className="min-w-0 pr-2">
-                          <p className="text-sm font-black text-slate-800 truncate">{mail.from}</p>
-                          <p className="text-[10px] font-bold text-slate-500 truncate mt-1">{mail.subject}</p>
+                          <p className="text-xs font-bold text-slate-800 truncate">{mail.from}</p>
+                          <p className="text-[10px] text-slate-500 truncate">{mail.subject}</p>
                         </div>
-                        <span className="text-[9px] font-black text-blue-400 bg-blue-50 px-2 py-1 rounded-md">{mail.date}</span>
+                        <span className="text-[9px] font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded shrink-0">{mail.date}</span>
                       </div>
-                      <button onClick={() => handleParseEmail(mail.id)} disabled={isSyncing} className="w-full mt-4 bg-white border-2 border-blue-100 text-blue-600 font-black text-[10px] uppercase tracking-widest py-3 rounded-xl hover:bg-blue-50 hover:border-blue-200 disabled:opacity-50 transition flex items-center justify-center gap-2">
-                        {isSyncing ? <Loader2 className="w-4 h-4 animate-spin"/> : <Sparkles className="w-4 h-4"/>} Extraer PDF con IA
+                      <button onClick={() => handleParseEmail(mail.id)} disabled={isSyncing} className="w-full bg-white border border-blue-200 text-blue-600 font-bold text-[10px] uppercase py-1.5 rounded-lg hover:bg-blue-50 disabled:opacity-50 transition flex items-center justify-center gap-1.5">
+                        {isSyncing ? <Loader2 className="w-3 h-3 animate-spin"/> : <Sparkles className="w-3 h-3"/>} Extraer PDF
                       </button>
                     </div>
                   ))}
@@ -680,62 +670,47 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
               </div>
             )}
 
-            {/* AUDITORÍA IA (BORRADORES) */}
-            <div className={cn("p-6 rounded-[2.5rem] border shadow-sm relative overflow-hidden transition-all duration-500", draftsIA.length > 0 ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200")}>
-              {draftsIA.length > 0 && <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 to-emerald-500"></div>}
-              
-              <div className="flex justify-between items-start mb-6">
-                <div>
-                  <h4 className={cn("text-base font-black flex items-center gap-2", draftsIA.length > 0 ? "text-white" : "text-slate-800")}>
-                    <Sparkles className={cn("w-5 h-5", draftsIA.length > 0 ? "text-purple-400" : "text-slate-400")}/> Bandeja IA
-                  </h4>
-                  <p className={cn("text-[10px] font-black uppercase tracking-[0.2em] mt-1", draftsIA.length > 0 ? "text-slate-400" : "text-slate-400")}>
-                    Factura vs Albaranes
-                  </p>
-                </div>
-                {draftsIA.length > 0 && <span className="bg-purple-500/20 text-purple-300 px-3 py-1 rounded-lg text-xs font-black">{draftsIA.length}</span>}
+            {/* DRAFTS IA COMPACTOS */}
+            <div className="bg-slate-900 p-4 rounded-3xl border border-slate-800 shadow-sm">
+              <div className="flex justify-between items-center mb-3 border-b border-slate-700 pb-2">
+                 <h4 className="text-sm font-bold text-white flex items-center gap-1.5"><Sparkles className="w-4 h-4 text-purple-400"/> Borradores IA</h4>
+                 {draftsIA.length > 0 && <span className="bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded text-[10px] font-bold">{draftsIA.length}</span>}
               </div>
 
               {draftsIA.length > 0 ? (
-                <div className="space-y-4 max-h-[60vh] overflow-y-auto custom-scrollbar pr-2">
+                <div className="space-y-2 max-h-[50vh] overflow-y-auto custom-scrollbar pr-1">
                   {draftsIA.map(d => (
-                    <div key={d.id} className="bg-slate-800 p-5 rounded-2xl border border-slate-700 hover:border-purple-500/50 transition">
-                      <div className="flex justify-between items-start mb-3">
+                    <div key={d.id} className="bg-slate-800 p-3 rounded-xl border border-slate-700 hover:border-purple-500/50 transition flex flex-col gap-2">
+                      <div className="flex justify-between items-center">
                         <div className="min-w-0 pr-2">
-                          <span className="font-black text-white block truncate text-base">{d.prov || 'Desconocido'}</span>
-                          <span className="text-[10px] text-slate-400 font-mono mt-1 block">{d.date} · Ref: {d.num}</span>
+                          <span className="font-bold text-white text-sm truncate block">{d.prov || 'Desconocido'}</span>
+                          <span className="text-[9px] text-slate-400 font-mono block mt-0.5">{d.date} · Ref: {d.num}</span>
                         </div>
-                        <button onClick={() => handleDiscardDraftIA(d.id)} className="text-slate-500 hover:text-rose-400 transition bg-slate-900 p-2 rounded-xl"><Trash2 className="w-4 h-4"/></button>
+                        <span className="text-base font-black text-white shrink-0">{Num.fmt(d.total)}</span>
                       </div>
                       
-                      <div className="flex justify-between items-end mt-4 p-4 bg-slate-900 rounded-xl border border-slate-800">
-                        <div>
-                          <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Total Factura</p>
-                          <span className="text-2xl font-black text-white">{Num.fmt(d.total)}</span>
-                        </div>
-                        <div className="text-right">
-                          {d.cuadraPerfecto ? (
-                            <span className="px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1"><Check className="w-3 h-3"/> Cuadra</span>
-                          ) : (
-                            <div>
-                               <p className="text-[9px] font-black text-amber-500 uppercase tracking-widest mb-1">Descuadre</p>
-                               <span className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest bg-amber-500/20 text-amber-400 border border-amber-500/30">{Num.fmt(d.diferencia)}</span>
-                            </div>
-                          )}
-                        </div>
+                      <div className="flex justify-between items-center bg-slate-900 p-2 rounded-lg border border-slate-700 mt-1">
+                        {d.cuadraPerfecto ? (
+                          <span className="text-[9px] font-bold uppercase text-emerald-400 flex items-center gap-1"><Check className="w-3 h-3"/> Cuadra</span>
+                        ) : (
+                          <span className="text-[9px] font-bold uppercase text-amber-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3"/> Diff: {Num.fmt(d.diferencia)}</span>
+                        )}
+                        <span className="text-[9px] text-slate-500">Albs: {Num.fmt(d.sumaAlbaranes)}</span>
                       </div>
                       
-                      <button onClick={() => handleConfirmAuditoriaIA(d.id)} disabled={isProcessing} className="w-full mt-4 py-3.5 bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-400 disabled:opacity-50 transition flex justify-center items-center gap-2">
-                        {isProcessing ? <Loader2 className="w-4 h-4 animate-spin"/> : <CheckCircle2 className="w-4 h-4"/>} Confirmar y Crear
-                      </button>
+                      <div className="flex gap-2 mt-1">
+                        <button onClick={() => handleConfirmAuditoriaIA(d.id)} disabled={isProcessing} className="flex-1 py-2 bg-indigo-500 text-white rounded-lg text-[10px] font-bold uppercase tracking-wider hover:bg-indigo-400 disabled:opacity-50 transition flex justify-center items-center gap-1.5">
+                          {isProcessing ? <Loader2 className="w-3 h-3 animate-spin"/> : <CheckCircle2 className="w-3 h-3"/>} Confirmar
+                        </button>
+                        <button onClick={() => handleDiscardDraftIA(d.id)} className="p-2 bg-slate-700 text-slate-400 hover:text-rose-400 rounded-lg transition"><Trash2 className="w-4 h-4"/></button>
+                      </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="text-center opacity-60 py-8">
-                  <FileText className="w-10 h-10 mx-auto text-slate-300 mb-4" />
-                  <p className="text-xs font-black text-slate-500 uppercase tracking-widest">Sin Borradores</p>
-                  <p className="text-[10px] text-slate-400 mt-2 font-bold px-4">Sube un PDF o sincroniza el correo para que la IA trabaje por ti.</p>
+                <div className="text-center opacity-60 py-6">
+                  <FileText className="w-8 h-8 mx-auto text-slate-500 mb-2" />
+                  <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Bandeja Vacía</p>
                 </div>
               )}
             </div>
@@ -744,28 +719,69 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         </aside>
       </div>
 
-      {/* MODALES */}
+      {/* MODAL AGRUPACIÓN COMPACTO */}
       <AnimatePresence>
-        {isExportModalOpen && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex justify-center items-center p-4 bg-slate-900/80 backdrop-blur-md">
-            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} className="bg-white w-full max-w-sm rounded-[3rem] p-8 shadow-2xl relative z-10 border border-slate-100">
-              <h3 className="text-2xl font-black text-slate-800 mb-1 tracking-tighter">Exportar</h3>
-              <p className="text-[10px] text-slate-400 font-black uppercase tracking-[0.2em] mb-8">Generar Excel para Gestoría</p>
-              <div className="space-y-6">
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2 block mb-2">Año Fiscal</label>
-                  <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-base font-black outline-none focus:ring-2 ring-indigo-200" />
+        {selectedGroup && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[200] flex justify-center items-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} className="bg-white w-full max-w-lg rounded-3xl p-6 shadow-2xl relative flex flex-col max-h-[90vh]">
+              <button onClick={() => setSelectedGroup(null)} className="absolute top-4 right-4 p-2 bg-slate-100 rounded-full text-slate-500 hover:bg-slate-200 transition"><X className="w-4 h-4"/></button>
+              
+              <div className="border-b border-slate-100 pb-4 mb-4">
+                <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-widest mb-1">Cierre Manual</p>
+                <h3 className="text-xl font-bold text-slate-800 truncate pr-8">{selectedGroup.label}</h3>
+              </div>
+              
+              <div className="flex justify-between items-center mb-2 px-1">
+                <span className="text-xs font-medium text-slate-500">{modalForm.selectedAlbs.length} seleccionados</span>
+                <button onClick={() => { const allIds = selectedGroup.ids; setModalForm(p => ({...p, selectedAlbs: p.selectedAlbs.length === allIds.length ? [] : allIds })) }} className="text-[10px] font-bold uppercase text-indigo-600 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100 transition">
+                  {modalForm.selectedAlbs.length === selectedGroup.ids.length ? 'Desmarcar' : 'Marcar Todos'}
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-50 rounded-xl p-2 border border-slate-200 space-y-1">
+                {(albaranesSeguros).filter(a => selectedGroup.ids.includes(a.id)).map(a => (
+                  <label key={a.id} className={cn("flex justify-between items-center p-2.5 rounded-lg cursor-pointer transition border", modalForm.selectedAlbs.includes(a.id) ? "bg-white border-indigo-300 shadow-sm" : "bg-transparent border-transparent hover:bg-white hover:border-slate-200")}>
+                    <div className="flex items-center gap-3">
+                      <input type="checkbox" checked={modalForm.selectedAlbs.includes(a.id)} onChange={(e) => { const newSelected = e.target.checked ? [...modalForm.selectedAlbs, a.id] : modalForm.selectedAlbs.filter(id => id !== a.id); setModalForm({ ...modalForm, selectedAlbs: newSelected }); }} className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 cursor-pointer accent-indigo-600" />
+                      <div>
+                        <p className="font-bold text-slate-800 text-xs">{a.date}</p>
+                        <p className="text-[9px] font-medium text-slate-400 mt-0.5">Ref: {a.num || 'S/N'}</p>
+                      </div>
+                    </div>
+                    <p className="font-bold text-slate-900 text-sm">{Num.fmt(a.total)}</p>
+                  </label>
+                ))}
+              </div>
+              
+              <div className="mt-4 space-y-4">
+                <div className="flex items-center justify-between bg-slate-900 p-4 rounded-xl text-white">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Total Factura</span>
+                  <span className="text-2xl font-black text-emerald-400">{Num.fmt(modalForm.selectedAlbs.reduce((acc, id) => { const alb = albaranesSeguros.find(a => a.id === id); return acc + (Num.parse(alb?.total) || 0); }, 0))}</span>
                 </div>
-                <div>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2 block mb-2">Trimestre</label>
-                  <div className="grid grid-cols-4 gap-2">
-                    {[1, 2, 3, 4].map(q => (<button key={q} onClick={() => setExportQuarter(q)} className={cn("py-4 rounded-2xl text-xs font-black transition", exportQuarter === q ? "bg-indigo-600 text-white shadow-lg" : "bg-slate-50 text-slate-500 border border-slate-200 hover:bg-slate-100")}>Q{q}</button>))}
+                
+                <div className="grid grid-cols-2 gap-3">
+                  {mode === 'socio' ? (
+                    <div>
+                      <label className="text-[9px] font-bold text-slate-500 uppercase ml-1 block mb-1">Responsable</label>
+                      <select value={modalForm.num.startsWith('SOCIO-') ? modalForm.num.split('-')[1] : ''} onChange={(e) => { const socio = e.target.value; setModalForm({ ...modalForm, num: `LIQ-${socio}-${modalForm.date.replace(/-/g,'')}` }); setSelectedGroup(prev => prev ? { ...prev, label: socio } : null); }} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 outline-none focus:border-indigo-400">
+                        <option value="">-- Socio --</option>{SOCIOS_REALES_NAMES.map(p => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="text-[9px] font-bold text-slate-500 uppercase ml-1 block mb-1">Nº Oficial</label>
+                      <input type="text" value={modalForm.num} onChange={(e) => setModalForm({ ...modalForm, num: e.target.value })} placeholder="Ej: F-2026/012" className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 outline-none focus:border-indigo-400" />
+                    </div>
+                  )}
+                  <div>
+                    <label className="text-[9px] font-bold text-slate-500 uppercase ml-1 block mb-1">Emisión</label>
+                    <input type="date" value={modalForm.date} onChange={(e) => setModalForm({ ...modalForm, date: e.target.value })} className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 outline-none focus:border-indigo-400" />
                   </div>
                 </div>
-                <div className="pt-4 border-t border-slate-100">
-                  <button onClick={handleExportGestoria} className="w-full bg-emerald-600 text-white py-5 rounded-[2rem] font-black text-xs uppercase tracking-widest shadow-xl shadow-emerald-200 hover:bg-emerald-500 active:scale-95 transition flex justify-center items-center gap-2"><Download className="w-4 h-4" /> DESCARGAR EXCEL</button>
-                  <button onClick={() => setIsExportModalOpen(false)} className="w-full text-slate-400 text-[11px] font-black uppercase tracking-widest py-4 hover:text-slate-600 mt-2 transition">Cancelar</button>
-                </div>
+                
+                <button onClick={handleConfirmManualInvoice} disabled={modalForm.selectedAlbs.length === 0 || isProcessing} className="w-full bg-indigo-600 text-white py-3.5 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-50 transition flex justify-center items-center gap-2">
+                  {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4"/>} Crear Factura
+                </button>
               </div>
             </motion.div>
           </motion.div>
@@ -773,67 +789,27 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       </AnimatePresence>
 
       <AnimatePresence>
-        {selectedGroup && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[200] flex justify-center items-center p-4 sm:p-6 bg-slate-900/80 backdrop-blur-md">
-            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} className="bg-white w-full max-w-3xl rounded-[3rem] p-6 md:p-10 shadow-2xl relative z-10 flex flex-col max-h-[90vh] border border-slate-100">
-              <button onClick={() => setSelectedGroup(null)} className="absolute top-6 right-6 p-3 bg-slate-50 rounded-full text-slate-500 hover:bg-slate-200 hover:text-slate-800 transition hover:rotate-90"><X className="w-5 h-5"/></button>
-              
-              <div className="border-b border-slate-100 pb-6 mb-6 flex flex-col md:flex-row justify-between md:items-end gap-4 pr-12">
+        {isExportModalOpen && (
+          // ... (El modal de exportación se mantiene igual que en tu código original)
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex justify-center items-center p-4 bg-slate-900/80 backdrop-blur-md">
+            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative z-10 border border-slate-100">
+              <h3 className="text-xl font-bold text-slate-800 mb-1">Exportar</h3>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-6">Excel para Gestoría</p>
+              <div className="space-y-4">
                 <div>
-                  <p className="text-[11px] font-black text-indigo-500 uppercase tracking-[0.2em] mb-2 flex items-center gap-2"><Layers className="w-4 h-4"/> Agrupación Manual</p>
-                  <h3 className="text-3xl md:text-4xl font-black text-slate-800 tracking-tighter">{selectedGroup.label}</h3>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase ml-1 block mb-1">Año Fiscal</label>
+                  <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:border-indigo-400" />
                 </div>
-                <button onClick={() => { const allIds = selectedGroup.ids; setModalForm(p => ({...p, selectedAlbs: p.selectedAlbs.length === allIds.length ? [] : allIds })) }} className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-600 bg-slate-100 border border-slate-200 px-4 py-3 rounded-xl hover:bg-slate-200 transition shrink-0"><CheckSquare className="w-4 h-4" />{modalForm.selectedAlbs.length === selectedGroup.ids.length ? 'Desmarcar Todos' : 'Marcar Todos'}</button>
-              </div>
-              
-              <div className="space-y-3 flex-1 overflow-y-auto pr-2 custom-scrollbar bg-slate-50/50 rounded-[2rem] p-6 border border-slate-100">
-                {(albaranesSeguros).filter(a => selectedGroup.ids.includes(a.id)).map(a => (
-                  <label key={a.id} className={cn("flex justify-between items-center p-5 rounded-2xl cursor-pointer transition-all border-2", modalForm.selectedAlbs.includes(a.id) ? "bg-white border-indigo-400 shadow-md" : "bg-transparent border-transparent hover:bg-white hover:border-slate-200")}>
-                    <div className="flex items-center gap-5">
-                      <div className="relative flex items-center justify-center"><input type="checkbox" checked={modalForm.selectedAlbs.includes(a.id)} onChange={(e) => { const newSelected = e.target.checked ? [...modalForm.selectedAlbs, a.id] : modalForm.selectedAlbs.filter(id => id !== a.id); setModalForm({ ...modalForm, selectedAlbs: newSelected }); }} className="w-6 h-6 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500 cursor-pointer accent-indigo-600" /></div>
-                      <div>
-                        <p className="font-black text-slate-800 text-base">{a.date}</p>
-                        <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mt-1">Ref: <span className="font-mono text-slate-500">{a.num || 'S/N'}</span></p>
-                      </div>
-                    </div>
-                    <p className="font-black text-slate-900 text-2xl tracking-tighter">{Num.fmt(a.total)}</p>
-                  </label>
-                ))}
-              </div>
-              
-              <div className="mt-8 space-y-6">
-                <div className="flex flex-col md:flex-row items-center justify-between bg-slate-900 p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden">
-                  <div className="absolute right-0 top-0 w-32 h-32 bg-indigo-500 rounded-full blur-3xl opacity-20"></div>
-                  <div className="relative z-10 w-full text-center md:text-left mb-4 md:mb-0">
-                    <span className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400 block mb-2">Total Consolidado</span>
-                    <span className="text-xs text-indigo-300 font-bold bg-indigo-500/20 border border-indigo-500/30 px-3 py-1.5 rounded-xl">{modalForm.selectedAlbs.length} albaranes sumados</span>
-                  </div>
-                  <span className="text-5xl md:text-6xl font-black text-emerald-400 tracking-tighter relative z-10">{Num.fmt(modalForm.selectedAlbs.reduce((acc, id) => { const alb = albaranesSeguros.find(a => a.id === id); return acc + (Num.parse(alb?.total) || 0); }, 0))}</span>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {mode === 'socio' ? (
-                    <div>
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2 block mb-2">Responsable (Socio)</label>
-                      <select value={modalForm.num.startsWith('SOCIO-') ? modalForm.num.split('-')[1] : ''} onChange={(e) => { const socio = e.target.value; setModalForm({ ...modalForm, num: `LIQ-${socio}-${modalForm.date.replace(/-/g,'')}` }); setSelectedGroup(prev => prev ? { ...prev, label: socio } : null); }} className="w-full p-5 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-800 outline-none focus:bg-white focus:border-indigo-400 transition cursor-pointer">
-                        <option value="">-- Selecciona --</option>{SOCIOS_REALES_NAMES.map(p => <option key={p} value={p}>{p}</option>)}
-                      </select>
-                    </div>
-                  ) : (
-                    <div>
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2 block mb-2">Nº Factura Oficial</label>
-                      <input type="text" value={modalForm.num} onChange={(e) => setModalForm({ ...modalForm, num: e.target.value })} placeholder="Ej: F-2026/012" className="w-full p-5 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-800 outline-none focus:bg-white focus:border-indigo-400 transition" />
-                    </div>
-                  )}
-                  <div>
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2 block mb-2">Fecha Emisión</label>
-                    <input type="date" value={modalForm.date} onChange={(e) => setModalForm({ ...modalForm, date: e.target.value })} className="w-full p-5 bg-slate-50 border-2 border-slate-100 rounded-2xl font-black text-slate-800 outline-none focus:bg-white focus:border-indigo-400 transition cursor-pointer" />
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase ml-1 block mb-1">Trimestre</label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[1, 2, 3, 4].map(q => (<button key={q} onClick={() => setExportQuarter(q)} className={cn("py-2 rounded-lg text-xs font-bold transition", exportQuarter === q ? "bg-indigo-600 text-white shadow" : "bg-slate-100 text-slate-500 hover:bg-slate-200")}>Q{q}</button>))}
                   </div>
                 </div>
-                
-                <button onClick={handleConfirmManualInvoice} disabled={modalForm.selectedAlbs.length === 0 || isProcessing} className="w-full bg-indigo-600 text-white py-6 rounded-[2.5rem] font-black text-sm uppercase tracking-[0.2em] shadow-xl shadow-indigo-200 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition flex justify-center items-center gap-3">
-                  {isProcessing ? <Loader2 className="w-6 h-6 animate-spin" /> : <CheckCircle2 className="w-6 h-6"/>} CERRAR Y FACTURAR
-                </button>
+                <div className="pt-4 border-t border-slate-100 flex flex-col gap-2">
+                  <button onClick={handleExportGestoria} className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold text-xs uppercase tracking-widest hover:bg-emerald-700 transition flex justify-center items-center gap-2"><Download className="w-4 h-4" /> Descargar Excel</button>
+                  <button onClick={() => setIsExportModalOpen(false)} className="w-full text-slate-500 text-xs font-bold py-2 hover:bg-slate-100 rounded-xl transition">Cancelar</button>
+                </div>
               </div>
             </motion.div>
           </motion.div>
