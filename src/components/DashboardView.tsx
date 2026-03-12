@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { 
   LayoutDashboard, Wallet, ArrowUpRight, ArrowDownRight, AlertCircle, 
   TrendingUp, Building2, Hotel, ShoppingBag, Users, SplitSquareHorizontal, 
-  ChevronLeft, ChevronRight, CalendarDays, CheckCircle2, ShieldCheck, Mail, Loader2
+  ChevronLeft, ChevronRight, CheckCircle2, ShieldCheck, Mail, Loader2
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Num } from '../services/engine';
@@ -36,14 +36,14 @@ export const DashboardView = ({ data }: { data: AppData }) => {
   const [generalEmails, setGeneralEmails] = useState<any[]>([]);
   const [loadingEmails, setLoadingEmails] = useState(true);
 
-  // Safeguards de colecciones
-  const cierres = data.cierres ?? [];
-  const albaranes = data.albaranes ?? [];
-  const facturas = data.facturas ?? [];
-  const gastosFijos = data.gastos_fijos ?? [];
-  const controlPagos = data.control_pagos ?? {};
-  const ingredientes = data.ingredientes ?? [];
-  const emailConfigurado = data.config?.emailGeneral || 'No configurado';
+  // Safeguards de colecciones (Protección extrema anti-crash)
+  const cierres = data?.cierres ?? [];
+  const albaranes = data?.albaranes ?? [];
+  const facturas = data?.facturas ?? [];
+  const gastosFijos = data?.gastos_fijos ?? [];
+  const controlPagos = data?.control_pagos ?? {};
+  const ingredientes = data?.ingredientes ?? [];
+  const emailConfigurado = data?.config?.emailGeneral || 'No configurado';
 
   // ==========================================
   // 📧 EFECTO: CARGAR CORREOS GENERALES
@@ -52,7 +52,6 @@ export const DashboardView = ({ data }: { data: AppData }) => {
     const fetchGeneralEmails = async () => {
       setLoadingEmails(true);
       try {
-        // En n8n tendrás que enviar los correos a una tabla llamada 'inbox_general' (por ejemplo)
         const { data: correos, error } = await supabase
           .from('inbox_general')
           .select('*')
@@ -105,7 +104,7 @@ export const DashboardView = ({ data }: { data: AppData }) => {
   }, [viewMode, selectedMonth, selectedQuarter, selectedYear]);
 
   // ==========================================
-  // 🧠 MOTOR DE CÁLCULO FINANCIERO (Mejorado por IA)
+  // 🧠 MOTOR DE CÁLCULO FINANCIERO BLINDADO
   // ==========================================
   const calculateStatsForPeriod = (month: number, quarter: number, year: number, mode: string) => {
     const breakdown: Record<string, { income: number; expenses: number; profit: number }> = {
@@ -124,35 +123,42 @@ export const DashboardView = ({ data }: { data: AppData }) => {
     else if (mode === 'quarter') { const start = (quarter - 1) * 3; monthsToCalc = [start, start + 1, start + 2]; } 
     else { monthsToCalc = [0,1,2,3,4,5,6,7,8,9,10,11]; }
 
-    const isDateInPeriod = (dateStr: string) => {
+    const isDateInPeriod = (dateStr?: string) => {
       if (!dateStr) return false;
-      const d = new Date(dateStr);
-      if (d.getFullYear() !== year) return false;
-      if (mode === 'month') return d.getMonth() === month;
-      if (mode === 'quarter') return Math.floor(d.getMonth() / 3) + 1 === quarter;
-      return true;
+      try {
+        const d = new Date(dateStr);
+        if (d.getFullYear() !== year) return false;
+        if (mode === 'month') return d.getMonth() === month;
+        if (mode === 'quarter') return Math.floor(d.getMonth() / 3) + 1 === quarter;
+        return true;
+      } catch (e) {
+        return false;
+      }
     };
 
     cierres.forEach((c: any) => {
-      if (isDateInPeriod(c.date)) {
-        const unit = c.unidad_negocio || 'REST';
-        const t = Num.parse(c.totalVenta);
+      if (isDateInPeriod(c?.date)) {
+        const unit = c?.unidad_negocio || 'REST';
+        const t = Num.parse(c?.totalVenta || 0);
         if (breakdown[unit] && unit !== 'DLV') breakdown[unit].income += t;
         agg.ingresos.total += t;
       }
     });
 
     facturas.forEach((f: any) => {
-      if (isDateInPeriod(f.date) && f.status !== 'draft') {
-        const tRaw = Num.parse(f.total);
-        if (f.cliente && f.cliente !== 'Z DIARIO' && f.cliente.trim() !== '') {
-          const unit = f.unidad_negocio || 'DLV';
-          if (breakdown[unit]) breakdown[unit].income += tRaw; // Permite facturas de abono (negativas)
+      if (isDateInPeriod(f?.date) && f?.status !== 'draft') {
+        const tRaw = Num.parse(f?.total || 0);
+        const clienteStr = String(f?.cliente || '').trim();
+        
+        if (clienteStr && clienteStr !== 'Z DIARIO') {
+          const unit = f?.unidad_negocio || 'DLV';
+          if (breakdown[unit]) breakdown[unit].income += tRaw; 
           agg.ingresos.total += tRaw;
         } else {
-          const noTieneAlbaranes = !f.albaranIdsArr || f.albaranIdsArr.length === 0;
+          // BLINDAJE: Verificamos que albaranIdsArr sea un array válido
+          const noTieneAlbaranes = !Array.isArray(f?.albaranIdsArr) || f.albaranIdsArr.length === 0;
           if (noTieneAlbaranes) {
-            const unit = f.unidad_negocio || 'REST';
+            const unit = f?.unidad_negocio || 'REST';
             const t = Math.abs(tRaw);
             if (breakdown[unit]) breakdown[unit].expenses += t;
             agg.gastos.total += t;
@@ -163,16 +169,16 @@ export const DashboardView = ({ data }: { data: AppData }) => {
     });
 
     albaranes.forEach((a: any) => {
-      if (isDateInPeriod(a.date)) {
-        const unit = a.unidad_negocio || a.unitId || 'REST';
-        const t = Num.parse(a.total);
+      if (isDateInPeriod(a?.date)) {
+        const unit = a?.unidad_negocio || a?.unitId || 'REST';
+        const t = Num.parse(a?.total || 0);
         if (breakdown[unit]) breakdown[unit].expenses += t;
         agg.gastos.total += t;
 
-        const hasBebida = (a.items || []).some((i:any) => {
-          const cat = String(i.cat || i.category || '').toLowerCase();
+        const hasBebida = Array.isArray(a?.items) && a.items.some((i:any) => {
+          const cat = String(i?.cat || i?.category || '').toLowerCase();
           if (cat.includes('bebida') || cat.includes('bar') || cat.includes('alcohol')) return true;
-          return i.rate === 21; 
+          return i?.rate === 21; 
         });
         if (hasBebida) agg.gastos.bebida += t; else agg.gastos.comida += t;
       }
@@ -182,13 +188,13 @@ export const DashboardView = ({ data }: { data: AppData }) => {
       const currentMonthKey = `pagos_${year}_${m + 1}`;
       const pagadosIds = controlPagos[currentMonthKey] || [];
       gastosFijos.forEach((g: any) => {
-        if (g.active !== false && pagadosIds.includes(g.id)) {
-          const unit = g.unitId || 'REST';
-          const amount = parseFloat(g.amount as any) || 0;
+        if (g?.active !== false && Array.isArray(pagadosIds) && pagadosIds.includes(g?.id)) {
+          const unit = g?.unitId || 'REST';
+          const amount = parseFloat(g?.amount as any) || 0;
           if (breakdown[unit]) breakdown[unit].expenses += amount;
           agg.gastos.total += amount;
 
-          const cat = String(g.category ?? g.cat ?? '').toLowerCase();
+          const cat = String(g?.category ?? g?.cat ?? '').toLowerCase();
           if (cat.includes('nómina') || cat.includes('personal')) agg.gastos.personal += amount;
           else agg.gastos.estructura += amount;
         }
@@ -206,14 +212,12 @@ export const DashboardView = ({ data }: { data: AppData }) => {
     return { breakdown, aggregated: agg };
   };
 
-  // Cálculo del periodo actual
   const dashboardStats = useMemo(() => calculateStatsForPeriod(selectedMonth, selectedQuarter, selectedYear, viewMode), 
     [cierres, albaranes, facturas, gastosFijos, controlPagos, viewMode, selectedMonth, selectedQuarter, selectedYear]
   );
   const stats = dashboardStats.aggregated;
   const unitBreakdown = dashboardStats.breakdown;
 
-  // Cálculo del periodo ANTERIOR (Para ver si crecemos o bajamos)
   const previousPeriodStats = useMemo(() => {
     let pMonth = selectedMonth, pQuarter = selectedQuarter, pYear = selectedYear;
     if (viewMode === 'month') { pMonth -= 1; if (pMonth < 0) { pMonth = 11; pYear -= 1; } }
@@ -230,10 +234,11 @@ export const DashboardView = ({ data }: { data: AppData }) => {
       const daysInMonth = new Date(selectedYear, selectedMonth + 1, 0).getDate();
       const days = Array.from({ length: daysInMonth }, (_, i) => ({ name: String(i + 1).padStart(2, '0'), venta: 0 }));
       cierres.forEach(c => {
+        if (!c?.date) return;
         const d = new Date(c.date);
         if (d.getFullYear() === selectedYear && d.getMonth() === selectedMonth) {
           const dayIdx = d.getDate() - 1;
-          if (days[dayIdx]) days[dayIdx].venta += Num.parse(c.totalVenta);
+          if (days[dayIdx]) days[dayIdx].venta += Num.parse(c.totalVenta || 0);
         }
       });
       return days;
@@ -242,17 +247,17 @@ export const DashboardView = ({ data }: { data: AppData }) => {
       if (viewMode === 'quarter') { startMonth = (selectedQuarter - 1) * 3; numMonths = 3; }
       const months = Array.from({ length: numMonths }, (_, i) => ({ name: MONTHS_SHORT[startMonth + i], venta: 0 }));
       cierres.forEach(c => {
+        if (!c?.date) return;
         const d = new Date(c.date);
         if (d.getFullYear() === selectedYear && d.getMonth() >= startMonth && d.getMonth() < startMonth + numMonths) {
           const mIdx = d.getMonth() - startMonth;
-          if (months[mIdx]) months[mIdx].venta += Num.parse(c.totalVenta);
+          if (months[mIdx]) months[mIdx].venta += Num.parse(c.totalVenta || 0);
         }
       });
       return months;
     }
   }, [cierres, viewMode, selectedMonth, selectedQuarter, selectedYear]);
 
-  // Utilidades para KPIs
   const renderTrend = (current: number, previous: number) => {
     if (previous === 0) return null;
     const pct = ((current - previous) / Math.abs(previous)) * 100;
@@ -267,7 +272,7 @@ export const DashboardView = ({ data }: { data: AppData }) => {
 
   const foodCostPct  = Number.isFinite(stats.ratios.foodCost) ? stats.ratios.foodCost : 0;
   const lowStock = ingredientes.filter(i => (i?.stock ?? 0) <= (i?.min ?? 0));
-  const facturasPendientes = facturas.filter((f: any) => !f.paid);
+  const facturasPendientes = facturas.filter((f: any) => !f?.paid);
 
   return (
     <div className="space-y-6 animate-fade-in pb-24">
@@ -326,16 +331,16 @@ export const DashboardView = ({ data }: { data: AppData }) => {
         </div>
       </div>
 
-      {/* 📈 GRÁFICO DE VENTAS */}
-      <div className="bg-white p-6 md:p-8 rounded-[3rem] border border-slate-100 shadow-sm">
+      {/* 📈 GRÁFICO DE VENTAS (Con llave de seguridad para evitar Crash de Recharts) */}
+      <div className="bg-white p-6 md:p-8 rounded-[3rem] border border-slate-100 shadow-sm min-w-0">
         <div className="flex justify-between items-center mb-8">
           <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
             <TrendingUp className="w-5 h-5 text-indigo-500" />
             Evolución de Ventas ({viewMode === 'month' ? 'Días' : 'Meses'})
           </h3>
         </div>
-        <div className="h-[280px] w-full">
-          <ResponsiveContainer width="100%" height="100%">
+        <div className="h-[280px] w-full min-w-0">
+          <ResponsiveContainer width="100%" height="100%" key={`${viewMode}-${selectedMonth}-${selectedQuarter}-${selectedYear}`}>
             <AreaChart data={chartData}>
               <defs>
                 <linearGradient id="colorVenta" x1="0" y1="0" x2="0" y2="1">
