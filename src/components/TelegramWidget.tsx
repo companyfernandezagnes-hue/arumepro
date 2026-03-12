@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MessageCircle, Send, X, Bot, Sparkles, Loader2, BarChart3, Mail, Building2 } from 'lucide-react';
+import { MessageCircle, Send, X, Bot, Sparkles, Loader2, BarChart3, Mail, Building2, WifiOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '../lib/utils';
 
@@ -14,6 +14,7 @@ type ChatMessage = {
   text: string;
   sender: 'user' | 'system';
   time: string;
+  isQueue?: boolean;
 };
 
 export const TelegramWidget = ({ currentModule, telegramToken, chatId }: TelegramWidgetProps) => {
@@ -21,30 +22,48 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
   const [message, setMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [history, setHistory] = useState<ChatMessage[]>([]);
+  const [pendingQueue, setPendingQueue] = useState<string[]>([]);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const lastPingRef = useRef<{module?: string; ts?: number}>({});
+  const pingAbortRef = useRef<AbortController | null>(null);
 
   // 1. Auto-scroll hacia abajo
   useEffect(() => {
-    if (messagesEndRef.current) {
+    if (messagesEndRef.current && isOpen) {
       messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [history, isOpen]);
 
-  // 2. Cerrar con la tecla ESCAPE
+  // 2. Foco automático y cierre con Escape
   useEffect(() => {
+    if (isOpen) {
+      setTimeout(() => inputRef.current?.focus(), 50);
+    }
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setIsOpen(false);
     };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
-  }, []);
+  }, [isOpen]);
 
-  // 3. RASTREADOR SILENCIOSO DE PESTAÑAS (Carril separado para no bloquear la UI)
+  // 3. RASTREADOR SILENCIOSO DE PESTAÑAS (Con Debounce, deduplicación y comprobación de visibilidad)
   useEffect(() => {
-    if (!currentModule || !telegramToken || !chatId) return;
-    
-    const sendSilentPing = async () => {
+    if (!telegramToken || !chatId || !currentModule) return;
+    if (document.visibilityState !== 'visible') return;
+
+    // Dedupe si es el mismo módulo en menos de 60 segundos
+    const now = Date.now();
+    if (lastPingRef.current.module === currentModule && now - (lastPingRef.current.ts || 0) < 60_000) {
+      return;
+    }
+
+    const controller = new AbortController();
+    if (pingAbortRef.current) pingAbortRef.current.abort();
+    pingAbortRef.current = controller;
+
+    const t = setTimeout(async () => {
       try {
         await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
           method: 'POST',
@@ -54,27 +73,61 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
             text: `🔄 *Navegación*\nEl usuario está ahora en el módulo: *${currentModule}*`,
             parse_mode: 'Markdown',
             disable_notification: true 
-          })
+          }),
+          signal: controller.signal
         });
+        lastPingRef.current = { module: currentModule, ts: Date.now() };
       } catch (error) {
-        // Ignoramos silenciosamente si falla la red al rastrear
+        // Silencioso. El ping no debe romper la UX.
       }
+    }, 2500); // 2.5s debounce para no spamear si navega rápido
+
+    return () => {
+      clearTimeout(t);
+      controller.abort();
     };
-    
-    sendSilentPing();
   }, [currentModule, telegramToken, chatId]);
 
-  // 4. ENVÍO DE MENSAJES DEL USUARIO
+  // 4. COLA OFFLINE (Reconecta y envía)
+  useEffect(() => {
+    const onOnline = async () => {
+      if (pendingQueue.length > 0) {
+        addSystemMessage('🌐 Conexión restaurada. Enviando mensajes pendientes...');
+        for (const txt of pendingQueue) {
+          await handleSendMessage(txt);
+          await new Promise(r => setTimeout(r, 500)); // Pequeño respiro entre mensajes
+        }
+        setPendingQueue([]);
+      }
+    };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [pendingQueue]);
+
+  // 5. ENVÍO SEGURO DE MENSAJES (Manejando Rate Limits de Telegram)
   const addSystemMessage = (text: string) => {
-    setHistory(prev => [...prev, { id: Date.now().toString(), text, sender: 'system', time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }]);
+    setHistory(prev => [...prev, { id: Date.now().toString() + Math.random(), text, sender: 'system', time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }]);
+  };
+
+  const safeSend = async (texto: string) => {
+    if (!texto.trim() || isSending) return;
+
+    if (!navigator.onLine) {
+      setPendingQueue(q => [...q, texto]);
+      setHistory(prev => [...prev, { id: Date.now().toString(), text, sender: 'user', time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), isQueue: true }]);
+      addSystemMessage('📥 Sin conexión. Mensaje puesto en cola.');
+      setMessage('');
+      return;
+    }
+    await handleSendMessage(texto);
   };
 
   const handleSendMessage = async (texto: string) => {
-    if (!telegramToken || !chatId || !texto.trim() || isSending) return;
+    if (!telegramToken || !chatId) return;
     
     setIsSending(true);
-    setHistory(prev => [...prev, { id: Date.now().toString(), text, sender: 'user', time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }]);
-    setMessage(''); // Vaciamos el input inmediatamente para dar sensación de rapidez
+    setHistory(prev => [...prev, { id: Date.now().toString() + Math.random(), text, sender: 'user', time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }]);
+    setMessage(''); 
     
     try {
       const url = `https://api.telegram.org/bot${telegramToken}/sendMessage`;
@@ -83,27 +136,39 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: chatId,
+          // CUIDADO CON EL MARKDOWN: Si el usuario escribe caracteres raros, Telegram falla.
+          // Mandamos el mensaje "en crudo" dentro de comillas para evitar errores de parseo.
           text: `🤖 *Comando desde la App (Módulo: ${currentModule})*\n\n💬 "${texto}"`,
           parse_mode: 'Markdown'
         })
       });
       
+      if (response.status === 429) {
+        throw new Error("429"); // Rate Limit de Telegram
+      }
+      
       if (!response.ok) throw new Error("Fallo en la API de Telegram");
 
       setTimeout(() => addSystemMessage("✅ Comando entregado a n8n."), 400);
-    } catch (error) {
+
+    } catch (error: any) {
       console.error("Error enviando a Telegram", error);
-      addSystemMessage("❌ Error de red. No se pudo contactar con n8n.");
+      if (error.message === "429") {
+        addSystemMessage("⏳ Telegram está limitando los mensajes. Espera un momento.");
+      } else {
+        addSystemMessage("❌ Error de red. No se pudo contactar con n8n.");
+      }
     } finally {
       setIsSending(false);
+      setTimeout(() => inputRef.current?.focus(), 100);
     }
   };
 
-  // Comandos rápidos predefinidos con iconos
+  // Comandos rápidos predefinidos
   const quickActions = [
     { label: "Saldo Banco", icon: Building2, text: "Dime el saldo del banco" },
-    { label: "Sincronizar Correos", icon: Mail, text: "Sincroniza las facturas IMAP" },
-    { label: "Resumen Ventas", icon: BarChart3, text: "Dame un resumen de ventas de hoy" }
+    { label: "Sync Correos", icon: Mail, text: "Sincroniza las facturas IMAP" },
+    { label: "Ventas Hoy", icon: BarChart3, text: "Dame un resumen de ventas de hoy" }
   ];
 
   if (!telegramToken || !chatId) return null;
@@ -128,11 +193,21 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
                 <div>
                   <span className="font-black text-base block leading-none">Asistente Arume</span>
                   <span className="text-[10px] text-blue-200 font-bold uppercase tracking-widest flex items-center gap-1.5 mt-1.5">
-                    <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse shadow-[0_0_10px_rgba(52,211,153,0.8)]"></span> n8n Online
+                    {navigator.onLine ? (
+                      <><span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse shadow-[0_0_10px_rgba(52,211,153,0.8)]"></span> n8n Online</>
+                    ) : (
+                      <><WifiOff className="w-3 h-3 text-rose-300" /> Fuera de línea</>
+                    )}
                   </span>
                 </div>
               </div>
-              <button onClick={() => setIsOpen(false)} className="hover:rotate-90 transition-transform bg-white/10 hover:bg-white/20 p-2.5 rounded-full"><X className="w-4 h-4" /></button>
+              <button 
+                onClick={() => setIsOpen(false)} 
+                aria-label="Cerrar chat del asistente"
+                className="hover:rotate-90 transition-transform bg-white/10 hover:bg-white/20 p-2.5 rounded-full"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
             
             {/* CUERPO DEL CHAT (HISTORIAL) */}
@@ -153,11 +228,14 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
                     initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
                     key={msg.id} 
                     className={cn("max-w-[85%] rounded-2xl p-3.5 text-sm shadow-sm relative", 
-                      msg.sender === 'user' ? "bg-indigo-600 text-white self-end rounded-tr-sm" : "bg-white border border-slate-100 text-slate-700 self-start rounded-tl-sm"
+                      msg.sender === 'user' ? "bg-indigo-600 text-white self-end rounded-tr-sm" : "bg-white border border-slate-100 text-slate-700 self-start rounded-tl-sm",
+                      msg.isQueue ? "opacity-70 border-dashed border border-white" : ""
                     )}
                   >
                     <p className="font-medium text-[13px] leading-snug">{msg.text}</p>
-                    <span className={cn("text-[9px] font-bold block mt-2 text-right", msg.sender === 'user' ? "text-indigo-200" : "text-slate-400")}>{msg.time}</span>
+                    <span className={cn("text-[9px] font-bold block mt-2 text-right", msg.sender === 'user' ? "text-indigo-200" : "text-slate-400")}>
+                      {msg.isQueue ? '⏳ En cola' : msg.time}
+                    </span>
                   </motion.div>
                 ))
               )}
@@ -176,8 +254,9 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
               {quickActions.map((action, idx) => (
                 <button 
                   key={idx} 
-                  onClick={() => handleSendMessage(action.text)}
-                  className="whitespace-nowrap px-4 py-2 bg-slate-50 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 text-[10px] font-black rounded-xl transition-colors border border-slate-200 hover:border-indigo-200 flex items-center gap-1.5"
+                  onClick={() => safeSend(action.text)}
+                  disabled={isSending}
+                  className="whitespace-nowrap px-4 py-2 bg-slate-50 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 text-[10px] font-black rounded-xl transition-colors border border-slate-200 hover:border-indigo-200 flex items-center gap-1.5 disabled:opacity-50"
                 >
                   <action.icon className="w-3 h-3" />
                   {action.label}
@@ -188,16 +267,24 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
             {/* INPUT DE MENSAJE */}
             <div className="p-3.5 bg-white border-t border-slate-100 flex gap-2 shrink-0">
               <input 
+                ref={inputRef}
                 type="text" 
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage(message)}
-                placeholder="Escribe a n8n..." 
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    safeSend(message);
+                  }
+                }}
+                aria-label="Escribir mensaje a Asistente Arume"
+                placeholder={navigator.onLine ? "Escribe a n8n..." : "Sin red (se enviará luego)..."} 
                 className="flex-1 bg-slate-50 text-sm font-bold rounded-2xl px-4 py-3.5 outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500 text-slate-700 border border-transparent focus:border-indigo-100 transition-all"
               />
               <button 
-                onClick={() => handleSendMessage(message)}
+                onClick={() => safeSend(message)}
                 disabled={!message.trim() || isSending}
+                aria-label="Enviar mensaje"
                 className="bg-indigo-600 text-white w-12 h-12 rounded-2xl flex items-center justify-center hover:bg-indigo-700 transition-colors disabled:opacity-50 active:scale-95 shrink-0 shadow-md"
               >
                 {isSending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5 ml-1" />}
@@ -210,11 +297,19 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
       {/* BOTÓN FLOTANTE */}
       <button 
         onClick={() => setIsOpen(!isOpen)}
+        aria-label={isOpen ? "Cerrar chat del asistente" : "Abrir chat del asistente"}
+        aria-expanded={isOpen}
         className={cn(
-          "w-16 h-16 text-white rounded-[2rem] flex items-center justify-center shadow-[0_10px_40px_-10px_rgba(79,70,229,0.5)] hover:scale-110 transition-all duration-300",
+          "w-16 h-16 text-white rounded-[2rem] flex items-center justify-center shadow-[0_10px_40px_-10px_rgba(79,70,229,0.5)] hover:scale-105 transition-all duration-300 relative",
           isOpen ? "bg-slate-800 rotate-90 rounded-full" : "bg-gradient-to-tr from-indigo-600 to-blue-600"
         )}
       >
+        {pendingQueue.length > 0 && !isOpen && (
+          <span className="absolute -top-1 -right-1 flex h-4 w-4">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-4 w-4 bg-rose-500 text-[8px] font-black items-center justify-center">{pendingQueue.length}</span>
+          </span>
+        )}
         {isOpen ? <X className="w-6 h-6 -rotate-90" /> : <MessageCircle className="w-7 h-7" />}
       </button>
     </div>
