@@ -1,105 +1,115 @@
 import { AppData, Albaran } from '../types';
 import { Num, DateUtil } from './engine';
 
-// 1. Normalización SENCILLA: Solo quita mayúsculas, tildes, símbolos y el "S.L."
-export const normProv = (s?: string) => {
+/* =======================================================
+ * 🧠 1. EL DICCIONARIO DE ALIAS (Normalización Inteligente)
+ * ======================================================= */
+const ALIAS_KEY = 'arume_prov_aliases';
+
+// Recupera el diccionario de la memoria local
+export const getProvAliases = (): Record<string, string> => {
+  try { return JSON.parse(localStorage.getItem(ALIAS_KEY) || '{}'); } 
+  catch { return {}; }
+};
+
+// Enseña a la app que un nombre raro equivale a un nombre oficial
+export const saveProvAlias = (rawScannedName: string, officialName: string) => {
+  if (!rawScannedName || !officialName) return;
+  const aliases = getProvAliases();
+  const cleanRaw = basicNorm(rawScannedName);
+  
+  aliases[cleanRaw] = officialName.trim().toUpperCase();
+  localStorage.setItem(ALIAS_KEY, JSON.stringify(aliases));
+};
+
+// La Escoba: Limpia mayúsculas, tildes y morralla societaria para poder comparar
+export const basicNorm = (s?: string) => {
   if (!s) return 'desconocido';
   return s.toLowerCase()
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/\b(s\.?l\.?|s\.?a\.?|s\.?l\.?u\.?|s\.?c\.?p\.?)\b/gi, '')
+    // Añadimos palabras comunes a ignorar para que el match sea más agresivo
+    .replace(/\b(s\.?l\.?|s\.?a\.?|s\.?l\.?u\.?|s\.?c\.?p\.?|hijos de|hnos|hermanos|distribuciones|comercial|logistica)\b/gi, '')
     .replace(/[^a-z0-9]/g, '') 
     .trim();
 };
 
-// 2. Busca la factura del mismo proveedor y mes
-const findFacturaIdx = (data: AppData, prov: string, dateISO?: string) => {
-  const key = normProv(prov);
-  const yymm = (dateISO || DateUtil.today()).slice(0, 7); // Saca el "YYYY-MM"
+// Traduce el nombre escaneado al nombre oficial usando el diccionario
+export const getOfficialProvName = (rawName?: string) => {
+  if (!rawName) return 'DESCONOCIDO';
+  const cleanRaw = basicNorm(rawName);
+  const aliases = getProvAliases();
   
-  return (data.facturas || []).findIndex((f: any) =>
-    f?.tipo === 'compra' &&
-    normProv(f?.prov) === key &&
-    (f?.date || '').startsWith(yymm) &&
-    !f?.reconciled
-  );
+  if (aliases[cleanRaw]) return aliases[cleanRaw];
+  return rawName.trim().toUpperCase();
 };
 
-// Evita duplicar el mismo albarán en la factura
-const facturaHasAlb = (f: any, albId: string) =>
-  Array.isArray(f?.albaranIdsArr) && f.albaranIdsArr.includes(albId);
+/* =======================================================
+ * 🔗 2. VINCULACIÓN SEGURA DE FACTURAS Y ALBARANES
+ * ======================================================= */
 
-// 3. Función principal: Agrupa el albarán en una factura o crea una nueva
-export function upsertFacturaFromAlbaran(data: AppData, alb: Albaran) {
-  if (!Array.isArray(data.facturas)) data.facturas = [];
-
-  const idx = findFacturaIdx(data, alb.prov, alb.date);
-
-  const t = Num.parse(alb.total) || 0;
-  const b = Num.parse(alb.base)  || Num.round2(t / 1.10);
-  const i = Num.parse(alb.taxes) || Num.round2(t - b);
-
-  if (idx >= 0) {
-    // A) Ya existe factura para este mes/proveedor -> SUMAMOS
-    const F = data.facturas[idx];
-    if (!facturaHasAlb(F, alb.id)) {
-      F.total = Num.round2((Num.parse(F.total) || 0) + t);
-      F.base  = Num.round2((Num.parse(F.base)  || 0) + b);
-      F.tax   = Num.round2((Num.parse(F.tax)   || 0) + i);
-      F.albaranIdsArr = Array.from(new Set([...(F.albaranIdsArr || []), alb.id]));
-    }
-  } else {
-    // B) No existe factura -> CREAMOS UNA NUEVA
-    const newF = {
-      id: `fac-auto-${Date.now()}`,
-      tipo: 'compra',
-      num: `AUTO-${alb.num || 'SN'}`,
-      date: alb.date || DateUtil.today(),
-      prov: alb.prov, // Guardamos el nombre tal cual lo escribió el usuario
-      total: t, 
-      base: b, 
-      tax: i,
-      paid: false,
-      reconciled: false,
-      status: 'approved',
-      unidad_negocio: alb.unitId || 'REST',
-      albaranIdsArr: [alb.id],
-      source: 'auto-from-albaran',
-    } as any;
-    data.facturas.unshift(newF);
-  }
-
-  // Marcamos el albarán original como facturado
-  const ai = (data.albaranes || []).findIndex(a => a.id === alb.id);
-  if (ai >= 0) {
-    data.albaranes[ai] = { ...data.albaranes[ai], invoiced: true };
-  }
-}
-
-// 4. Función para cuando EDITAS un albarán (le cambias la fecha o proveedor)
-export function detachFromPreviousFacturaIfMoved(data: AppData, before: Albaran, after: Albaran) {
-  const sameProv = normProv(before.prov) === normProv(after.prov);
-  const sameMonth = (before.date || '').slice(0, 7) === (after.date || '').slice(0, 7);
+// Esta función se llama cuando la IA o tú confirmáis un 3-Way Match.
+// Coge la factura, coge los albaranes, los vincula y suma los importes al céntimo.
+export const linkAlbaranesToFactura = (data: AppData, facturaId: string, albaranIds: string[]) => {
+  const fIdx = (data.facturas || []).findIndex(f => f.id === facturaId);
+  if (fIdx === -1) return;
   
-  if (sameProv && sameMonth) return; // Si no cambió ni mes ni proveedor, no hacemos nada
+  const F = data.facturas[fIdx] as any;
+  let addedTotal = 0;
+  let addedBase = 0;
+  let addedTax = 0;
 
-  const idx = (data.facturas || []).findIndex((f: any) =>
-    Array.isArray(f.albaranIdsArr) && f.albaranIdsArr.includes(before.id)
-  );
-  if (idx < 0) return;
+  const currentIds = new Set(F.albaranIdsArr || []);
 
-  const F = data.facturas[idx];
-  const tb = Num.parse(before.total) || 0;
-  const bb = Num.parse(before.base)  || Num.round2(tb / 1.10);
-  const ib = Num.parse(before.taxes) || Num.round2(tb - bb);
+  (data.albaranes || []).forEach(a => {
+    // Si el albarán está en la lista y aún no estaba vinculado a esta factura
+    if (albaranIds.includes(a.id) && !currentIds.has(a.id)) {
+      a.invoiced = true; // Lo bloqueamos
+      currentIds.add(a.id);
+      
+      const t = Num.parse(a.total) || 0;
+      const b = Num.parse(a.base) || Num.round2(t / 1.10);
+      addedTotal += t;
+      addedBase += b;
+      addedTax += (t - b);
+    }
+  });
 
-  // Restamos los importes de la factura antigua
-  F.total = Num.round2((Num.parse(F.total) || 0) - tb);
-  F.base  = Num.round2((Num.parse(F.base)  || 0) - bb);
-  F.tax   = Num.round2((Num.parse(F.tax)   || 0) - ib);
-  F.albaranIdsArr = F.albaranIdsArr.filter((id: string) => id !== before.id);
+  // Actualizamos los totales de la factura
+  F.total = Num.round2((Num.parse(F.total) || 0) + addedTotal);
+  F.base = Num.round2((Num.parse(F.base) || 0) + addedBase);
+  F.tax = Num.round2((Num.parse(F.tax) || 0) + addedTax);
+  F.albaranIdsArr = Array.from(currentIds);
+};
 
-  // Si la factura vieja se quedó vacía al quitar este albarán, la borramos
-  if ((F.albaranIdsArr || []).length === 0 && !F.reconciled) {
-    data.facturas.splice(idx, 1);
+// Esta función se llama si te equivocas y quieres quitar un albarán de una factura
+export const unlinkAlbaranFromFactura = (data: AppData, facturaId: string, albaranId: string) => {
+  const fIdx = (data.facturas || []).findIndex(f => f.id === facturaId);
+  if (fIdx === -1) return;
+  
+  const F = data.facturas[fIdx] as any;
+  const currentIds = new Set(F.albaranIdsArr || []);
+
+  if (currentIds.has(albaranId)) {
+    const aIdx = (data.albaranes || []).findIndex(a => a.id === albaranId);
+    if (aIdx !== -1) {
+      const A = data.albaranes[aIdx];
+      A.invoiced = false; // Lo liberamos
+      
+      const t = Num.parse(A.total) || 0;
+      const b = Num.parse(A.base) || Num.round2(t / 1.10);
+      
+      // Restamos del total de la factura
+      F.total = Num.round2((Num.parse(F.total) || 0) - t);
+      F.base = Num.round2((Num.parse(F.base) || 0) - b);
+      F.tax = Num.round2((Num.parse(F.tax) || 0) - (t - b));
+    }
+    
+    currentIds.delete(albaranId);
+    F.albaranIdsArr = Array.from(currentIds);
+
+    // Si la factura se queda vacía de albaranes y era un "Borrador/Automática", podemos destruirla
+    if (F.albaranIdsArr.length === 0 && !F.reconciled && F.source?.includes('auto')) {
+      data.facturas.splice(fIdx, 1);
+    }
   }
-}
+};
