@@ -1,9 +1,9 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { AppData } from '../types';
 
-// 1. Conexión con TUS credenciales exactas (URL y Clave Pública)
-const SUPABASE_URL = "https://awbgboucnbsuzojocbuy.supabase.co";
-const SUPABASE_KEY = "sb_publishable_drOQ5PsFA8eox_aRTXNATQ_5kibM6ST";
+// 1. NUEVA CONEXIÓN: Apuntando a la nueva base de datos limpia de Supabase
+const SUPABASE_URL = "https://bgtelulbiaugawyrhvwt.supabase.co";
+const SUPABASE_KEY = "sb_publishable_jagYegyG8gGMijzpLEY9BQ_iWfL1MU4";
 
 // 🛡️ FIX: PATRÓN SINGLETON PARA EVITAR MULTIPLES INSTANCIAS (Evita pantallazos azules)
 let supabaseInstance: SupabaseClient | null = null;
@@ -12,7 +12,7 @@ export const supabase = (() => {
   if (!supabaseInstance) {
     supabaseInstance = createClient(SUPABASE_URL, SUPABASE_KEY, {
       auth: {
-        storageKey: 'arume-auth-token-v2', // Clave única para evitar conflictos
+        storageKey: 'arume-auth-token-v3', // Clave única actualizada para la nueva DB
         autoRefreshToken: true,
         persistSession: true,
         detectSessionInUrl: false
@@ -31,7 +31,7 @@ if (typeof window !== 'undefined') {
 // ================ Utilidades Robustas ==================
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
-// Sistema de reintentos: Si el internet falla 1 segundo, lo vuelve a intentar solo sin que te des cuenta
+// Sistema de reintentos: Si el internet falla, lo vuelve a intentar solo
 async function withRetries<T>(fn: () => Promise<T>, { retries = 3, baseMs = 700, maxMs = 3000 } = {}): Promise<T> {
   let attempt = 0;
   while (true) {
@@ -47,8 +47,8 @@ async function withRetries<T>(fn: () => Promise<T>, { retries = 3, baseMs = 700,
   }
 }
 
-// Evita que la app se quede "colgada" pensando para siempre
-async function withTimeout<T>(p: Promise<T>, ms = 8000): Promise<T> {
+// 🛡️ Evita que la app se quede colgada esperando. Aumentado a 15 segundos para mayor seguridad.
+async function withTimeout<T>(p: Promise<T>, ms = 15000): Promise<T> {
   const ac = new AbortController();
   const to = setTimeout(() => ac.abort(), ms);
   try {
