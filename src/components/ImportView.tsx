@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Upload, FileSpreadsheet, CheckCircle2, Database,
+  Upload, FileText, CheckCircle2, Database,
   ArrowRight, Sparkles, Loader2, Camera, Receipt, Mic, Square, AlertTriangle, FileDown, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -411,7 +411,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
             <input type="file" ref={fileInputRef} disabled={isScanning || recording} onChange={handleFileUpload} accept={importMode.startsWith('ia_') ? ".pdf, image/jpeg, image/png" : ".xlsx, .csv"} className="hidden" />
             
             <div className="bg-white w-16 h-16 rounded-full flex items-center justify-center shadow-sm mb-4">
-              {isScanning ? <Loader2 className="w-6 h-6 text-indigo-500 animate-spin" /> : importMode.startsWith('ia_') ? <Receipt className="w-6 h-6 text-indigo-500" /> : <FileSpreadsheet className="w-6 h-6 text-slate-400" />}
+              {isScanning ? <Loader2 className="w-6 h-6 text-indigo-500 animate-spin" /> : importMode.startsWith('ia_') ? <Receipt className="w-6 h-6 text-indigo-500" /> : <FileText className="w-6 h-6 text-slate-400" />}
             </div>
             
             <p className="text-sm font-black text-slate-700">{isScanning ? "Extrayendo datos..." : "Haz clic o arrastra un archivo"}</p>
