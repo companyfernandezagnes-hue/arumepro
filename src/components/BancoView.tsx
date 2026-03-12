@@ -6,17 +6,20 @@ import {
   AlertTriangle, Eye, EyeOff, Sparkles, Filter,
   History, Calendar, Info, BarChart3, PieChart,
   ArrowUpRight, ArrowDownLeft, Check, X as CloseIcon,
-  Loader2, Landmark
+  Loader2, Landmark, ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AppData } from '../types';
-import { Num } from '../services/engine';
+import { AppData, Albaran, Factura, BankMovement } from '../types';
+import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
+import { proxyFetch } from '../services/api';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import * as XLSX from 'xlsx';
 
-// 🚀 IMPORTAMOS LA LÓGICA MODULAR (NUEVO)
+// 🚀 IMPORTAMOS LA LÓGICA DESDE TU NUEVO ARCHIVO
 import { findMatches, executeLink, fingerprint, isSuspicious, daysBetween, normalizeDesc } from '../services/bancoLogic';
+// 🚀 IMPORTAMOS EL COMPONENTE SWIPE
+import { SwipeReconciler } from './SwipeReconciler';
 
 interface BancoViewProps {
   data: AppData;
@@ -37,8 +40,34 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
   const [activeTab, setActiveTab] = useState<'list' | 'insights'>('list');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const n8nUrl = data.config?.n8nUrlBanco || "https://ia.permatunnelopen.org/webhook/1085406f-324c-42f7-b50f-22f211f445cd";
 
   // --- STATS Y FLUJO ---
+  const cashFlowData = useMemo(() => {
+    const days = 30;
+    const result = [];
+    const now = new Date();
+    for (let i = days; i >= 0; i--) {
+      const d = new Date(); d.setDate(now.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const dayMovs = (data.banco || []).filter((m: any) => m.date === dateStr);
+      const income = dayMovs.filter((m: any) => Num.parse(m.amount) > 0).reduce((acc: number, m: any) => acc + Num.parse(m.amount), 0);
+      const expense = Math.abs(dayMovs.filter((m: any) => Num.parse(m.amount) < 0).reduce((acc: number, m: any) => acc + Num.parse(m.amount), 0));
+      result.push({ name: d.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' }), ingresos: income, gastos: expense, balance: income - expense });
+    }
+    return result;
+  }, [data.banco]);
+
+  const pendingCajas = useMemo(() => {
+    return (data.cierres || []).filter((c: any) => {
+      const isCardMatched = (data.banco || []).some((b: any) => 
+        b.status === 'matched' && b.link?.type === 'FACTURA' && 
+        data.facturas?.find((f: any) => f.id === b.link?.id)?.num === `Z-${c.date.replace(/-/g, '')}`
+      );
+      return !isCardMatched && Num.parse(c.tarjeta) > 0;
+    }).slice(0, 5);
+  }, [data.cierres, data.banco, data.facturas]);
+
   const stats = useMemo(() => {
     const movements = data.banco || [];
     const sumaMovs = movements.reduce((acc: number, b: any) => acc + (Num.parse(b.amount) || 0), 0);
@@ -47,16 +76,25 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
     const matched = movements.length - pending.length;
     const percent = movements.length > 0 ? Math.round((matched / movements.length) * 100) : 0;
     const trend = movements.slice(-10).map((m: any) => Num.parse(m.amount));
-    
     return { saldo, percent, pending: pending.length, total: movements.length, matched, trend };
   }, [data.banco, data.config?.saldoInicial]);
 
+  const prevPagos = useMemo(() => {
+    const now = new Date(); const target = new Date(now); target.setDate(now.getDate() + 7);
+    const items = (data.gastos_fijos || [])
+      .filter((g: any) => g.active !== false && g.freq && g.dia_pago)
+      .map((g: any) => {
+        const due = new Date(now.getFullYear(), now.getMonth(), Number(g.dia_pago) || 1);
+        if (due < now) due.setMonth(due.getMonth() + 1);
+        return { amount: Num.parse(g.amount), within: due <= target };
+      }).filter((x: any) => x.within);
+    return items.reduce((acc: number, x: any) => acc + x.amount, 0);
+  }, [data.gastos_fijos]);
+
   const filteredMovements = useMemo(() => {
     const base = (data.banco || []).filter((b: any) => 
-      b.desc.toLowerCase().includes(deferredSearch.toLowerCase()) || 
-      b.amount.toString().includes(deferredSearch)
+      b.desc.toLowerCase().includes(deferredSearch.toLowerCase()) || b.amount.toString().includes(deferredSearch)
     );
-
     return base.filter((b: any) => {
       if (viewFilter === 'all') return true;
       if (viewFilter === 'pending') return b.status === 'pending';
@@ -70,7 +108,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
 
   const selectedItem = useMemo(() => data.banco?.find((b: any) => b.id === selectedBankId), [data.banco, selectedBankId]);
 
-  // 🚀 USAMOS EL MOTOR EXTERNO DE BÚSQUEDA
+  // 🚀 LLAMADA AL CEREBRO EXTERNO PARA BUSCAR COINCIDENCIAS
   const matches = useMemo(() => {
     if (!selectedItem) return [];
     return findMatches(selectedItem, data);
@@ -81,28 +119,173 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
     setIsApiSyncing(true);
     try {
       await new Promise(r => setTimeout(r, 2000));
-      alert("✅ Sincronización bancaria API iniciada.");
+      alert("✅ Sincronización bancaria API iniciada (Conectando a PSD2).");
     } finally { setIsApiSyncing(false); }
   };
 
+  const handleAnalyze = async () => {
+    const newData = JSON.parse(JSON.stringify(data)); 
+    const seen: any[] = [];
+    newData.banco = (newData.banco || []).map((m: any) => {
+      const n = { ...m };
+      const fp = fingerprint(n.date, Num.parse(n.amount), n.desc || '');
+      if (!n.hash) n.hash = fp;
+      let duplicate = false;
+      for (const prev of seen) {
+        if (Math.abs(Num.parse(prev.amount) - Num.parse(n.amount)) < 0.005) {
+          if (normalizeDesc(prev.desc) === normalizeDesc(n.desc) && daysBetween(prev.date, n.date) <= 2) { duplicate = true; break; }
+        }
+      }
+      seen.push({ date: n.date, amount: Num.parse(n.amount), desc: n.desc });
+      n.flags = { duplicate, suspicious: isSuspicious(n.desc || ''), unmatched: n.status === 'pending' && !n.link?.id };
+      if (n.reviewed === undefined) n.reviewed = false;
+      return n;
+    });
+    await onSave(newData);
+    alert('📊 Análisis completado: Sospechosos y duplicados detectados.');
+  };
+
+  const toggleReviewed = async (id: string, val: boolean) => {
+    const newData = { ...data };
+    const it: any = newData.banco?.find((b: any) => b.id === id);
+    if (!it) return;
+    it.reviewed = val;
+    await onSave(newData);
+  };
+
+  const handleReviewAll = async () => {
+    if (!confirm(`¿Marcar los ${filteredMovements.length} movimientos visibles como REVISADOS?`)) return;
+    const newData = { ...data };
+    const visibleIds = new Set(filteredMovements.map((m: any) => m.id));
+    newData.banco = newData.banco.map((b: any) => { if (visibleIds.has(b.id)) return { ...b, reviewed: true }; return b; });
+    await onSave(newData);
+  };
+
+  // 🚀 LLAMADA AL MOTOR EXTERNO PARA ENLAZAR
   const handleLink = async (bankId: string, matchType: string, docId: string, comision: number = 0) => {
     const newData = JSON.parse(JSON.stringify(data));
-    executeLink(newData, bankId, matchType, docId, comision); // Llamada al servicio limpio
+    executeLink(newData, bankId, matchType, docId, comision); 
     await onSave(newData);
     setSelectedBankId(null);
+  };
+
+  const handleQuickAction = async (bankId: string, label: string, type: 'ALBARAN' | 'FIXED_EXPENSE' | 'TPV' | 'CASH' | 'INCOME') => {
+    const newData = JSON.parse(JSON.stringify(data));
+    const item = newData.banco.find((b: any) => b.id === bankId);
+    if (!item) return;
+
+    const amtRaw = Num.parse(item.amount);
+    const amt = Math.abs(amtRaw);
+
+    if (type === 'FIXED_EXPENSE') {
+      const d = new Date(item.date);
+      const monthKey = `pagos_${d.getFullYear()}_${d.getMonth() + 1}`;
+      if (!newData.control_pagos) newData.control_pagos = {};
+      if (!newData.control_pagos[monthKey]) newData.control_pagos[monthKey] = [];
+      const isPersonal = label.includes('Personal') || label.includes('Nómina');
+      
+      const pendingFixed = (newData.gastos_fijos || []).find((g: any) => 
+        g.active !== false && g.cat === (isPersonal ? 'personal' : 'varios') &&
+        !newData.control_pagos[monthKey].includes(g.id) && Math.abs(Num.parse(g.amount) - amt) < 50 
+      );
+
+      if (pendingFixed) {
+        newData.control_pagos[monthKey].push(pendingFixed.id);
+      } else { 
+        const newFixedId = 'gf-' + Date.now();
+        if (!newData.gastos_fijos) newData.gastos_fijos = [];
+        newData.gastos_fijos.push({ id: newFixedId, name: `${label} (Detectado Auto)`, amount: amt, freq: 'mensual', dia_pago: d.getDate(), cat: isPersonal ? 'personal' : 'varios', active: true });
+        newData.control_pagos[monthKey].push(newFixedId);
+      }
+    } else if (type === 'TPV') {
+      const zMatch = newData.cierres?.find((c: any) => !c.conciliado_banco && Math.abs(Num.parse(c.tarjeta) - amt) <= 5);
+      if (zMatch) {
+        zMatch.conciliado_banco = true;
+        const zNum = `Z-${zMatch.date.replace(/-/g, '')}`;
+        const fZ = newData.facturas?.find((f: any) => f.num === zNum);
+        if (fZ) { fZ.reconciled = true; fZ.paid = true; fZ.status = 'reconciled'; }
+      }
+    } else if (type === 'CASH') {
+      const cMatch = newData.cierres?.find((c: any) => !c.conciliado_banco && Math.abs(Num.parse(c.efectivo) - amt) <= 50);
+      if (cMatch) cMatch.conciliado_banco = true;
+    }
+
+    item.status = 'matched'; item.category = label;
+    await onSave(newData);
+    setSelectedBankId(null);
+  };
+
+  const handleMagicMatch = async () => {
+    const pendings = filteredMovements.slice(0, 25);
+    if (pendings.length === 0) return alert("No hay movimientos pendientes.");
+    setIsMagicLoading(true);
+    try {
+      const result = await proxyFetch(n8nUrl, { method: 'POST', body: { movimientos: pendings.map((m: any) => ({ ...m, descOriginal: m.desc })), saldoInicial: data.config?.saldoInicial } });
+      if (result && result.movimientos) {
+        const newData = JSON.parse(JSON.stringify(data));
+        let count = 0;
+        for (const mov of result.movimientos) {
+          const item = newData.banco.find((b: any) => b.id === mov.id);
+          if (!item) continue;
+          const amtRaw = Num.parse(item.amount);
+
+          if (amtRaw > 0) {
+            if (mov.esCierreTPV) {
+              const zMatch = newData.cierres?.find((c: any) => !c.conciliado_banco && Math.abs(Num.parse(c.tarjeta) - Math.abs(amtRaw)) <= 5);
+              if (zMatch) {
+                zMatch.conciliado_banco = true;
+                const fZ = newData.facturas?.find((f: any) => f.num === `Z-${zMatch.date.replace(/-/g, '')}`);
+                if (fZ) { fZ.reconciled = true; fZ.paid = true; fZ.status = 'reconciled'; }
+              }
+            }
+          } else {
+            if (mov.categoriaAsignada && mov.confidence >= 0.7) {
+              const catLower = mov.categoriaAsignada.toLowerCase();
+              if (catLower.includes('personal') || catLower.includes('nómina') || catLower.includes('alquiler')) {
+                 const d = new Date(item.date);
+                 const monthKey = `pagos_${d.getFullYear()}_${d.getMonth() + 1}`;
+                 if (!newData.control_pagos) newData.control_pagos = {};
+                 if (!newData.control_pagos[monthKey]) newData.control_pagos[monthKey] = [];
+                 
+                 const newFixedId = 'gf-ia-' + Date.now();
+                 if (!newData.gastos_fijos) newData.gastos_fijos = [];
+                 newData.gastos_fijos.push({ id: newFixedId, name: mov.categoriaAsignada, amount: Math.abs(amtRaw), freq: 'mensual', dia_pago: d.getDate(), cat: catLower.includes('personal') ? 'personal' : 'varios', active: true });
+                 newData.control_pagos[monthKey].push(newFixedId);
+              }
+            }
+          }
+          item.status = 'matched'; item.category = mov.categoriaAsignada || 'IA';
+          count++;
+        }
+        await onSave(newData); alert(`✨ IA ha conciliado ${count} movimientos.`);
+      }
+    } catch (err) { alert("Error conectando con la IA."); } finally { setIsMagicLoading(false); }
+  };
+
+  const handleAutoCleanup = async () => {
+    if (!confirm("⚠️ ¿LIMPIEZA AUTOMÁTICA?")) return;
+    const newData = JSON.parse(JSON.stringify(data));
+    let eliminados = 0;
+    
+    const initialAlbs = (newData.albaranes || []).length;
+    newData.albaranes = (newData.albaranes || []).filter((a: any) => !(a.id.startsWith('auto-') || a.id.startsWith('ia-') || a.prov === 'BANCO' || a.prov?.includes('(IA)')));
+    eliminados += (initialAlbs - newData.albaranes.length);
+
+    const initialFacs = (newData.facturas || []).length;
+    newData.facturas = (newData.facturas || []).filter((f: any) => !(f.id.startsWith('auto-fac') || f.id.startsWith('fac-ia-') || f.id.startsWith('fac-z-auto') || f.cliente === 'Z DIARIO AUTO' || f.cliente === 'Ingreso Banco'));
+    eliminados += (initialFacs - newData.facturas.length);
+
+    await onSave(newData); alert(`✨ Limpieza exitosa: ${eliminados} documentos fantasma eliminados.`);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = async (evt) => {
       const bstr = evt.target?.result;
       const wb = XLSX.read(bstr, { type: 'binary' });
-      const wsname = wb.SheetNames[0];
-      const rows: any[] = XLSX.utils.sheet_to_json(wb.Sheets[wsname]);
-      
+      const rows: any[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
       const newData = JSON.parse(JSON.stringify(data));
       if (!newData.banco) newData.banco = [];
       let imported = 0;
@@ -115,24 +298,28 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
         if (date && amount) {
           let dateISO = String(date);
           if (typeof date === 'number') {
-            const excelEpoch = new Date(1899, 11, 30);
-            dateISO = new Date(excelEpoch.getTime() + date * 86400000).toISOString().split('T')[0];
+            dateISO = new Date(new Date(1899, 11, 30).getTime() + date * 86400000).toISOString().split('T')[0];
+          } else if (date.includes('/')) {
+            const parts = date.split('/');
+            if (parts[2].length === 4) dateISO = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
           }
           const fp = fingerprint(dateISO, Num.parse(amount), String(desc));
           if (!newData.banco.some((b: any) => b.hash === fp)) {
-            newData.banco.push({
-              id: 'imp-' + Date.now() + Math.random().toString(36).slice(2, 7),
-              date: dateISO, amount: Num.parse(amount), desc: desc || 'Importado',
-              status: 'pending', hash: fp
-            });
+            newData.banco.push({ id: 'imp-' + Date.now() + Math.random().toString(36).slice(2, 7), date: dateISO, amount: Num.parse(amount), desc: desc || 'Importado', status: 'pending', hash: fp });
             imported++;
           }
         }
       });
-      await onSave(newData);
-      alert(`📥 ${imported} movimientos importados.`);
+      await onSave(newData); alert(`📥 ${imported} movimientos importados.`);
     };
     reader.readAsBinaryString(file);
+  };
+
+  const handleNuke = async () => {
+    if (!confirm("🛑 PELIGRO: ¿Borrar todos los movimientos ya conciliados para hacer espacio?")) return;
+    const newData = JSON.parse(JSON.stringify(data));
+    newData.banco = newData.banco.filter((b: any) => b.status === 'pending');
+    await onSave(newData);
   };
 
   return (
@@ -158,7 +345,10 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
             <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept=".xlsx,.xls,.csv" />
           </button>
           <button onClick={handleApiSync} disabled={isApiSyncing} className="bg-blue-600 text-white px-5 py-3 rounded-xl text-[10px] font-black hover:bg-blue-700 transition shadow-lg flex items-center gap-2">
-            {isApiSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} SYNC PSD2 (BETA)
+            {isApiSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} SYNC PSD2
+          </button>
+          <button onClick={handleAnalyze} className="bg-amber-50 text-amber-700 px-5 py-3 rounded-xl text-[10px] font-black hover:bg-amber-100 transition shadow-sm flex items-center gap-2">
+            <RefreshCw className="w-4 h-4" /> ANALIZAR BANDERAS
           </button>
           <button onClick={() => setIsSwipeMode(true)} className="bg-indigo-50 text-indigo-600 px-5 py-3 rounded-xl text-[10px] font-black hover:bg-indigo-100 transition shadow-sm flex items-center gap-2 ml-auto">
             <Sparkles className="w-4 h-4" /> MODO SWIPE
@@ -234,8 +424,34 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
                           <p className="text-emerald-700 font-black uppercase text-xs">Conciliado Correctamente</p>
                         </div>
                       ) : (
-                        <div className="text-center opacity-40 py-10"><Search className="w-10 h-10 mx-auto mb-2" /><p className="text-xs font-black uppercase">Sin coincidencias</p></div>
+                        <div className="text-center opacity-40 py-10">
+                          <Search className="w-10 h-10 mx-auto mb-2 text-slate-400" />
+                          <p className="text-xs font-black uppercase tracking-widest">No hay sugerencias exactas</p>
+                        </div>
                       )
+                    )}
+
+                    {selectedItem.status === 'pending' && (
+                      <div className="mt-8">
+                        <h4 className="text-[10px] font-black text-slate-400 uppercase mb-4 flex items-center gap-2">
+                          <Zap className="w-3 h-3 text-indigo-500" /> ⚡ Creación Rápida
+                        </h4>
+                        <div className="grid grid-cols-2 gap-3">
+                          {(Num.parse(selectedItem.amount) > 0 ? [
+                            { label: 'Cierre TPV (Tarjetas)', icon: TrendingUp, type: 'TPV' as const },
+                            { label: 'Ingreso Efectivo', icon: Building2, type: 'CASH' as const }
+                          ] : [
+                            { label: 'Gasto Fijo', icon: Zap, type: 'FIXED_EXPENSE' as const },
+                            { label: 'Comisión Bancaria', icon: Building2, type: 'FIXED_EXPENSE' as const },
+                            { label: 'Personal / Nómina', icon: TrendingDown, type: 'FIXED_EXPENSE' as const }
+                          ]).map(cat => (
+                            <button key={cat.label} onClick={() => handleQuickAction(selectedItem.id, cat.label, cat.type)} className="p-4 border border-slate-100 rounded-2xl hover:bg-slate-50 text-left transition group cursor-pointer">
+                              <cat.icon className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 mb-2 transition-colors" />
+                              <p className="text-[10px] font-black text-slate-600 uppercase">{cat.label}</p>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     )}
                   </div>
                 </motion.div>
@@ -247,7 +463,16 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
         </div>
       </div>
 
-      {/* AQUÍ IRÍA EL MODAL SWIPE RECONCILER COMO LO TENÍAS (Que ahora usaría findMatches internamente) */}
+      {/* 🚀 MODAL SWIPE IMPORTADO DESDE FUERA */}
+      <AnimatePresence>
+        {isSwipeMode && (
+          <SwipeReconciler 
+            data={data} 
+            onSave={onSave} 
+            onClose={() => setIsSwipeMode(false)} 
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 };
