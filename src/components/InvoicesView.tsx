@@ -5,7 +5,7 @@ import {
   LineChart as LineChartIcon, FileSpreadsheet, Mic, Square, 
   UploadCloud, FileDown, Smartphone, Camera, Loader2, Mail, 
   CheckCircle2, Link as LinkIcon, Inbox, ArrowRight, CheckSquare, 
-  Sparkles, ChevronLeft, ChevronRight, Zap, FileText, FileArchive, AlertCircle
+  Sparkles, ChevronLeft, ChevronRight, Zap, FileText, FileArchive, AlertCircle, ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
@@ -13,14 +13,15 @@ import { GoogleGenAI } from "@google/genai";
 import { AppData, Factura, Albaran, Socio } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
-// 🚀 CREAMOS EL CLIENTE DE SUPABASE AQUÍ MISMO PARA EVITAR ERRORES DE EXPORTACIÓN
+
+// 🚀 IMPORTAMOS EL CEREBRO DE LA FASE 1
+import { getOfficialProvName, basicNorm, linkAlbaranesToFactura } from '../services/invoicing'; 
 import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = "https://awbgboucnbsuzojocbuy.supabase.co"; 
 const SUPABASE_ANON_KEY = "sb_publishable_drOQ5PsFA8eox_aRTXNATQ_5kibM6ST";
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// 🚀 COMPONENTES HIJOS
 import { InvoicesList } from './InvoicesList';
 import { InvoiceDetailModal } from './InvoiceDetailModal';
 
@@ -64,16 +65,12 @@ export interface InvoicesViewProps {
   onSave: (newData: AppData) => Promise<void>;
 }
 
-/* =======================================================
- * 🛡️ 1. UTILIDADES Y SEGURIDAD (Anti-Crash)
- * ======================================================= */
 const TOLERANCIA = 0.50; 
 
-// 🐛 BUG DEL BUSCADOR ARREGLADO
 export const superNorm = (s: string | undefined | null) => {
   if (!s) return ''; 
   if (typeof s !== 'string') return 'desconocido';
-  try { return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\b(s\.?l\.?|s\.?a\.?|s\.?l\.?u\.?|s\.?c\.?p\.?)\b/gi, '').replace(/[^a-z0-9]/g, '').trim(); } catch (e) { return 'desconocido'; }
+  try { return basicNorm(s); } catch (e) { return 'desconocido'; }
 };
 
 const safeJSON = (str: string) => { try { const match = str.match(/\{[\s\S]*\}/); return match ? JSON.parse(match[0]) : {}; } catch { return {}; } };
@@ -93,20 +90,31 @@ async function sha256File(file: File) {
   return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
+/* =======================================================
+ * 🚀 CEREBRO 3-WAY MATCH MEJORADO
+ * ======================================================= */
 const matchAlbaranesToFactura = (factura: FacturaExtended, albaranes: Albaran[], provNormalizado: string) => {
   const fDate = factura?.date || DateUtil.today();
-  const mesDraft = typeof fDate === 'string' ? fDate.substring(0, 7) : '0000-00';
+  const fTotal = Num.parse(factura?.total) || 0;
   
-  const candidatos = albaranes.filter(a => {
-    const aDate = a?.date || '';
-    return !a?.invoiced && superNorm(a?.prov) === provNormalizado && (typeof aDate === 'string' && aDate.startsWith(mesDraft));
-  });
+  // Si la IA encontró referencias de albaranes explícitas en el PDF
+  let candidatos = [];
+  if (factura.albaranIdsArr && factura.albaranIdsArr.length > 0) {
+     candidatos = albaranes.filter(a => !a.invoiced && factura.albaranIdsArr!.includes(a.num));
+  }
+  
+  // Si no cuadró por números, caemos en la búsqueda mágica por Mes + Proveedor
+  if (candidatos.length === 0) {
+    const mesDraft = typeof fDate === 'string' ? fDate.substring(0, 7) : '0000-00';
+    candidatos = albaranes.filter(a => {
+      const aDate = a?.date || '';
+      return !a?.invoiced && superNorm(a?.prov) === provNormalizado && (typeof aDate === 'string' && aDate.startsWith(mesDraft));
+    });
+  }
 
   const sumaAlbaranes = candidatos.reduce((acc, a) => acc + (Num.parse(a?.total) || 0), 0);
-  const totalFactura = Num.parse(factura?.total) || 0;
-  
-  const diff = Math.abs(sumaAlbaranes - Math.abs(totalFactura));
-  const toleranciaPermitida = Math.max(TOLERANCIA, Math.abs(totalFactura) * 0.005);
+  const diff = Math.abs(sumaAlbaranes - Math.abs(fTotal));
+  const toleranciaPermitida = Math.max(TOLERANCIA, Math.abs(fTotal) * 0.005);
   const cuadraPerfecto = diff <= toleranciaPermitida && candidatos.length > 0;
 
   return { candidatos, sumaAlbaranes, diferencia: diff, cuadraPerfecto };
@@ -139,6 +147,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   
   const [isSyncing, setIsSyncing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false); // 🚀 ESTADO ANTI-BLOQUEO AÑADIDO
 
   const [selectedGroup, setSelectedGroup] = useState<{ label: string; ids: string[], unitId: BusinessUnit } | null>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<FacturaExtended | null>(null);
@@ -147,92 +156,49 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [emailInbox, setEmailInbox] = useState<EmailDraft[]>([]);
 
-  /* =======================================================
-   * 🛡️ DRAG & DROP SEGURO
-   * ======================================================= */
+  // DRAG & DROP
   useEffect(() => {
     let dragCounter = 0;
-
-    const handleDragEnter = (e: DragEvent) => {
-      if (!hasRealFiles(e)) return;
-      e.preventDefault();
-      dragCounter++;
-      if (dragCounter === 1) setIsDragging(true);
-    };
-
-    const handleDragLeave = (e: DragEvent) => {
-      if (!hasRealFiles(e)) return;
-      e.preventDefault();
-      dragCounter--;
-      if (dragCounter === 0) setIsDragging(false);
-    };
-
-    const handleDragOver = (e: DragEvent) => {
-      if (!hasRealFiles(e)) return;
-      e.preventDefault();
-    };
-
+    const handleDragEnter = (e: DragEvent) => { if (!hasRealFiles(e)) return; e.preventDefault(); dragCounter++; if (dragCounter === 1) setIsDragging(true); };
+    const handleDragLeave = (e: DragEvent) => { if (!hasRealFiles(e)) return; e.preventDefault(); dragCounter--; if (dragCounter === 0) setIsDragging(false); };
+    const handleDragOver = (e: DragEvent) => { if (!hasRealFiles(e)) return; e.preventDefault(); };
     const handleDropGlobal = async (e: DragEvent) => {
-      e.preventDefault();
-      dragCounter = 0;
-      setIsDragging(false);
-
-      const dt = e.dataTransfer;
-      if (!dt?.files?.length) return;
+      e.preventDefault(); dragCounter = 0; setIsDragging(false);
+      const dt = e.dataTransfer; if (!dt?.files?.length) return;
       if (dt.files.length > 1) return alert("Sube 1 solo documento para evitar errores.");
-      
       const file = dt.files[0]; 
-      if (file.type === 'application/pdf' || file.type.startsWith('image/')) {
-        await processLocalFile(file); 
-      } else {
-        alert("⚠️ Solo se permiten archivos PDF o imágenes.");
-      }
+      if (file.type === 'application/pdf' || file.type.startsWith('image/')) { await processLocalFile(file); } 
+      else { alert("⚠️ Solo se permiten archivos PDF o imágenes."); }
     };
-
-    document.body.addEventListener('dragenter', handleDragEnter);
-    document.body.addEventListener('dragleave', handleDragLeave);
-    document.body.addEventListener('dragover', handleDragOver);
-    document.body.addEventListener('drop', handleDropGlobal);
-
-    return () => {
-      document.body.removeEventListener('dragenter', handleDragEnter);
-      document.body.removeEventListener('dragleave', handleDragLeave);
-      document.body.removeEventListener('dragover', handleDragOver);
-      document.body.removeEventListener('drop', handleDropGlobal);
-    };
+    document.body.addEventListener('dragenter', handleDragEnter); document.body.addEventListener('dragleave', handleDragLeave);
+    document.body.addEventListener('dragover', handleDragOver); document.body.addEventListener('drop', handleDropGlobal);
+    return () => { document.body.removeEventListener('dragenter', handleDragEnter); document.body.removeEventListener('dragleave', handleDragLeave); document.body.removeEventListener('dragover', handleDragOver); document.body.removeEventListener('drop', handleDropGlobal); };
   }, [facturasSeguras]);
 
-  /* =======================================================
-   * ⌨️ ATAJOS DE TECLADO RÁPIDOS
-   * ======================================================= */
+  // ATAJOS
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const active = document.activeElement as HTMLElement;
-      const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+      const active = document.activeElement as HTMLElement; const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
       if (!isTyping && e.key === '/') { e.preventDefault(); document.querySelector<HTMLInputElement>('input[placeholder^="Buscar"]')?.focus(); }
       if (!isTyping && e.key.toLowerCase() === 'g') { e.preventDefault(); setActiveTab(t => t === 'pend' ? 'hist' : 'pend'); }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  /* =======================================================
-   * 🧠 AUDITORÍA DE IA MEMOIZADA (3-WAY MATCHING)
-   * ======================================================= */
   const draftsIA = useMemo(() => {
     try {
       return facturasSeguras.filter(f => f?.status === 'draft').map(draft => {
-        const matchResult = matchAlbaranesToFactura(draft, albaranesSeguros, superNorm(draft?.prov));
-        return { ...draft, ...matchResult };
+        const oficialName = getOfficialProvName(draft.prov);
+        const matchResult = matchAlbaranesToFactura(draft, albaranesSeguros, superNorm(oficialName));
+        return { ...draft, ...matchResult, prov: oficialName }; 
       });
     } catch (error) {
-      console.error("Error en draftsIA:", error);
-      return [];
+      console.error("Error en draftsIA:", error); return [];
     }
   }, [facturasSeguras, albaranesSeguros]);
 
   /* =======================================================
-   * 🤖 MOTOR OCR (Google Gemini + Fallback Seguro)
+   * 🤖 MOTOR OCR CON SUPER-PROMPT (Local)
    * ======================================================= */
   const processLocalFile = async (file: File) => {
     setIsSyncing(true); 
@@ -250,7 +216,17 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       const soloBase64 = fileBase64.split(',')[1];
 
       const ai = new GoogleGenAI({ apiKey });
-      const prompt = `Actúa como un OCR contable. Extrae de esta factura y devuelve SOLO un JSON estricto: { "proveedor": "Nombre de la empresa", "num": "Número de factura", "fecha": "YYYY-MM-DD", "total": 0, "base": 0, "iva": 0 }`;
+      const prompt = `Actúa como un Auditor Contable. Lee esta factura y extrae TODO lo posible. Devuelve SOLO un JSON estricto: 
+      { 
+        "proveedor": "Nombre de la empresa", 
+        "nif": "NIF o CIF si aparece",
+        "num": "Número de factura oficial", 
+        "fecha": "YYYY-MM-DD", 
+        "total": 0, 
+        "base": 0, 
+        "iva": 0,
+        "referencias_albaranes": ["Array de strings con números de albarán o pedido que vengan escritos en la factura"]
+      }`;
       
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
@@ -265,6 +241,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         id: 'draft-local-' + Date.now(), tipo: 'compra', num: rawJson.num || 'S/N', 
         date: rawJson.fecha || DateUtil.today(), prov: rawJson.proveedor || 'Proveedor Desconocido',
         total: String(rawJson.total || 0), base: String(rawJson.base || 0), tax: String(rawJson.iva || 0),
+        albaranIdsArr: rawJson.referencias_albaranes || [], 
         paid: false, reconciled: false, source: 'dropzone', status: 'draft', unidad_negocio: 'REST', file_base64: fileBase64, attachmentSha: sha 
       };
 
@@ -272,62 +249,27 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       alert("✅ Factura extraída correctamente. Revisa la bandeja de conciliación IA.");
 
     } catch (e) {
-      console.warn("⚠️ Gemini falló. Activando Rescate Local...");
-      try {
-        let extractedText = ""; let possibleTotal = 0;
-        const fileBase64 = await new Promise<string>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result as string); reader.readAsDataURL(file); });
-
-        if (file.type.includes('image')) {
-           const tesseractModule = await import('tesseract.js'); const Tesseract = tesseractModule.default || tesseractModule;
-           const { data: { text } } = await Tesseract.recognize(file, 'spa'); extractedText = text;
-        } else if (file.type === 'application/pdf') {
-           const pdfjsLib = await import('pdfjs-dist');
-           // @ts-ignore
-           const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min?url')).default;
-           pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
-
-           const arrayBuffer = await file.arrayBuffer(); const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-           for (let i = 1; i <= pdfDoc.numPages; i++) { const page = await pdfDoc.getPage(i); const textContent = await page.getTextContent(); extractedText += textContent.items.map((item: any) => item.str).join(' ') + '\n'; }
-        }
-        
-        const matches = extractedText.match(/(\d+([.,]\d{2}))/g);
-        if (matches) { const nums = matches.map(m => parseFloat(m.replace(',', '.'))); const validNums = nums.filter(n => n < 50000); possibleTotal = validNums.length > 0 ? Math.max(...validNums) : 0; }
-        
-        const fallbackFactura: FacturaExtended = {
-          id: 'draft-fallback-' + Date.now(), tipo: 'compra', num: 'REVISAR MANUAL', date: DateUtil.today(),
-          prov: file.type.includes('image') ? '📷 OCR Emergencia' : `📄 PDF Rescatado`,
-          total: String(possibleTotal || 0), base: String(possibleTotal ? (possibleTotal / 1.10).toFixed(2) : 0), tax: String(possibleTotal ? (possibleTotal - (possibleTotal / 1.10)).toFixed(2) : 0),
-          paid: false, reconciled: false, source: 'local-rescue', status: 'draft', unidad_negocio: 'REST', file_base64: fileBase64, attachmentSha: Date.now().toString() 
-        };
-
-        await onSave({ ...safeData, facturas: [fallbackFactura, ...facturasSeguras] });
-        alert(`⚠️ Rescate offline completado. Revisa los totales manualmente.`);
-      } catch (fallbackErr) { alert("⚠️ Archivo corrupto o ilegible."); }
+      alert("⚠️ Error en OCR. Procesamiento manual requerido.");
     } finally { setIsSyncing(false); }
   };
 
   /* =======================================================
-   * 📧 LECTOR GMAIL DESDE SUPABASE 
+   * 📧 LECTOR GMAIL (Supabase Seguro)
    * ======================================================= */
   const handleFetchEmails = async () => {
     setIsSyncing(true);
     try {
       const { data: correosBD, error } = await supabase
         .from('inbox_gmail')
-        .select('*');
+        .select('*')
+        .eq('status', 'new');
 
       if (error) throw error;
       
       if (correosBD && correosBD.length > 0) {
         const nuevosCorreos: EmailDraft[] = correosBD.map((fila: any) => ({
-          id: fila.id,
-          from: fila.remitente,
-          subject: fila.asunto,
-          date: fila.fecha ? fila.fecha.slice(0, 10) : DateUtil.today(),
-          hasAttachment: true,
-          status: 'new',
-          fileBase64: fila.archivo_base64,
-          fileName: fila.archivo_nombre
+          id: fila.id, from: fila.remitente, subject: fila.asunto, date: fila.fecha ? fila.fecha.slice(0, 10) : DateUtil.today(),
+          hasAttachment: true, status: 'new', fileBase64: fila.archivo_base64, fileName: fila.archivo_nombre
         }));
 
         setEmailInbox(prev => {
@@ -337,14 +279,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         });
         alert(`✅ ¡Encontradas ${correosBD.length} facturas nuevas en Gmail!`);
       } else {
-        alert("📭 No hay correos nuevos con facturas en este momento.");
+        alert("📭 No hay correos nuevos pendientes de escanear.");
       }
-    } catch (e: any) {
-      console.error("Error leyendo inbox_gmail:", e);
-      alert(`⚠️ Error conectando con Supabase: ${e.message || 'Desconocido'}`);
-    } finally {
-      setIsSyncing(false);
-    }
+    } catch (e: any) { alert(`⚠️ Error conectando con servidor: ${e.message || 'Desconocido'}`); } 
+    finally { setIsSyncing(false); }
   };
 
   const handleParseEmail = async (emailId: string) => {
@@ -357,7 +295,8 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       if (!apiKey) throw new Error("NO_API_KEY");
 
       const ai = new GoogleGenAI({ apiKey });
-      const prompt = `Actúa como un OCR contable. Extrae de esta factura y devuelve SOLO un JSON estricto: { "proveedor": "Nombre de la empresa", "num": "Número de factura", "fecha": "YYYY-MM-DD", "total": 0, "base": 0, "iva": 0 }`;
+      const prompt = `Actúa como un Auditor Contable. Lee esta factura y extrae TODO lo posible. Devuelve SOLO un JSON estricto: 
+      { "proveedor": "Nombre de la empresa", "nif": "NIF/CIF", "num": "Número de factura", "fecha": "YYYY-MM-DD", "total": 0, "base": 0, "iva": 0, "referencias_albaranes": ["Array de números de albarán referenciados"] }`;
       
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
@@ -369,65 +308,61 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       const rawJson = safeJSON(cleanText);
 
       const nuevaFacturaIA: FacturaExtended = {
-        id: 'draft-email-' + Date.now(), 
-        tipo: 'compra', 
-        num: rawJson.num || 'S/N', 
-        date: rawJson.fecha || correo.date, 
-        prov: rawJson.proveedor || correo.from,
-        total: String(rawJson.total || 0), 
-        base: String(rawJson.base || 0), 
-        tax: String(rawJson.iva || 0),
-        paid: false, 
-        reconciled: false, 
-        source: 'gmail-sync', 
-        status: 'draft', 
-        unidad_negocio: 'REST', 
-        file_base64: `data:application/pdf;base64,${correo.fileBase64}`, 
-        attachmentSha: correo.id 
+        id: 'draft-email-' + Date.now(), tipo: 'compra', num: rawJson.num || 'S/N', 
+        date: rawJson.fecha || correo.date, prov: rawJson.proveedor || correo.from,
+        total: String(rawJson.total || 0), base: String(rawJson.base || 0), tax: String(rawJson.iva || 0),
+        albaranIdsArr: rawJson.referencias_albaranes || [],
+        paid: false, reconciled: false, source: 'gmail-sync', status: 'draft', unidad_negocio: 'REST', 
+        file_base64: `data:application/pdf;base64,${correo.fileBase64}`, attachmentSha: correo.id 
       };
 
       await onSave({ ...safeData, facturas: [nuevaFacturaIA, ...facturasSeguras] });
       
-      const { error: deleteError } = await supabase
-        .from('inbox_gmail')
-        .delete()
-        .eq('id', emailId);
-        
-      if (deleteError) console.error("Aviso: No se pudo borrar de Supabase", deleteError);
+      // 🛡️ Actualización segura, NUNCA borramos.
+      await supabase.from('inbox_gmail').update({ status: 'parsed' }).eq('id', emailId);
 
       setEmailInbox(prev => prev.filter(e => e.id !== emailId));
       alert("✅ Factura extraída y enviada a Borradores.");
-    } catch (e: any) {
-      console.error(e);
-      alert("⚠️ Error al procesar el PDF del correo. Quizás no tengas saldo en Gemini o el PDF esté protegido.");
-    } finally {
-      setIsSyncing(false);
-    }
+    } catch (e: any) { alert("⚠️ Error al procesar el PDF del correo."); } 
+    finally { setIsSyncing(false); }
   };
 
   /* =======================================================
-   * ⚙️ LÓGICA DE NEGOCIO Y GUARDADO
+   * ⚙️ LÓGICA DE NEGOCIO Y GUARDADO (CONECTADA A LA FASE 1)
    * ======================================================= */
   const handleConfirmAuditoriaIA = async (draftId: string) => {
+    setIsProcessing(true);
     try {
-      const newData = { ...safeData, facturas: [...facturasSeguras], albaranes: [...albaranesSeguros] };
-      const draftIdx = newData.facturas.findIndex(f => f.id === draftId);
+      const newData = JSON.parse(JSON.stringify(safeData)); // Copia profunda segura
+      const draftIdx = newData.facturas.findIndex((f: any) => f.id === draftId);
       const audit = draftsIA.find(d => d.id === draftId);
       if (draftIdx === -1 || !audit) return;
 
-      let unitToAssign: BusinessUnit = 'REST'; 
+      // 1. Reseteamos los valores porque la función 'linkAlbaranes' los calculará exactamente
+      newData.facturas[draftIdx].total = "0";
+      newData.facturas[draftIdx].base = "0";
+      newData.facturas[draftIdx].tax = "0";
+      newData.facturas[draftIdx].albaranIdsArr = []; 
+
+      // 2. Si la IA encontró albaranes que cuadran, los vinculamos con nuestro motor de la Fase 1
       if (audit.candidatos && audit.candidatos.length > 0) {
         const idsVincular = audit.candidatos.map((a: any) => a.id);
-        newData.albaranes = newData.albaranes.map(a => idsVincular.includes(a.id) ? { ...a, invoiced: true } : a);
-        (newData.facturas[draftIdx] as FacturaExtended).albaranIdsArr = idsVincular;
-        unitToAssign = (audit.candidatos[0] as any).unitId || 'REST';
+        linkAlbaranesToFactura(newData, draftId, idsVincular);
+        newData.facturas[draftIdx].unidad_negocio = audit.candidatos[0].unitId || 'REST';
+      } else {
+        // Si es un gasto directo (luz, agua) que no tiene albaranes, dejamos lo que leyó la IA
+        newData.facturas[draftIdx].total = String(audit.total);
+        newData.facturas[draftIdx].base = String(audit.base);
+        newData.facturas[draftIdx].tax = String(audit.tax);
       }
 
-      (newData.facturas[draftIdx] as FacturaExtended).status = 'approved'; 
-      newData.facturas[draftIdx].unidad_negocio = unitToAssign; 
+      newData.facturas[draftIdx].status = 'approved'; 
+      
       await onSave(newData);
-    } catch (error) {
-      console.error("Error al confirmar IA:", error);
+    } catch (error) { 
+      console.error("Error al confirmar IA:", error); 
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -436,7 +371,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     await onSave({ ...safeData, facturas: facturasSeguras.filter(f => f.id !== id) });
   };
 
-  // 📦 Agrupación manual de albaranes optimizada
   const pendingGroups = useMemo(() => {
     try {
       const byMonth: Record<string, { name: string; groups: Record<string, any> }> = {};
@@ -479,33 +413,40 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       });
 
       return Object.entries(byMonth).sort((a, b) => b[0].localeCompare(a[0]));
-    } catch (error) {
-      console.error("Error agrupando albaranes:", error);
-      return [];
-    }
+    } catch (error) { return []; }
   }, [albaranesSeguros, year, mode, deferredSearch, selectedUnit]);
 
+  // 🚀 Cierre Manual Conectado al Motor Exacto
   const handleConfirmManualInvoice = async () => {
     if (!modalForm.num.trim() || modalForm.selectedAlbs.length === 0) return;
-    const newData = { ...safeData, albaranes: [...albaranesSeguros], facturas: [...facturasSeguras] };
-    let totalFactura = 0;
-    
-    newData.albaranes = newData.albaranes.map(a => {
-      if (modalForm.selectedAlbs.includes(a.id)) { totalFactura += Num.parse(a.total) || 0; return { ...a, invoiced: true }; } return a;
-    });
+    setIsProcessing(true);
+    try {
+      const newData = JSON.parse(JSON.stringify(safeData));
+      const newFacId = 'fac-manual-' + Date.now();
+      
+      // 1. Creamos la factura a cero
+      const newFactura: FacturaExtended = {
+        id: newFacId, 
+        tipo: mode === 'proveedor' ? 'compra' : 'venta', 
+        num: modalForm.num, 
+        date: modalForm.date,
+        prov: mode === 'proveedor' ? (selectedGroup?.label || '') : 'Varios', 
+        cliente: mode === 'socio' ? (selectedGroup?.label || '') : 'Arume',
+        total: "0", base: "0", tax: "0", albaranIdsArr: [],
+        paid: false, reconciled: false, source: 'manual-group', status: 'approved', 
+        unidad_negocio: modalForm.unitId || 'REST' 
+      };
 
-    const taxRate = 0.10; 
-    const baseObj = totalFactura / (1 + taxRate);
-    const taxObj = totalFactura - baseObj;
+      newData.facturas.unshift(newFactura);
 
-    newData.facturas.unshift({
-      id: 'fac-' + Date.now(), tipo: mode === 'proveedor' ? 'compra' : 'venta', num: modalForm.num, date: modalForm.date,
-      prov: mode === 'proveedor' ? (selectedGroup?.label || '') : 'Varios', cliente: mode === 'socio' ? (selectedGroup?.label || '') : 'Arume',
-      total: String(Num.round2(totalFactura)), base: String(Num.round2(baseObj)), tax: String(Num.round2(taxObj)), albaranIdsArr: modalForm.selectedAlbs,
-      paid: false, reconciled: false, source: 'manual-group', status: 'approved', unidad_negocio: modalForm.unitId || 'REST' 
-    } as any);
+      // 2. Usamos el motor para vincular y sumar EXACTAMENTE los albaranes seleccionados
+      linkAlbaranesToFactura(newData, newFacId, modalForm.selectedAlbs);
 
-    await onSave(newData); setSelectedGroup(null);
+      await onSave(newData); 
+      setSelectedGroup(null);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleTogglePago = async (id: string) => {
@@ -519,15 +460,26 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     }
   };
 
+  // 🚀 Borrado Seguro de Facturas
   const handleDeleteFactura = async (id: string) => {
     const fac = facturasSeguras.find(f => f.id === id); 
     if (!fac) return;
     if (fac.reconciled) return alert("⚠️ No puedes borrar una factura validada por el Banco.");
     if (!window.confirm(`🛑 ¿Eliminar DEFINITIVAMENTE la factura ${fac.num || 'sin número'}?`)) return;
     
-    const newData = { ...safeData, facturas: facturasSeguras.filter(f => f.id !== id), albaranes: [...albaranesSeguros] };
-    const ids = fac.albaranIdsArr || [];
-    newData.albaranes = newData.albaranes.map(a => ids.includes(a.id) ? { ...a, invoiced: false } : a);
+    const newData = JSON.parse(JSON.stringify(safeData));
+    
+    // 1. Liberamos los albaranes (invoiced: false)
+    const idsToFree = fac.albaranIdsArr || [];
+    newData.albaranes.forEach((a: any) => {
+      if (idsToFree.includes(a.id)) {
+        a.invoiced = false;
+      }
+    });
+
+    // 2. Borramos la factura
+    newData.facturas = newData.facturas.filter((f: any) => f.id !== id);
+    
     await onSave(newData);
   };
 
@@ -561,12 +513,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     if (!f || !f.file_base64) return alert('El PDF original no está disponible.');
     try {
         const a = document.createElement('a');
-        a.href = f.file_base64;
+        a.href = f.file_base64.startsWith('data:') ? f.file_base64 : `data:application/pdf;base64,${f.file_base64}`; 
         a.download = `${superNorm(f.prov||'factura')}_${f.num||'SN'}.pdf`;
         a.click();
-    } catch(e) {
-        alert("Error al descargar el archivo");
-    }
+    } catch(e) { alert("Error al descargar el archivo"); }
   };
 
   /* =======================================================
@@ -615,7 +565,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   return (
     <div className="animate-fade-in space-y-6 pb-24 min-h-screen relative max-w-[1600px] mx-auto">
       
-      {/* OVERLAY DE DROP PROTEGIDO Y NO BLOQUEANTE */}
       <AnimatePresence>
         {isDragging && (
           <motion.div data-test-id="drop-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[60] pointer-events-none">
@@ -631,7 +580,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         )}
       </AnimatePresence>
       
-      {/* 🚀 HEADER COMPACTO Y MODERNO */}
       <header className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6 md:p-8 flex flex-col lg:flex-row justify-between gap-4 relative z-10">
         <div>
           <h2 className="text-2xl md:text-3xl font-black text-slate-800 tracking-tighter">Facturas · INVØYS PRO</h2>
@@ -654,12 +602,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         </div>
       </header>
 
-      {/* 🚀 TOOLBAR STICKY (Filtros e Inputs) */}
       <div className="sticky top-2 z-40">
         <div className={cn("bg-white/95 backdrop-blur-md px-4 py-3 rounded-[2rem] shadow-md border border-slate-200")}>
           <div className="flex flex-col xl:flex-row items-center justify-between gap-3">
             
-            {/* TABS DE VISTA */}
             <div className="flex items-center bg-slate-100 p-1.5 rounded-2xl w-full xl:w-auto overflow-x-auto no-scrollbar">
               <button onClick={() => setActiveTab('pend')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition whitespace-nowrap", activeTab === 'pend' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>
                 📦 Agrupar Albaranes
@@ -691,7 +637,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
               <div className="relative flex-1 md:w-72">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Buscar proveedor, nº o ref OCR..." className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-bold outline-none focus:ring-2 ring-indigo-500/20 shadow-sm transition" />
+                <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Buscar proveedor o referencia..." className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-bold outline-none focus:ring-2 ring-indigo-500/20 shadow-sm transition" />
               </div>
             </div>
 
@@ -699,21 +645,17 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         </div>
       </div>
 
-      {/* 🚀 LAYOUT GRID (Inbox IA Derecha / Contenido Izquierda) */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 relative z-10">
         
-        {/* ZONA IZQUIERDA: Listas Principales */}
         <section className="xl:col-span-8 space-y-4">
           {activeTab === 'pend' ? renderPendingGroups() : (
             <InvoicesList facturas={facturasSeguras} searchQ={deferredSearch} selectedUnit={selectedUnit} mode={mode} filterStatus={filterStatus} year={year} businessUnits={BUSINESS_UNITS} sociosReales={SOCIOS_REALES_NAMES} superNorm={superNorm} onOpenDetail={setSelectedInvoice as any} onTogglePago={handleTogglePago} onDelete={handleDeleteFactura} />
           )}
         </section>
 
-        {/* ZONA DERECHA: Inbox Múltiple (Email + IA) */}
         <aside className="xl:col-span-4 space-y-6">
           <div className="sticky top-24 space-y-6">
             
-            {/* INBOX CORREO */}
             {emailInbox.length > 0 && (
               <div className="bg-white p-5 rounded-[2rem] border border-slate-200 shadow-sm">
                 <h4 className="text-sm font-black text-slate-800 mb-1 flex items-center gap-2"><Inbox className="w-4 h-4 text-blue-500"/> Correos Recibidos</h4>
@@ -728,8 +670,8 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                         </div>
                         <span className="text-[9px] font-black text-slate-400">{mail.date}</span>
                       </div>
-                      <button onClick={() => handleParseEmail(mail.id)} className="w-full mt-3 bg-blue-50 text-blue-600 font-black text-[10px] uppercase py-2 rounded-lg hover:bg-blue-600 hover:text-white transition flex items-center justify-center gap-2">
-                        <Zap className="w-3 h-3"/> Extraer PDF con IA
+                      <button onClick={() => handleParseEmail(mail.id)} disabled={isSyncing} className="w-full mt-3 bg-blue-50 text-blue-600 font-black text-[10px] uppercase py-2 rounded-lg hover:bg-blue-600 hover:text-white disabled:opacity-50 transition flex items-center justify-center gap-2">
+                        {isSyncing ? <Loader2 className="w-3 h-3 animate-spin"/> : <Zap className="w-3 h-3"/>} Extraer PDF con IA
                       </button>
                     </div>
                   ))}
@@ -737,7 +679,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
               </div>
             )}
 
-            {/* INBOX IA (Conciliador 3-Way Matching) */}
             {draftsIA.length > 0 ? (
               <div className="bg-indigo-50/50 p-5 rounded-[2rem] border border-indigo-100 shadow-inner">
                 <h4 className="text-sm font-black text-slate-800 mb-1 flex items-center gap-2"><Sparkles className="w-4 h-4 text-indigo-500"/> Borradores 3-WAY MATCH ({draftsIA.length})</h4>
@@ -760,8 +701,8 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                           <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-widest bg-amber-50 text-amber-600 border border-amber-100">Descuadre {Num.fmt(d.diferencia)}</span>
                         )}
                       </div>
-                      <button onClick={() => handleConfirmAuditoriaIA(d.id)} className="w-full mt-3 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase hover:bg-indigo-700 transition">
-                        Confirmar y Vincular
+                      <button onClick={() => handleConfirmAuditoriaIA(d.id)} disabled={isProcessing} className="w-full mt-3 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase hover:bg-indigo-700 disabled:opacity-50 transition flex justify-center items-center gap-2">
+                        {isProcessing ? <Loader2 className="w-3 h-3 animate-spin"/> : <CheckCircle2 className="w-3 h-3"/>} Confirmar y Vincular
                       </button>
                     </div>
                   ))}
@@ -778,7 +719,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         </aside>
       </div>
 
-      {/* MODALES MANUALES */}
       <AnimatePresence>
         {isExportModalOpen && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex justify-center items-center p-4 bg-slate-900/80 backdrop-blur-sm">
@@ -844,14 +784,15 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                   )}
                   <div><label className="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-1">Fecha de Emisión</label><input type="date" value={modalForm.date} onChange={(e) => setModalForm({ ...modalForm, date: e.target.value })} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:ring-2 ring-indigo-500/20 transition cursor-pointer" /></div>
                 </div>
-                <button onClick={handleConfirmManualInvoice} disabled={modalForm.selectedAlbs.length === 0} className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black text-sm shadow-xl shadow-indigo-200 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition flex justify-center items-center gap-2">GUARDAR Y CERRAR ALBARANES <CheckCircle2 className="w-5 h-5"/></button>
+                <button onClick={handleConfirmManualInvoice} disabled={modalForm.selectedAlbs.length === 0 || isProcessing} className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black text-sm shadow-xl shadow-indigo-200 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition flex justify-center items-center gap-2">
+                  {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5"/>} GUARDAR Y CERRAR ALBARANES
+                </button>
               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* 🚀 MODAL DE DETALLE DE FACTURA PROTEGIDO */}
       {selectedInvoice && typeof selectedInvoice === 'object' && selectedInvoice.id && (
         <InvoiceDetailModal 
           factura={selectedInvoice as any} 
