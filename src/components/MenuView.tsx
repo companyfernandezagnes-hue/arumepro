@@ -59,6 +59,7 @@ function useMenuIntelligencePRO(
       omnes: { precioMedioOfertado: 0, precioMedioDemandado: 0, ratioOmnes: 0, rangoMax: 0, rangoMin: 0, amplitud: 0, cumple1: false, cumple2: false, grupos: { bajo:0, medio:0, alto:0} }
     };
     
+    // 🛡️ Protección anti-crash si no hay platos
     if (!db.platos || db.platos.length === 0) return result;
 
     const checkDate = (dateStr: string) => {
@@ -89,6 +90,7 @@ function useMenuIntelligencePRO(
     result.global.breakEvenClientes = result.global.ticketMedio > 0 ? result.global.breakEvenVentas / result.global.ticketMedio : 0;
 
     let totalQty = 0; let sumMargenPonderado = 0; const searchN = norm(searchQ);
+    const tempFamilias: Record<string, any> = {};
 
     // 🚀 ANÁLISIS DE PLATOS CON MERMA APLICADA (elBulli Method)
     const analisis = db.platos.map(p => {
@@ -121,15 +123,16 @@ function useMenuIntelligencePRO(
       result.global.totalBeneficioBruto += totalBeneficioLinea;
 
       const cat = p.category || 'General';
-      if (!result.families[cat]) result.families[cat] = { qty: 0, ventasBrutas: 0, ventasNetas: 0, coste: 0, beneficio: 0 };
-      result.families[cat].qty += qty;
-      result.families[cat].ventasNetas += totalVentasNetoLinea;
-      result.families[cat].coste += totalCosteLinea;
-      result.families[cat].beneficio += totalBeneficioLinea;
+      if (!tempFamilias[cat]) tempFamilias[cat] = { qty: 0, ventasBrutas: 0, ventasNetas: 0, coste: 0, beneficio: 0 };
+      tempFamilias[cat].qty += qty;
+      tempFamilias[cat].ventasNetas += totalVentasNetoLinea;
+      tempFamilias[cat].ventasBrutas += totalVentasBrutoLinea; // Añadido para la ley de Omnes
+      tempFamilias[cat].coste += totalCosteLinea;
+      tempFamilias[cat].beneficio += totalBeneficioLinea;
 
       return { 
         ...p, qty, precioNeto, costeRealEscandallo, margenUnitario, fcUnitario, precioIdeal,
-        totalVentasLinea: totalVentasNetoLinea, totalCosteLinea, totalBeneficioLinea 
+        totalVentasLinea: totalVentasNetoLinea, totalVentasBruto: totalVentasBrutoLinea, totalCosteLinea, totalBeneficioLinea 
       };
     });
 
@@ -140,8 +143,8 @@ function useMenuIntelligencePRO(
     categorias.forEach(cat => {
       const platosFamilia = analisis.filter(p => p.category === cat);
       const activosFamilia = platosFamilia.filter(p => p.qty > 0);
-      const udsFamilia = platosFamilia.reduce((acc, p) => acc + p.qty, 0);
-      const ventasBrutasFamilia = platosFamilia.reduce((acc, p) => acc + p.totalVentasBruto, 0);
+      const udsFamilia = tempFamilias[cat]?.qty || 0;
+      const ventasBrutasFamilia = tempFamilias[cat]?.ventasBrutas || 0;
       const margenTotalFamilia = platosFamilia.reduce((acc, p) => acc + (p.margenUnitario * p.qty), 0);
 
       let mediaPop = 0; let mediaMargen = 0;
@@ -227,7 +230,7 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
     return 'General';
   };
 
-  // 🚀 LECTOR DE IA / OCR PARA TICKETS DE VENTAS (NUEVO)
+  // 🚀 LECTOR DE IA / OCR PARA TICKETS DE VENTAS
   const handleUploadIA = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
     const apiKey = localStorage.getItem('gemini_api_key');
@@ -251,9 +254,9 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
       });
 
       const raw = response.text || "";
-      const json = raw.includes('{') ? JSON.parse(raw) : {};
+      const json = raw.includes('{') ? JSON.parse(raw.substring(raw.indexOf('{'), raw.lastIndexOf('}') + 1)) : {};
       
-      if (!json.ventas || !Array.isArray(json.ventas)) throw new Error("Formato inválido");
+      if (!json.ventas || !Array.isArray(json.ventas)) throw new Error("Formato inválido devuelto por IA");
       
       const dateInput = prompt(`📅 ¿A qué fecha corresponden estas ventas IA? (YYYY-MM-DD):`, DateUtil.today());
       if (!dateInput) { setIsScanning(false); return; }
@@ -279,7 +282,7 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
       alert(`✅ IA completada: Se han importado ${count} líneas de venta.`);
     } catch (error) {
       console.error(error);
-      alert("⚠️ La IA no pudo leer los platos. Prueba con un archivo más claro o usa la carga de Excel estándar.");
+      alert("⚠️ La IA no pudo leer los platos correctamente. Comprueba el archivo y vuelve a intentarlo.");
     } finally {
       setIsScanning(false);
       e.target.value = '';
@@ -333,6 +336,14 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
     await onSave({ ...db, platos: newPlatos }); setEditingPlato(null);
   };
 
+  // 🛡️ FUNCIÓN DE BORRADO AÑADIDA PARA EVITAR EL CRASH DE PANTALLA AZUL
+  const handleDeletePlato = async (id: string) => {
+    if (!window.confirm("¿Seguro que quieres eliminar este plato? Se perderá su historial.")) return;
+    const newPlatos = (db.platos || []).filter(p => p.id !== id);
+    await onSave({ ...db, platos: newPlatos });
+    setEditingPlato(null);
+  };
+
   // --- RENDERS DE COMPONENTES INTERNOS ---
   const renderQuad = (title: string, subtitle: string, color: string, list: any[]) => (
     <div className={`bg-white p-5 rounded-[2.5rem] border border-slate-100 shadow-sm h-80 flex flex-col group hover:shadow-md transition-shadow`}>
@@ -352,7 +363,7 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
   );
 
   return (
-    <div className="animate-fade-in space-y-6 pb-24 relative">
+    <div className="animate-fade-in space-y-6 pb-24 relative max-w-[1600px] mx-auto">
       
       {/* OVERLAY DE CARGA IA */}
       <AnimatePresence>
@@ -440,12 +451,10 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
           </div>
           <button onClick={() => setEditingPlato({ id: 'p-' + Date.now(), name: '', price: 0, cost: 0, category: 'General', iva: 10, merma: 0 })} className="bg-slate-900 text-white p-3 rounded-2xl shadow-sm hover:bg-indigo-600 transition" title="Añadir Plato Manual"><Plus className="w-5 h-5" /></button>
           
-          {/* BOTÓN SUBIR EXCEL */}
           <label className="bg-emerald-500 text-white p-3 rounded-2xl shadow-sm hover:bg-emerald-600 transition cursor-pointer" title="Subir Excel TPV">
             <FileSpreadsheet className="w-5 h-5" /><input type="file" ref={fileInputRef} onChange={handleImportExcel} className="hidden" accept=".csv, .xlsx, .xls" />
           </label>
           
-          {/* BOTÓN IA / OCR (NUEVO) */}
           <label className="bg-indigo-600 text-white p-3 rounded-2xl shadow-sm hover:bg-indigo-700 transition cursor-pointer" title="Leer Ticket Z con IA">
             <Camera className="w-5 h-5" /><input type="file" ref={iaInputRef} onChange={handleUploadIA} className="hidden" accept=".pdf, image/*" />
           </label>
@@ -678,7 +687,7 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
 
       </AnimatePresence>
 
-      {/* MODAL EDICIÓN PLATO (+ MERMAS) */}
+      {/* MODAL EDICIÓN PLATO (+ MERMAS) PROTEGIDO */}
       <AnimatePresence>
         {editingPlato && (
           <div className="fixed inset-0 z-[9999] flex justify-center items-center p-4">
@@ -727,7 +736,12 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
                 
                 <div className="pt-4 space-y-2">
                   <button type="submit" className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black shadow-xl hover:bg-indigo-600 transition active:scale-95">GUARDAR PLATO</button>
-                  {db.platos?.some(p => p.id === editingPlato.id) && <button type="button" onClick={() => handleDeletePlato(editingPlato.id)} className="w-full text-rose-500 font-bold text-xs py-2">Eliminar</button>}
+                  {/* 🛡️ BOTÓN DE BORRAR REPARADO */}
+                  {db.platos?.some(p => p.id === editingPlato.id) && (
+                    <button type="button" onClick={() => handleDeletePlato(editingPlato.id)} className="w-full text-rose-500 font-bold text-xs py-2 hover:bg-rose-50 rounded-xl transition">
+                      Eliminar Plato
+                    </button>
+                  )}
                 </div>
               </form>
             </motion.div>
