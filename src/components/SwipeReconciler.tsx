@@ -4,7 +4,7 @@ import { CheckCircle2, Sparkles, ArrowDownLeft, Search, X as CloseIcon } from 'l
 import { AppData } from '../types';
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
-// 🚀 Importamos el cerebro que creamos antes
+// 🚀 Importamos el cerebro 
 import { findMatches, executeLink } from '../services/bancoLogic';
 
 export interface SwipeReconcilerProps {
@@ -31,7 +31,6 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
 
   const next = () => setCurrentIndex(prev => prev + 1);
 
-  // Pantalla final cuando terminas de hacer swipe a todo
   if (pendingMovements.length === 0 || currentIndex >= pendingMovements.length) {
     return (
       <div className="fixed inset-0 z-[1000] flex justify-center items-center p-4">
@@ -52,16 +51,15 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
 
   const currentItem = pendingMovements[currentIndex];
 
-  // 🚀 AQUÍ ESTÁ LA MAGIA: Usamos el cerebro central, 0 código repetido
+  // 🚀 USAMOS EL CEREBRO DE BUSQUEDA
   const matches = useMemo(() => {
     return findMatches(currentItem, data);
   }, [currentItem, data]);
 
   const handleLinkLocal = async (matchType: string, docId: string, comision: number = 0) => {
     const newData = JSON.parse(JSON.stringify(data));
-    executeLink(newData, currentItem.id, matchType, docId, comision); // Llamamos al motor central
+    executeLink(newData, currentItem.id, matchType, docId, comision); 
     await onSave(newData);
-    // Al guardar, el array de pendingMovements cambiará y automáticamente pasará al siguiente
   };
 
   const progressPercent = Math.round((currentIndex / pendingMovements.length) * 100);
