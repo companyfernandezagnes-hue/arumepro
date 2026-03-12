@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Upload, FileSpreadsheet, CheckCircle2, Database,
-  ArrowRight, Sparkles, Loader2, Camera, Layers, Receipt, Mic, Square, AlertTriangle, FileDown, X
+  ArrowRight, Sparkles, Loader2, Camera, Receipt, Mic, Square, AlertTriangle, FileDown, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import { GoogleGenAI } from "@google/genai";
-import { AppData, Albaran } from '../types';
+import { AppData } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
 import { useColumnDetector } from '../hooks/useColumnDetector';
@@ -129,18 +129,16 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
   const [processedData, setProcessedData] = useState<{
     cierre?: any; ventasMenu?: any; albaranesExcel?: any[]; facturaIa?: any; albaranIa?: any; tpvPreview?: any
   } | null>(null);
+  
   const [isDragging, setIsDragging] = useState(false);
-
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // VOSK Mic Logic
   const [recording, setRecording] = useState(false);
   const mediaRecRef = useRef<MediaRecorder|null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const runId = useRef(0);
   
-  // 🛡️ Contador de Drag para evitar el parpadeo
-  const dragCounter = useRef(0);
-
-  // Hook Inteligente TPV
   const { analyzeColumns, saveProfile } = useColumnDetector();
 
   const generarHash = async (prov: string, num: string, date: string, total: number) => {
@@ -230,8 +228,8 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         } else {
           setProcessedData({ albaranIa: { id: `alb-fall-${Date.now()}`, prov: file.type.includes('image') ? '📷 OCR Rescate' : '📄 PDF Rescate', date: today, num: 'S/N-REVISAR', socio: "Arume", notes: "Generado por Rescate Local. Revisar líneas.", items: [{ q: 1, n: "Gasto recuperado", unit: "ud", t: possibleTotal, rate: 10, base: fallbackBase, tax: fallbackIva, unitPrice: possibleTotal }], total: possibleTotal, base: fallbackBase, taxes: fallbackIva, invoiced: false, paid: false, reconciled: false, status: 'warning', unitId: 'REST' } });
         }
-        alert("⚠️ Gemini no pudo procesarlo. Se ha extraído un borrador de rescate.");
-      } catch (fallbackErr) { alert(`⚠️ Error crítico: Archivo ilegible.`); }
+        alert("⚠️ El archivo era complejo y se ha usado un lector de emergencia básico.");
+      } catch (fallbackErr) { alert(`❌ Error crítico: Archivo completamente ilegible.`); }
     } finally { if (myRunId === runId.current) setIsScanning(false); }
   };
 
@@ -244,7 +242,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       mr.onstop = async () => {
         const mime = cleanMime(mr.mimeType); const blob = new Blob(chunksRef.current, { type: mime });
         stream.getTracks().forEach(t => t.stop()); setRecording(false);
-        // Enviamos al VOSK Local
         setIsScanning(true); setProcessedData(null);
         try {
           const formData = new FormData(); formData.append("file", blob, "audio.webm");
@@ -252,7 +249,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
           if (!voskRes.ok) throw new Error("Vosk no responde");
           const voskData = await voskRes.json();
           
-          // Si VOSK funciona, le pasamos el texto a Gemini para estructurarlo
           const apiKey = sessionStorage.getItem('gemini_api_key');
           if (apiKey) {
             const genAI = new GoogleGenAI({ apiKey });
@@ -261,13 +257,13 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
             const alData = safeJSON(response.text || "");
             const rec = reconcileAlbaran(alData);
             setProcessedData({
-              albaranIa: { id: `alb-voz-${Date.now()}`, prov: rec.proveedor || 'Dictado por voz', date: rec.fecha || DateUtil.today(), num: rec.num || 'S/N', socio: "Arume", notes: "Transcrito con VOSK", items: rec.lineas.map(l => ({ q: l.qty, n: l.name, unit: l.unit, t: l.total, rate: l.tax_rate, base: l.base, tax: l.tax, unitPrice: l.total })), total: rec.sum_total, base: rec.sum_base, taxes: rec.sum_tax, invoiced: false, paid: false, reconciled: false, status: 'ok', unitId: 'REST' }
+              albaranIa: { id: `alb-voz-${Date.now()}`, prov: rec.proveedor || 'Dictado por voz', date: rec.fecha || DateUtil.today(), num: rec.num || 'S/N', socio: "Arume", notes: "Transcrito con voz", items: rec.lineas.map(l => ({ q: l.qty, n: l.name, unit: l.unit, t: l.total, rate: l.tax_rate, base: l.base, tax: l.tax, unitPrice: l.total })), total: rec.sum_total, base: rec.sum_base, taxes: rec.sum_tax, invoiced: false, paid: false, reconciled: false, status: 'ok', unitId: 'REST' }
             });
           }
-        } catch { alert("Error con servidor VOSK local."); } finally { setIsScanning(false); }
+        } catch { alert("Error conectando con el motor de voz."); } finally { setIsScanning(false); }
       };
       mr.start(); setRecording(true); setTimeout(() => { if (mr.state === 'recording') mr.stop(); }, 60000);
-    } catch { alert("No se pudo acceder al micrófono"); }
+    } catch { alert("No se pudo acceder al micrófono."); }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement> | React.DragEvent) => {
@@ -276,16 +272,15 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     else if ('dataTransfer' in e && e.dataTransfer.files) file = e.dataTransfer.files[0];
     if (!file) return;
 
-    // 🛡️ Validación de Tipo de Archivo Profesional
     if (importMode.startsWith('ia_')) { 
        if (!file.type.includes('pdf') && !file.type.startsWith('image/')) {
-         return alert("⚠️ La IA solo soporta PDFs o Imágenes (JPG/PNG).");
+         return alert("⚠️ La IA solo admite PDF o Imágenes (JPG/PNG).");
        }
        await procesarDocumentoIA(file, importMode); 
        return; 
     } else {
        if (!['.xls', '.xlsx', '.csv'].some(ext => file!.name.toLowerCase().endsWith(ext))) {
-         return alert("⚠️ Este modo solo acepta archivos Excel (.xlsx) o CSV.");
+         return alert("⚠️ Este modo es para archivos Excel (.xlsx) o CSV.");
        }
     }
 
@@ -296,12 +291,12 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 }) as any[][];
 
         if (importMode === 'tpv') {
-          const dateInput = prompt(`📅 ¿Fecha de estas ventas TPV? (YYYY-MM-DD):`, DateUtil.today());
+          const dateInput = prompt(`📅 ¿Fecha de ventas TPV? (YYYY-MM-DD):`, DateUtil.today());
           if (!dateInput) return;
           const analysis = analyzeColumns(rows);
           setProcessedData({ tpvPreview: { rows, mapping: analysis.mapping, confidence: analysis.confidence, isKnown: analysis.isKnown, date: dateInput } });
         } else {
-          // EXCEL DE ALBARANES
+          // EXCEL ALBARANES
           const agrupados: Record<string, AlbaranIA> = {};
           rows.slice(1).forEach(fila => {
             const prov = fila[0] || 'Desconocido'; const fecha = normalizeDate(fila[1]); const producto = fila[2] || 'Varios'; const cantidad = Num.parse(fila[3] || 1);
@@ -316,7 +311,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
           });
           setProcessedData({ albaranesExcel: albsExcel });
         }
-      } catch (err) { alert("Error al leer Excel."); }
+      } catch (err) { alert("Error al leer el archivo Excel."); }
     };
     reader.readAsBinaryString(file);
   };
@@ -343,7 +338,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       });
       
       if (!newData.cierres) newData.cierres = [];
-      newData.cierres.push({ id: `cierre-imp-${Date.now()}`, date, totalVenta: totalVentaDelDia, origen: 'Importación TPV', efectivo: 0, tarjeta: totalVentaDelDia, apps: 0, notas: "Importado desde TPV (Suma de platos)", descuadre: 0, unitId: 'REST' });
+      newData.cierres.push({ id: `cierre-imp-${Date.now()}`, date, totalVenta: totalVentaDelDia, origen: 'Importación TPV', efectivo: 0, tarjeta: totalVentaDelDia, apps: 0, notas: "Importado desde TPV", descuadre: 0, unitId: 'REST' });
       saveProfile(rows, mapping);
       await onSave({ ...data, platos: newPlatos, ventas_menu: newVentas, cierres: newData.cierres });
       onNavigate('menus');
@@ -364,199 +359,104 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       newData.albaranes.push(processedData.albaranIa);
       await onSave(newData); onNavigate('albaranes');
     }
-    alert("¡Datos guardados con éxito en la base de datos!");
     setProcessedData(null);
   };
 
   /* =======================================================
-   * 🛡️ GESTIÓN PROFESIONAL DEL DRAG & DROP
+   * 🛡️ GESTIÓN SIMPLE DRAG & DROP
    * ======================================================= */
-  useEffect(() => {
-    // 1. Bloqueo global de Drag & Drop para no abrir archivos accidentalmente en otra pestaña
-    const blockDefault = (e: DragEvent) => {
-      if (!(e.target as HTMLElement)?.closest(".dropzone-area")) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    };
-    window.addEventListener("dragover", blockDefault);
-    window.addEventListener("drop", blockDefault);
-
-    // 2. Limpieza de Overlay si el ratón sale de la ventana del navegador
-    const cancelDrag = () => {
-      dragCounter.current = 0;
-      setIsDragging(false);
-    };
-    window.addEventListener("mouseout", (e) => {
-      if (!e.relatedTarget && !e.toElement) cancelDrag();
-    });
-
-    return () => { 
-      window.removeEventListener("dragover", blockDefault);
-      window.removeEventListener("drop", blockDefault);
-      window.removeEventListener("mouseout", cancelDrag);
-    };
-  }, []);
-
-  const handleDragEnter = (e: React.DragEvent) => {
-    e.preventDefault();
-    dragCounter.current++;
-    if (!isDragging) setIsDragging(true);
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    dragCounter.current--;
-    if (dragCounter.current <= 0) {
-      setIsDragging(false);
-      dragCounter.current = 0;
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    dragCounter.current = 0;
-    setIsDragging(false);
-    
-    if (!e.dataTransfer?.files?.length) return;
-    if (e.dataTransfer.files.length > 1) {
-       alert("⚠️ Sube los documentos de uno en uno para evitar errores.");
-       return;
-    }
-    handleFileUpload(e as any);
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); };
+  const handleDragLeave = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); };
+  const handleDropLocal = (e: React.DragEvent) => { 
+    e.preventDefault(); e.stopPropagation(); setIsDragging(false); 
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) handleFileUpload(e);
   };
 
   return (
-    <div className={cn("max-w-3xl mx-auto space-y-6 animate-fade-in pb-24 min-h-[80vh] relative")}>
+    <div className="max-w-2xl mx-auto space-y-6 pb-24 animate-fade-in relative">
       
-      {/* 🚀 OVERLAY DE ARRASTRE SEGURO (pointer-events-auto en contenedor, none interno) */}
-      <AnimatePresence>
-        {isDragging && (
-          <motion.div 
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} 
-            className="fixed inset-0 z-[999] bg-indigo-600/90 backdrop-blur-sm rounded-[3rem] border-4 border-dashed border-white flex items-center justify-center pointer-events-auto dropzone-area"
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            onDragOver={(e) => e.preventDefault()}
-          >
-            <div className="flex flex-col items-center pointer-events-none">
-              <FileDown className="w-24 h-24 text-white mb-4 animate-bounce" />
-              <h2 className="text-4xl font-black text-white tracking-tighter">¡Suéltalo aquí!</h2>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-slate-100 relative z-10">
-        <header className="text-center mb-8 flex flex-col items-center">
-          <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-[2rem] flex items-center justify-center text-3xl mb-4 transform rotate-3 shadow-inner">
-            <Upload className="w-8 h-8" />
+      <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
+        
+        {/* SELECTOR TIPO iOS */}
+        <div className="bg-slate-50 p-2 flex border-b border-slate-100">
+          <div className="flex bg-white rounded-2xl p-1 shadow-sm w-full border border-slate-200">
+            <button onClick={() => { setImportMode('ia_factura'); setProcessedData(null); }} className={cn("flex-1 py-2.5 rounded-xl font-bold text-[11px] uppercase tracking-widest transition-all", importMode === 'ia_factura' ? "bg-indigo-600 text-white shadow-md" : "text-slate-500 hover:bg-slate-50")}>Facturas</button>
+            <button onClick={() => { setImportMode('ia_albaran'); setProcessedData(null); }} className={cn("flex-1 py-2.5 rounded-xl font-bold text-[11px] uppercase tracking-widest transition-all", importMode === 'ia_albaran' ? "bg-indigo-600 text-white shadow-md" : "text-slate-500 hover:bg-slate-50")}>Albaranes</button>
+            <button onClick={() => { setImportMode('tpv'); setProcessedData(null); }} className={cn("flex-1 py-2.5 rounded-xl font-bold text-[11px] uppercase tracking-widest transition-all", importMode === 'tpv' ? "bg-indigo-600 text-white shadow-md" : "text-slate-500 hover:bg-slate-50")}>TPV / Excel</button>
           </div>
-          <h2 className="text-2xl font-black text-slate-800 tracking-tighter">Bandeja de Entrada</h2>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Sube archivos, tickets y facturas</p>
-          
+        </div>
+
+        <div className="p-8">
+          <div className="text-center mb-8">
+            <h2 className="text-2xl font-black text-slate-800 tracking-tight">
+              {importMode === 'tpv' ? 'Sincronizar Ventas' : 'Subir Documento'}
+            </h2>
+            <p className="text-xs font-bold text-slate-400 mt-1">
+              {importMode === 'tpv' ? 'Sube el Excel de tu caja registradora.' : 'La IA extraerá todos los datos contables por ti.'}
+            </p>
+          </div>
+
+          {/* DROPZONE LIMPIA */}
+          <div 
+            className={cn(
+              "border-2 border-dashed rounded-[2rem] p-10 flex flex-col items-center justify-center transition-all cursor-pointer relative",
+              isDragging ? "border-indigo-500 bg-indigo-50" : "border-slate-200 bg-slate-50 hover:bg-slate-100",
+              (isScanning || recording) && "opacity-50 pointer-events-none"
+            )}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDropLocal}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <input type="file" ref={fileInputRef} disabled={isScanning || recording} onChange={handleFileUpload} accept={importMode.startsWith('ia_') ? ".pdf, image/jpeg, image/png" : ".xlsx, .csv"} className="hidden" />
+            
+            <div className="bg-white w-16 h-16 rounded-full flex items-center justify-center shadow-sm mb-4">
+              {isScanning ? <Loader2 className="w-6 h-6 text-indigo-500 animate-spin" /> : importMode.startsWith('ia_') ? <Receipt className="w-6 h-6 text-indigo-500" /> : <FileSpreadsheet className="w-6 h-6 text-slate-400" />}
+            </div>
+            
+            <p className="text-sm font-black text-slate-700">{isScanning ? "Extrayendo datos..." : "Haz clic o arrastra un archivo"}</p>
+            <p className="text-[10px] font-bold text-slate-400 mt-2 uppercase tracking-widest">{importMode.startsWith('ia_') ? "PDF o Imágenes (JPG/PNG)" : "Archivos .XLSX o .CSV"}</p>
+          </div>
+
+          {/* BOTÓN VOZ ALTERNATIVO (Solo para Albaranes) */}
           {importMode === 'ia_albaran' && (
-            <button onClick={startVoiceForAlbaran} disabled={isScanning && !recording} className={cn("mt-4 px-6 py-2.5 rounded-xl text-[10px] font-black uppercase transition-all shadow-md flex items-center justify-center gap-2", recording ? "bg-rose-500 text-white animate-pulse" : "bg-slate-900 text-white hover:bg-slate-800")}>
+            <button onClick={startVoiceForAlbaran} disabled={isScanning && !recording} className={cn("w-full mt-4 py-4 rounded-2xl text-xs font-black uppercase tracking-widest transition flex justify-center items-center gap-2", recording ? "bg-rose-50 border border-rose-200 text-rose-600 animate-pulse" : "bg-white border border-slate-200 text-slate-600 hover:bg-slate-50")}>
               {recording ? <Square className="w-4 h-4 fill-current" /> : <Mic className="w-4 h-4" />}
-              {recording ? 'DETENER Y ANALIZAR...' : '🎙️ AÑADIR POR VOZ (VOSK)'}
+              {recording ? 'DETENER Y ESCANEAR' : 'AÑADIR POR VOZ'}
             </button>
           )}
-        </header>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 bg-slate-100 p-1.5 rounded-3xl mb-8">
-          <button onClick={() => { setImportMode('ia_factura'); setProcessedData(null); }} className={cn("py-3 px-2 rounded-2xl font-black text-[9px] uppercase transition flex items-center justify-center gap-1.5", importMode === 'ia_factura' ? "bg-indigo-600 shadow-md text-white" : "text-slate-500 hover:bg-slate-200")}><Sparkles className="w-3.5 h-3.5" /> IA Facturas</button>
-          <button onClick={() => { setImportMode('ia_albaran'); setProcessedData(null); }} className={cn("py-3 px-2 rounded-2xl font-black text-[9px] uppercase transition flex items-center justify-center gap-1.5", importMode === 'ia_albaran' ? "bg-emerald-500 shadow-md text-white" : "text-slate-500 hover:bg-slate-200")}><Camera className="w-3.5 h-3.5" /> IA Albaranes</button>
-          <button onClick={() => { setImportMode('tpv'); setProcessedData(null); }} className={cn("py-3 px-2 rounded-2xl font-black text-[9px] uppercase transition flex items-center justify-center gap-1.5", importMode === 'tpv' ? "bg-white shadow-sm text-slate-800" : "text-slate-500 hover:bg-slate-200")}><Database className="w-3.5 h-3.5" /> Excel TPV</button>
-          <button onClick={() => { setImportMode('albaranes_excel'); setProcessedData(null); }} className={cn("py-3 px-2 rounded-2xl font-black text-[9px] uppercase transition flex items-center justify-center gap-1.5", importMode === 'albaranes_excel' ? "bg-white shadow-sm text-slate-800" : "text-slate-500 hover:bg-slate-200")}><FileSpreadsheet className="w-3.5 h-3.5" /> Excel Alb.</button>
-        </div>
+          {/* TARJETA DE CONFIRMACIÓN (Menos Intrusiva) */}
+          <AnimatePresence>
+            {processedData && (
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden mt-6">
+                <div className="bg-white border border-slate-200 rounded-[2rem] p-6 shadow-lg">
+                  <div className="flex justify-between items-center mb-4">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-emerald-600 bg-emerald-50 px-3 py-1 rounded-full flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Listo para Guardar</span>
+                    <button onClick={() => setProcessedData(null)} className="text-slate-400 hover:text-slate-600"><X className="w-4 h-4"/></button>
+                  </div>
 
-        {/* 📦 DROPZONE DELIMITADA Y SEGURA */}
-        <div 
-          className={cn("dropzone-area border-2 border-dashed rounded-[2.5rem] p-12 text-center transition-all relative group overflow-hidden", isDragging ? "border-indigo-500 bg-indigo-50" : "border-slate-200 hover:border-indigo-300 hover:bg-slate-50", (isScanning || recording) && "opacity-50 pointer-events-none")}
-          onDragEnter={handleDragEnter}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={handleDrop}
-        >
-          <input type="file" disabled={isScanning || recording} onChange={handleFileUpload} accept={importMode.startsWith('ia_') ? ".pdf, image/jpeg, image/png, image/webp" : ".xlsx, .xls, .csv"} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" />
-          <div className="space-y-4 relative z-10 pointer-events-none">
-            <div className="w-16 h-16 bg-white rounded-[2rem] shadow-sm border border-slate-100 flex items-center justify-center mx-auto group-hover:scale-110 transition-transform">
-              {isScanning ? <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /> : importMode.startsWith('ia_') ? <Receipt className="w-8 h-8 text-indigo-500" /> : <FileSpreadsheet className="w-8 h-8 text-slate-400" />}
-            </div>
-            <div>
-              <p className="text-sm font-black text-slate-600">{isScanning ? "El Cerebro IA está procesando..." : "Arrastra un archivo aquí o haz clic"}</p>
-              <p className="text-[10px] text-slate-400 mt-1 font-bold uppercase tracking-widest">{importMode.startsWith('ia_') ? "Soporta PDFs y Fotografías (JPG, PNG)" : "Formatos: .xlsx, .csv"}</p>
-            </div>
-          </div>
-        </div>
+                  <div className="space-y-3 mb-6 bg-slate-50 p-4 rounded-2xl">
+                    {importMode === 'ia_factura' && processedData.facturaIa && (
+                      <><DataRow label="Proveedor" val={processedData.facturaIa.proveedor} /><DataRow label="Nº Factura" val={processedData.facturaIa.num_factura} /><div className="h-px bg-slate-200 my-2"/><DataRow label="TOTAL" val={Num.fmt(processedData.facturaIa.total_pdf)} highlight /></>
+                    )}
+                    {importMode === 'ia_albaran' && processedData.albaranIa && (
+                      <><DataRow label="Proveedor" val={processedData.albaranIa.prov} /><DataRow label="Líneas" val={`${processedData.albaranIa.items.length} detectadas`} /><div className="h-px bg-slate-200 my-2"/><DataRow label="TOTAL" val={Num.fmt(processedData.albaranIa.total)} highlight /></>
+                    )}
+                    {importMode === 'tpv' && processedData.tpvPreview && (
+                      <><DataRow label="Fecha" val={processedData.tpvPreview.date} /><DataRow label="Platos leídos" val={`${processedData.tpvPreview.rows.length - 1} filas`} highlight/></>
+                    )}
+                  </div>
 
-        <AnimatePresence>
-          {processedData && (
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }} className="mt-8 bg-slate-900 p-6 rounded-[2.5rem] space-y-4 shadow-xl">
-              <div className="flex justify-between items-center border-b border-slate-800 pb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-emerald-500/20 text-emerald-400 rounded-2xl flex items-center justify-center"><CheckCircle2 className="w-6 h-6" /></div>
-                  <div><h3 className="font-black text-white text-sm uppercase tracking-widest">Extracción Completada</h3><p className="text-[10px] text-slate-400 font-bold uppercase">Revisa los datos antes de guardar</p></div>
+                  <button onClick={handleConfirm} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm py-4 rounded-xl transition flex justify-center items-center gap-2">
+                    <Database className="w-4 h-4" /> GUARDAR EN EL SISTEMA
+                  </button>
                 </div>
-                <button onClick={() => setProcessedData(null)} className="p-2 bg-slate-800 rounded-full text-slate-400 hover:text-white transition"><X className="w-4 h-4" /></button>
-              </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-              {importMode === 'ia_albaran' && processedData.albaranIa && processedData.albaranIa.status === 'warning' && (
-                <div className="px-4 py-3 rounded-2xl text-[10px] font-black bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center gap-2"><AlertTriangle className="w-4 h-4 shrink-0" /><span>{processedData.albaranIa.notes || "DESCUADRE DETECTADO ENTRE LÍNEAS Y TOTAL."}</span></div>
-              )}
-              
-              {importMode === 'ia_factura' && processedData.facturaIa && processedData.facturaIa.proveedor.includes('Rescate') && (
-                <div className="px-4 py-3 rounded-2xl text-[10px] font-black bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-2"><AlertTriangle className="w-4 h-4 shrink-0" /> SE USÓ EL RESCATE LOCAL. COMPRUEBA EL TOTAL.</div>
-              )}
-
-              {/* TPV PREVIEW (Inteligencia de Columnas) */}
-              {importMode === 'tpv' && processedData.tpvPreview && (
-                <>
-                  <div className={cn("p-4 rounded-2xl flex items-start gap-3", processedData.tpvPreview.isKnown ? "bg-emerald-500/10 border border-emerald-500/20 text-emerald-400" : "bg-indigo-500/10 border border-indigo-500/20 text-indigo-400")}>
-                    {processedData.tpvPreview.isKnown ? <CheckCircle2 className="w-5 h-5 shrink-0" /> : <Sparkles className="w-5 h-5 shrink-0" />}
-                    <div>
-                      <p className="text-xs font-black uppercase tracking-widest">{processedData.tpvPreview.isKnown ? "PERFIL TPV RECONOCIDO" : "NUEVO FORMATO DETECTADO"}</p>
-                      <p className="text-[10px] opacity-80 mt-1">{processedData.tpvPreview.isKnown ? "Patrón guardado de importaciones anteriores." : `Confianza del ${processedData.tpvPreview.confidence}%. Verifica la tabla.`}</p>
-                    </div>
-                  </div>
-                  <div className="border border-slate-700 rounded-2xl overflow-hidden mt-4">
-                    <table className="w-full text-left text-[10px] text-slate-300">
-                      <thead className="bg-slate-800 font-black uppercase">
-                        <tr>
-                          <th className="p-3">Nombre (Col {processedData.tpvPreview.mapping.name + 1})</th>
-                          <th className="p-3 text-center">Cant. (Col {processedData.tpvPreview.mapping.qty + 1})</th>
-                          <th className="p-3 text-right">Precio (Col {processedData.tpvPreview.mapping.price + 1})</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800">
-                        {processedData.tpvPreview.rows.slice(1, 4).map((row: any, i: number) => (
-                          <tr key={i}>
-                            <td className="p-3 text-white font-bold">{row[processedData.tpvPreview.mapping.name] || '—'}</td>
-                            <td className="p-3 text-center">{row[processedData.tpvPreview.mapping.qty] || 0}</td>
-                            <td className="p-3 text-right">{Num.fmt(row[processedData.tpvPreview.mapping.price] || 0)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              )}
-
-              <div className="bg-slate-800/50 rounded-2xl p-5 space-y-3 mt-4">
-                {importMode === 'ia_factura' && processedData.facturaIa && (
-                  <><DataRow label="Proveedor" val={processedData.facturaIa.proveedor} /><DataRow label="Nº Factura" val={processedData.facturaIa.num_factura} /><DataRow label="Fecha" val={processedData.facturaIa.fecha} /><div className="border-t border-slate-700/50 my-2 pt-2"></div><DataRow label="Base" val={Num.fmt(processedData.facturaIa.base)} /><DataRow label="IVA" val={Num.fmt(processedData.facturaIa.iva)} /><DataRow label="TOTAL FACTURA" val={Num.fmt(processedData.facturaIa.total_pdf)} highlight /></>
-                )}
-                {importMode === 'ia_albaran' && processedData.albaranIa && (
-                  <><DataRow label="Proveedor" val={processedData.albaranIa.prov} /><DataRow label="Fecha" val={processedData.albaranIa.date} /><DataRow label="Líneas" val={`${processedData.albaranIa.items.length} detectadas`} /><div className="border-t border-slate-700/50 my-2 pt-2"></div><DataRow label="Base Calc" val={Num.fmt(processedData.albaranIa.base)} /><DataRow label="TOTAL ALBARÁN" val={Num.fmt(processedData.albaranIa.total)} highlight /></>
-                )}
-                {importMode === 'albaranes_excel' && (<DataRow label="Albaranes Extraídos" val={`${processedData.albaranesExcel?.length} documentos`} highlight />)}
-              </div>
-
-              <button onClick={handleConfirm} className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-black py-4 rounded-2xl transition shadow-lg flex items-center justify-center gap-2 group mt-2">
-                <Database className="w-4 h-4" /> <span>CONFIRMAR E IMPORTAR</span> <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        </div>
       </div>
     </div>
   );
@@ -564,7 +464,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
 
 const DataRow = ({ label, val, highlight = false }: { label: string, val: string, highlight?: boolean }) => (
   <div className="flex justify-between items-center">
-    <span className={cn("text-[10px] font-black uppercase tracking-widest", highlight ? "text-emerald-400" : "text-slate-400")}>{label}</span>
-    <span className={cn("text-xs", highlight ? "font-black text-emerald-400 text-lg" : "font-bold text-white")}>{val}</span>
+    <span className="text-[11px] font-bold text-slate-500 uppercase">{label}</span>
+    <span className={cn("text-sm", highlight ? "font-black text-indigo-600 text-xl" : "font-bold text-slate-800")}>{val}</span>
   </div>
 );
