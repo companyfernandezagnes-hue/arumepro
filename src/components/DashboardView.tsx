@@ -12,8 +12,9 @@ import { createClient } from '@supabase/supabase-js';
 
 type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
 
-const SUPABASE_URL = "https://awbgboucnbsuzojocbuy.supabase.co"; 
-const SUPABASE_ANON_KEY = "sb_publishable_drOQ5PsFA8eox_aRTXNATQ_5kibM6ST";
+// 🔑 NUEVAS CREDENCIALES DE SUPABASE
+const SUPABASE_URL = "https://bgtelulbiaugawyrhvwt.supabase.co"; 
+const SUPABASE_ANON_KEY = "sb_publishable_jagYegyG8gGMijzpLEY9BQ_iWfL1MU4";
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string; bg: string; hex: string }[] = [
@@ -155,7 +156,6 @@ export const DashboardView = ({ data }: { data: AppData }) => {
           if (breakdown[unit]) breakdown[unit].income += tRaw; 
           agg.ingresos.total += tRaw;
         } else {
-          // BLINDAJE: Verificamos que albaranIdsArr sea un array válido
           const noTieneAlbaranes = !Array.isArray(f?.albaranIdsArr) || f.albaranIdsArr.length === 0;
           if (noTieneAlbaranes) {
             const unit = f?.unidad_negocio || 'REST';
@@ -331,7 +331,7 @@ export const DashboardView = ({ data }: { data: AppData }) => {
         </div>
       </div>
 
-      {/* 📈 GRÁFICO DE VENTAS (Con llave de seguridad para evitar Crash de Recharts) */}
+      {/* 📈 GRÁFICO DE VENTAS */}
       <div className="bg-white p-6 md:p-8 rounded-[3rem] border border-slate-100 shadow-sm min-w-0">
         <div className="flex justify-between items-center mb-8">
           <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
@@ -364,7 +364,7 @@ export const DashboardView = ({ data }: { data: AppData }) => {
       {/* ⚙️ DESGLOSE, UNIDADES Y CORREOS */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        {/* COLUMNA 1: Desglose Gastos (Span 4) */}
+        {/* COLUMNA 1: Desglose Gastos */}
         <div className="lg:col-span-4 bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col">
           <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6">Desglose Gastos</h3>
           <div className="space-y-6 flex-1">
@@ -395,7 +395,7 @@ export const DashboardView = ({ data }: { data: AppData }) => {
           </div>
         </div>
 
-        {/* COLUMNA 2: Unidades de Negocio (Span 4) */}
+        {/* COLUMNA 2: Unidades de Negocio */}
         <div className="lg:col-span-4 bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-xl relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 via-amber-500 to-emerald-500"></div>
           <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6">Rentabilidad Local</h3>
@@ -431,10 +431,9 @@ export const DashboardView = ({ data }: { data: AppData }) => {
           </div>
         </div>
 
-        {/* COLUMNA 3: Correos Generales + Alertas (Span 4) */}
+        {/* COLUMNA 3: Correos Generales + Alertas */}
         <div className="lg:col-span-4 flex flex-col gap-6">
           
-          {/* 📧 NUEVO: BUZÓN GENERAL DE OPERACIONES */}
           <div className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 shadow-xl flex-1 flex flex-col relative overflow-hidden">
             <div className="absolute top-0 right-0 p-4 opacity-5"><Mail className="w-32 h-32" /></div>
             <h3 className="text-sm font-black text-white uppercase tracking-widest mb-1 flex items-center gap-2 relative z-10"><Mail className="w-4 h-4 text-blue-400" /> Buzón de Empresa</h3>
@@ -463,7 +462,6 @@ export const DashboardView = ({ data }: { data: AppData }) => {
             </div>
           </div>
 
-          {/* Alertas */}
           <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex-1">
             <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2"><AlertCircle className="w-4 h-4 text-amber-500"/> Alertas Activas</h3>
             <div className="space-y-3 max-h-[160px] overflow-y-auto custom-scrollbar pr-2">
