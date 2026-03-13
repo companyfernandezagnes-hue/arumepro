@@ -31,6 +31,7 @@ import { DashboardView } from './components/DashboardView';
 import { AIConsultant } from './components/AIConsultant'; 
 import { SettingsModal } from './components/SettingsModal';
 import { TelegramWidget } from './components/TelegramWidget';
+import { AuthScreen } from './components/AuthScreen'; // 🔒 ESCUDO IMPORTADO
 
 // 🛡️ TIPOS Y CONSTANTES
 type TabKey = 
@@ -45,6 +46,30 @@ const TAB_LABELS: Record<TabKey, string> = {
 };
 
 const jsonSafeClone = <T,>(obj: T): T => { try { return JSON.parse(JSON.stringify(obj)); } catch { return obj; } };
+
+/* =======================================================
+ * 🗜️ COMPRESOR DE IMÁGENES (Evita que el móvil explote)
+ * ======================================================= */
+const compressImageForAI = async (file: File): Promise<string> => {
+  const bitmap = await createImageBitmap(file);
+  const MAX_W = 1200, MAX_H = 1200; // Reducido para mayor velocidad
+  const ratio = Math.min(MAX_W / bitmap.width, MAX_H / bitmap.height, 1);
+  
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * ratio));
+  canvas.height = Math.max(1, Math.round(bitmap.height * ratio));
+  
+  const ctx = canvas.getContext('2d', { alpha: false });
+  if (ctx) ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  
+  const blob = await new Promise<Blob>((res) => canvas.toBlob((b) => res(b!), 'image/jpeg', 0.7));
+  
+  return new Promise<string>((res) => {
+    const reader = new FileReader();
+    reader.onload = () => res((reader.result as string).split(',')[1]);
+    reader.readAsDataURL(blob);
+  });
+};
 
 /* =======================================================
  * 🛡️ PARACAÍDAS ANTI-PANTALLAZO AZUL (ErrorBoundary)
@@ -69,7 +94,7 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
 }
 
 /* =======================================================
- * 🧭 1. BUSCADOR RÁPIDO (CMD + K) - DENSIDAD ALTA
+ * 🧭 1. BUSCADOR RÁPIDO (CMD + K)
  * ======================================================= */
 type CmdItem<T extends string> = { key: T; label: string; group?: string; icon?: any; shortcut?: string };
 
@@ -82,7 +107,6 @@ function CommandPalette<T extends string>({ open, onClose, items, onSelect }: { 
   }, [q, items]);
 
   useEffect(() => { if (open) setQ(''); }, [open]);
-
   if (!open) return null;
 
   return (
@@ -161,7 +185,6 @@ function AutoHideDock<T extends string>({ items, activeKey, onChange }: { items:
 
   useSwipeUpToReveal(handleShow);
 
-  // Mostrar dock con la tecla 'D'
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const active = document.activeElement as HTMLElement; const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
@@ -193,10 +216,9 @@ function AutoHideDock<T extends string>({ items, activeKey, onChange }: { items:
         {visible && (
           <motion.nav
             initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            className="fixed bottom-0 left-0 right-0 z-[120] px-4 pb-3 pt-6 flex justify-center"
-            onMouseEnter={() => setHoveringDock(true)} onMouseLeave={() => { setHoveringDock(false); handleShow(); }}
+            className="fixed bottom-safe left-0 right-0 z-[120] px-4 pb-3 pt-6 flex justify-center"
           >
-            <div className="bg-white/95 backdrop-blur-md border border-slate-200 shadow-xl rounded-xl p-2 max-w-full overflow-x-auto relative">
+            <div className="bg-white/95 backdrop-blur-md border border-slate-200 shadow-xl rounded-xl p-2 max-w-full overflow-x-auto relative" onMouseEnter={() => setHoveringDock(true)} onMouseLeave={() => { setHoveringDock(false); handleShow(); }}>
               <div className="flex items-center gap-1 no-scrollbar" style={{ WebkitOverflowScrolling: 'touch' }}>
                 {groups.main.map(it => <DockButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
                 <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
@@ -234,18 +256,15 @@ export default function App() {
   
   const [isCmdOpen, setIsCmdOpen] = useState(false);
 
-  // 💡 ESTADO PARA LA CÁMARA RÁPIDA
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
 
-  // 🛡️ Detección de conexión
   useEffect(() => {
     const onOnline = () => setIsOffline(false); const onOffline = () => setIsOffline(true);
     window.addEventListener('online', onOnline); window.addEventListener('offline', onOffline);
     return () => { window.removeEventListener('online', onOnline); window.removeEventListener('offline', onOffline); };
   }, []);
 
-  // 🛡️ Suscripción a cambios en Supabase
   useEffect(() => {
     const channel = supabase.channel('arume-changes', { config: { broadcast: { self: false } } }).on('postgres_changes', { event: '*', schema: 'public', table: 'arume_data' }, () => { reloadData(); }).subscribe();
     return () => { try { supabase.removeChannel(channel); } catch { /* noop */ } };
@@ -253,7 +272,6 @@ export default function App() {
 
   const REQUIRED: (keyof AppData)[] = ['banco','platos','recetas','ingredientes','ventas_menu','cierres','facturas','albaranes','gastos_fijos'];
   
-  // 🛡️ EL ESCUDO: Inicialización segura de datos
   useEffect(() => {
     if (loading || !db) return; 
     
@@ -272,12 +290,9 @@ export default function App() {
       changed = true; 
     }
     
-    if (changed) {
-      setData(next);
-    }
+    if (changed) setData(next);
   }, [db, loading, setData]);
 
-  // 🛡️ Guardado seguro y backup local
   const isSyncingRef = useRef(false);
   const lastPayloadRef = useRef<AppData | null>(null);
 
@@ -298,13 +313,12 @@ export default function App() {
 
 
   /* =======================================================
-   * 📸 PROCESADOR DE CÁMARA GLOBAL (INTEGRACIÓN IA)
+   * 📸 PROCESADOR DE CÁMARA CON COMPRESIÓN
    * ======================================================= */
   const handlePhotoCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !db) return;
     
-    // Reseteamos el input
     e.target.value = '';
     setIsProcessingPhoto(true);
 
@@ -312,16 +326,9 @@ export default function App() {
       const apiKey = localStorage.getItem('gemini_api_key');
       if (!apiKey) throw new Error("NO_API_KEY");
 
-      // 1. Convertir imagen a Base64
-      const fileBase64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader(); 
-        reader.onload = () => resolve(reader.result as string); 
-        reader.onerror = reject; 
-        reader.readAsDataURL(file);
-      });
-      const soloBase64 = fileBase64.split(',')[1];
+      // 🗜️ Usamos el compresor mágico para no colgar el móvil
+      const soloBase64 = await compressImageForAI(file);
 
-      // 2. Llamada a Gemini (Mismo prompt que en InvoicesView para asegurar consistencia)
       const ai = new GoogleGenAI({ apiKey });
       const prompt = `Actúa como un Auditor Contable. Lee esta imagen de un ticket o factura. Extrae TODO lo posible. Devuelve SOLO un JSON estricto sin comentarios: 
       { 
@@ -337,7 +344,7 @@ export default function App() {
       
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: soloBase64, mimeType: file.type } }] }],
+        contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: soloBase64, mimeType: "image/jpeg" } }] }],
         config: { responseMimeType: "application/json", temperature: 0.1 }
       });
 
@@ -349,7 +356,6 @@ export default function App() {
         throw new Error("Gemini no devolvió un JSON válido.");
       }
 
-      // 3. Crear la nueva Factura Borrador
       const nuevaFacturaIA: FacturaExtended = {
         id: 'draft-camera-' + Date.now(), 
         tipo: 'compra', 
@@ -362,27 +368,22 @@ export default function App() {
         albaranIdsArr: rawJson.referencias_albaranes || [], 
         paid: false, 
         reconciled: false, 
-        source: 'dropzone', // Usamos dropzone para que aparezca en la bandeja IA de Facturas
+        source: 'dropzone', 
         status: 'draft', 
         unidad_negocio: 'REST', 
-        file_base64: fileBase64 
+        file_base64: `data:image/jpeg;base64,${soloBase64}` // Guardamos la foto comprimida!
       };
 
-      // 4. Guardar
       const newData = JSON.parse(JSON.stringify(db));
       newData.facturas = [nuevaFacturaIA, ...(newData.facturas || [])];
       await handleSave(newData);
       
       alert("✅ Ticket escaneado y enviado a la Bandeja de Facturas para su revisión.");
-      
-      // Si no estamos en facturas, navegamos allí para que lo vea
-      if (activeTab !== 'facturas') {
-        setActiveTab('facturas');
-      }
+      if (activeTab !== 'facturas') setActiveTab('facturas');
 
     } catch (e: any) {
       if (e.message === "NO_API_KEY") {
-        alert("⚠️ Por favor, configura tu clave de Gemini API en los ajustes primero.");
+        alert("⚠️ Configura tu clave de Gemini API en los ajustes primero.");
         setIsConfigOpen(true);
       } else {
         alert("❌ Error al procesar la imagen: " + (e.message || "Imagen ilegible"));
@@ -393,7 +394,6 @@ export default function App() {
   };
 
 
-  // ⌨️ ATAJOS GLOBALES (Cmd+K y Cmd+1...5 para módulos rápidos)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const active = document.activeElement as HTMLElement;
@@ -473,95 +473,98 @@ export default function App() {
   }
 
   return (
-    <div id="app-root-container" className="min-h-screen bg-slate-50 flex flex-col font-sans text-xs text-slate-800 relative overflow-x-hidden">
-      
-      {/* 📸 INPUT INVISIBLE PARA CÁMARA */}
-      <input 
-        type="file" 
-        accept="image/*" 
-        capture="environment" // Esto fuerza a que se abra la cámara trasera en el móvil
-        ref={fileInputRef} 
-        onChange={handlePhotoCapture} 
-        className="hidden" 
-      />
-
-      {/* HEADER CONTABLE (ULTRA COMPACTO) */}
-      <header className="sticky top-0 z-[110] bg-white border-b border-slate-200 px-4 py-2 flex justify-between items-center shadow-sm">
-        <div className="flex items-center gap-3">
-          <h1 className="text-sm font-black text-slate-900 tracking-tight flex items-center gap-1.5">
-            ARUME <span className="bg-indigo-600 text-white px-1.5 py-0.5 rounded text-[8px] uppercase tracking-widest">PRO</span>
-          </h1>
-          <div className="w-px h-4 bg-slate-200 hidden sm:block"></div>
-          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest hidden sm:block">{TAB_LABELS[activeTab]}</p>
-        </div>
+    // 🛡️ EL ESCUDO: Todo envuelto en AuthScreen para pedir el PIN
+    <AuthScreen>
+      <div id="app-root-container" className="min-h-[100dvh] bg-slate-50 flex flex-col font-sans text-xs text-slate-800 relative overflow-x-hidden pt-safe">
         
-        <div className="flex items-center gap-2">
-          <button onClick={() => setIsCmdOpen(true)} className="hidden sm:flex items-center gap-1.5 px-2 py-1.5 bg-slate-50 text-slate-500 rounded border border-slate-200 hover:bg-slate-100 hover:text-slate-800 transition text-[10px] font-bold">
-            <Search className="w-3 h-3" /> Buscar (⌘K)
-          </button>
+        {/* 📸 INPUT INVISIBLE PARA CÁMARA */}
+        <input 
+          type="file" 
+          accept="image/*" 
+          capture="environment" 
+          ref={fileInputRef} 
+          onChange={handlePhotoCapture} 
+          className="hidden" 
+        />
 
-          {isOffline && (
-            <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-200 px-2 py-1.5 rounded">
-               <WifiOff className="w-3 h-3 text-rose-500" />
-               <span className="text-[9px] text-rose-600 font-bold uppercase">Offline</span>
-            </div>
-          )}
-          {isSyncing && !isOffline && (
-            <div className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-100 px-2 py-1.5 rounded">
-               <RefreshCw className="w-3 h-3 text-indigo-500 animate-spin" />
-               <span className="text-[9px] text-indigo-600 font-bold uppercase">Guardando</span>
-            </div>
-          )}
-          <button onClick={() => setIsConfigOpen(true)} aria-label="Configuración" className="w-8 h-8 flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 rounded transition">
-            <Settings className="w-4 h-4" />
-          </button>
-        </div>
-      </header>
+        {/* HEADER CONTABLE */}
+        <header className="sticky top-0 z-[110] bg-white/90 backdrop-blur-md border-b border-slate-200 px-4 py-2 flex justify-between items-center shadow-sm">
+          <div className="flex items-center gap-3">
+            <h1 className="text-sm font-black text-slate-900 tracking-tight flex items-center gap-1.5">
+              ARUME <span className="bg-indigo-600 text-white px-1.5 py-0.5 rounded text-[8px] uppercase tracking-widest">PRO</span>
+            </h1>
+            <div className="w-px h-4 bg-slate-200 hidden sm:block"></div>
+            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest hidden sm:block">{TAB_LABELS[activeTab]}</p>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <button onClick={() => setIsCmdOpen(true)} className="hidden sm:flex items-center gap-1.5 px-2 py-1.5 bg-slate-50 text-slate-500 rounded border border-slate-200 hover:bg-slate-100 hover:text-slate-800 transition text-[10px] font-bold">
+              <Search className="w-3 h-3" /> Buscar (⌘K)
+            </button>
 
-      <main className="flex-1 overflow-y-auto">
-        <AnimatePresence mode="wait">
-          {/* MARGEN REDUCIDO: p-2 md:p-4 */}
-          <motion.div key={activeTab} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} transition={{ duration: 0.1 }} className="p-2 md:p-4 max-w-[1600px] mx-auto pb-16">
-            <ErrorBoundary key={activeTab}>
-              {content}
-            </ErrorBoundary>
-          </motion.div>
+            {isOffline && (
+              <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-200 px-2 py-1.5 rounded">
+                 <WifiOff className="w-3 h-3 text-rose-500" />
+                 <span className="text-[9px] text-rose-600 font-bold uppercase">Offline</span>
+              </div>
+            )}
+            {isSyncing && !isOffline && (
+              <div className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-100 px-2 py-1.5 rounded">
+                 <RefreshCw className="w-3 h-3 text-indigo-500 animate-spin" />
+                 <span className="text-[9px] text-indigo-600 font-bold uppercase">Guardando</span>
+              </div>
+            )}
+            <button onClick={() => setIsConfigOpen(true)} aria-label="Configuración" className="w-8 h-8 flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 rounded transition">
+              <Settings className="w-4 h-4" />
+            </button>
+          </div>
+        </header>
+
+        <main className="flex-1 overflow-y-auto pb-safe">
+          <AnimatePresence mode="wait">
+            <motion.div key={activeTab} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} transition={{ duration: 0.1 }} className="p-2 md:p-4 max-w-[1600px] mx-auto pb-24">
+              <ErrorBoundary key={activeTab}>
+                {content}
+              </ErrorBoundary>
+            </motion.div>
+          </AnimatePresence>
+        </main>
+
+        {/* 📸 BOTÓN FLOTANTE CÁMARA (FAB) */}
+        <button 
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isProcessingPhoto}
+          className={cn(
+            "fixed bottom-24 right-4 z-[90] w-14 h-14 rounded-full flex items-center justify-center text-white shadow-xl transition-all duration-300 md:hidden",
+            isProcessingPhoto ? "bg-indigo-400 cursor-not-allowed scale-95" : "bg-indigo-600 hover:bg-indigo-700 hover:scale-105 active:scale-95"
+          )}
+          aria-label="Escanear ticket con cámara"
+        >
+          {isProcessingPhoto ? <Loader2 className="w-6 h-6 animate-spin" /> : <Camera className="w-6 h-6" />}
+        </button>
+
+        {/* Overlay procesando */}
+        <AnimatePresence>
+          {isProcessingPhoto && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+              <div className="bg-white p-6 rounded-3xl shadow-2xl flex flex-col items-center">
+                <Sparkles className="w-10 h-10 text-indigo-500 animate-pulse mb-3" />
+                <h3 className="text-base font-black text-slate-800">Cerebro AI Analizando...</h3>
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Comprimiendo y Extrayendo</p>
+                <div className="w-full h-1 bg-slate-100 rounded-full mt-4 overflow-hidden">
+                  <div className="w-full h-full bg-indigo-500 animate-pulse"></div>
+                </div>
+              </div>
+            </motion.div>
+          )}
         </AnimatePresence>
-      </main>
 
-      {/* 🚀 COMPONENTES FLOTANTES */}
-
-      {/* 📸 BOTÓN FLOTANTE CÁMARA (FAB) */}
-      <button 
-        onClick={() => fileInputRef.current?.click()}
-        disabled={isProcessingPhoto}
-        className={cn(
-          "fixed bottom-24 right-4 z-[90] w-14 h-14 rounded-full flex items-center justify-center text-white shadow-xl transition-all duration-300 md:hidden",
-          isProcessingPhoto ? "bg-indigo-400 cursor-not-allowed scale-95" : "bg-indigo-600 hover:bg-indigo-700 hover:scale-105 active:scale-95"
-        )}
-        aria-label="Escanear ticket con cámara"
-      >
-        {isProcessingPhoto ? <Loader2 className="w-6 h-6 animate-spin" /> : <Camera className="w-6 h-6" />}
-      </button>
-
-      {/* Overlay procesando para que no toquen nada más */}
-      <AnimatePresence>
-        {isProcessingPhoto && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
-            <div className="bg-white p-6 rounded-2xl shadow-2xl flex flex-col items-center">
-              <Sparkles className="w-8 h-8 text-indigo-500 animate-pulse mb-3" />
-              <p className="text-sm font-bold text-slate-800">Leyendo ticket...</p>
-              <p className="text-[10px] text-slate-500 uppercase mt-1">La IA está extrayendo los datos</p>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      <TelegramWidget currentModule={TAB_LABELS[activeTab]} telegramToken={db?.config?.telegramToken} chatId={db?.config?.telegramChatId} />
-      
-      <AutoHideDock items={navItems} activeKey={activeTab} onChange={(k) => setActiveTab(k)} />
-      <CommandPalette open={isCmdOpen} onClose={() => setIsCmdOpen(false)} items={navItems.map(n => ({ key: n.key, label: TAB_LABELS[n.key], group: n.group, icon: n.icon, shortcut: n.shortcut }))} onSelect={(key) => { setActiveTab(key); setIsCmdOpen(false); }} />
-      <SettingsModal isOpen={isConfigOpen} onClose={() => setIsConfigOpen(false)} db={db} setDb={setData} onSave={handleSave} />
-    </div>
+        <TelegramWidget currentModule={TAB_LABELS[activeTab]} telegramToken={db?.config?.telegramToken} chatId={db?.config?.telegramChatId} />
+        
+        <AutoHideDock items={navItems} activeKey={activeTab} onChange={(k) => setActiveTab(k)} />
+        <CommandPalette open={isCmdOpen} onClose={() => setIsCmdOpen(false)} items={navItems.map(n => ({ key: n.key, label: TAB_LABELS[n.key], group: n.group, icon: n.icon, shortcut: n.shortcut }))} onSelect={(key) => { setActiveTab(key); setIsCmdOpen(false); }} />
+        <SettingsModal isOpen={isConfigOpen} onClose={() => setIsConfigOpen(false)} db={db} setDb={setData} onSave={handleSave} />
+      </div>
+    </AuthScreen>
   );
 }
