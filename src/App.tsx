@@ -28,8 +28,6 @@ import { StockView } from './components/StockView';
 import { DashboardView } from './components/DashboardView';
 import { AIConsultant } from './components/AIConsultant'; 
 import { SettingsModal } from './components/SettingsModal';
-
-// 🤖 WIDGET FLOTANTE DE TELEGRAM
 import { TelegramWidget } from './components/TelegramWidget';
 
 // 🛡️ TIPOS Y CONSTANTES
@@ -39,9 +37,9 @@ type TabKey =
   | 'banco' | 'fixed' | 'informes' | 'menus' | 'stock' | 'cierre';
 
 const TAB_LABELS: Record<TabKey, string> = {
-  dashboard: 'Cuadro de Mando', ia: 'Asistente IA', diario: 'Caja Diaria', importador: 'Importador',
+  dashboard: 'Dashboard', ia: 'IA', diario: 'Caja Diaria', importador: 'Importador',
   facturas: 'Facturas', albaranes: 'Albaranes', tesoreria: 'Tesorería', liquidez: 'Liquidez',
-  banco: 'Banco', fixed: 'Gastos Fijos', informes: 'Informes', menus: 'Menús', stock: 'Stock', cierre: 'Cierre Contable'
+  banco: 'Banco', fixed: 'G. Fijos', informes: 'Informes', menus: 'Menús', stock: 'Stock', cierre: 'Cierre'
 };
 
 const jsonSafeClone = <T,>(obj: T): T => { try { return JSON.parse(JSON.stringify(obj)); } catch { return obj; } };
@@ -56,11 +54,11 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex flex-col items-center justify-center h-[60vh] bg-white rounded-[3rem] shadow-sm border border-slate-100">
-          <AlertTriangle className="w-16 h-16 text-rose-400 mb-4" />
-          <h2 className="text-xl font-black text-slate-800">Esta pestaña ha fallado</h2>
-          <p className="text-sm text-slate-500 mt-2">No te preocupes, el resto de la app sigue funcionando.</p>
-          <button onClick={() => this.setState({hasError: false})} className="mt-6 px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition">Intentar recargar vista</button>
+        <div className="flex flex-col items-center justify-center p-8 bg-white border border-slate-200 rounded-xl shadow-sm m-4">
+          <AlertTriangle className="w-12 h-12 text-rose-500 mb-3" />
+          <h2 className="text-sm font-bold text-slate-800">Error visual en este módulo</h2>
+          <p className="text-xs text-slate-500 mt-1">El resto de la contabilidad sigue segura.</p>
+          <button onClick={() => this.setState({hasError: false})} className="mt-4 px-4 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-200 transition">Recargar Módulo</button>
         </div>
       );
     }
@@ -69,9 +67,9 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
 }
 
 /* =======================================================
- * 🧭 1. BUSCADOR RÁPIDO (CMD + K)
+ * 🧭 1. BUSCADOR RÁPIDO (CMD + K) - DENSIDAD ALTA
  * ======================================================= */
-type CmdItem<T extends string> = { key: T; label: string; group?: string; icon?: any };
+type CmdItem<T extends string> = { key: T; label: string; group?: string; icon?: any; shortcut?: string };
 
 function CommandPalette<T extends string>({ open, onClose, items, onSelect }: { open: boolean, onClose: ()=>void, items: CmdItem<T>[], onSelect: (k:T)=>void }) {
   const [q, setQ] = useState('');
@@ -87,27 +85,27 @@ function CommandPalette<T extends string>({ open, onClose, items, onSelect }: { 
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-[300] flex justify-center items-start pt-[15vh] px-4" aria-modal="true" role="dialog">
-        <motion.button initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} aria-label="Cerrar" className="absolute inset-0 w-full h-full bg-slate-900/60 backdrop-blur-md cursor-default border-none outline-none" onClick={onClose} />
-        <motion.div initial={{ y: -20, scale: 0.95, opacity: 0 }} animate={{ y: 0, scale: 1, opacity: 1 }} className="relative w-full max-w-2xl rounded-[2rem] bg-white shadow-2xl border border-slate-200 overflow-hidden z-10">
-          <div className="p-5 border-b border-slate-100 flex items-center gap-4 bg-slate-50/50">
-            <Search className="w-7 h-7 text-indigo-500" />
-            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar módulo (Ej: Facturas...)" className="flex-1 outline-none text-2xl font-black text-slate-800 placeholder-slate-300 bg-transparent" onKeyDown={(e) => { if (e.key === 'Enter' && filtered.length > 0) onSelect(filtered[0].key); if (e.key === 'Escape') onClose(); }} />
-            <button onClick={onClose} className="p-3 bg-white border border-slate-200 text-slate-400 rounded-2xl hover:bg-rose-50 hover:text-rose-500 hover:border-rose-200 transition shadow-sm"><X className="w-5 h-5"/></button>
+      <div className="fixed inset-0 z-[300] flex justify-center items-start pt-[12vh] px-4" aria-modal="true" role="dialog">
+        <motion.button initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} aria-label="Cerrar" className="absolute inset-0 w-full h-full bg-slate-900/50 backdrop-blur-sm cursor-default border-none outline-none" onClick={onClose} />
+        <motion.div initial={{ y: -10, scale: 0.98, opacity: 0 }} animate={{ y: 0, scale: 1, opacity: 1 }} className="relative w-full max-w-xl rounded-xl bg-white shadow-2xl border border-slate-200 overflow-hidden z-10">
+          <div className="p-3 border-b border-slate-100 flex items-center gap-3 bg-slate-50">
+            <Search className="w-5 h-5 text-indigo-500" />
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar módulo (Ej: Facturas...)" className="flex-1 outline-none text-sm font-semibold text-slate-800 bg-transparent" onKeyDown={(e) => { if (e.key === 'Enter' && filtered.length > 0) onSelect(filtered[0].key); if (e.key === 'Escape') onClose(); }} />
+            <span className="text-[10px] font-bold text-slate-400 bg-slate-200 px-1.5 py-0.5 rounded">ESC</span>
           </div>
-          <div className="max-h-[50vh] overflow-y-auto p-4 custom-scrollbar bg-white">
-            {filtered.length === 0 && <p className="text-sm font-bold text-slate-400 px-4 py-10 text-center">No se encontraron módulos.</p>}
-            <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="max-h-[50vh] overflow-y-auto p-2 custom-scrollbar bg-white">
+            {filtered.length === 0 && <p className="text-xs font-semibold text-slate-400 px-4 py-8 text-center">No se encontraron módulos.</p>}
+            <ul className="grid grid-cols-2 gap-1">
               {filtered.map((i) => {
                 const Icon = i.icon;
                 return (
                   <li key={i.key}>
-                    <button className="w-full text-left px-5 py-5 rounded-2xl text-sm font-black text-slate-600 bg-slate-50 border border-slate-100 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600 transition-all flex items-center justify-between group shadow-sm hover:shadow-md" onClick={() => onSelect(i.key)}>
-                      <div className="flex items-center gap-4">
-                        {Icon && <Icon className="w-6 h-6 text-slate-400 group-hover:text-indigo-500 transition-colors" />}
+                    <button className="w-full text-left px-3 py-2.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 transition-colors flex items-center justify-between group" onClick={() => onSelect(i.key)}>
+                      <div className="flex items-center gap-2">
+                        {Icon && <Icon className="w-4 h-4 text-slate-400 group-hover:text-indigo-500 transition-colors" />}
                         {i.label}
                       </div>
-                      {i.group && <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest bg-white px-3 py-1.5 rounded-lg border border-slate-100 group-hover:border-indigo-100">{i.group}</span>}
+                      {i.shortcut && <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded group-hover:bg-indigo-100 group-hover:text-indigo-500 transition-colors">{i.shortcut}</span>}
                     </button>
                   </li>
                 );
@@ -127,37 +125,22 @@ function useSwipeUpToReveal(onReveal: () => void) {
   const startY = useRef(0);
   useEffect(() => {
     if (!window.matchMedia?.('(pointer: coarse)').matches) return;
-    const onTouchStart = (e: TouchEvent) => {
-      if (!e.touches.length) return;
-      const y = e.touches[0].clientY;
-      if (window.innerHeight - y <= 40) startY.current = y;
-    };
-    const onTouchMove = (e: TouchEvent) => {
-      if (startY.current === 0) return;
-      const y = e.touches[0].clientY;
-      if (startY.current - y >= 30) {
-        onReveal();
-        startY.current = 0;
-      }
-    };
+    const onTouchStart = (e: TouchEvent) => { if (e.touches.length && window.innerHeight - e.touches[0].clientY <= 40) startY.current = e.touches[0].clientY; };
+    const onTouchMove = (e: TouchEvent) => { if (startY.current > 0 && startY.current - e.touches[0].clientY >= 30) { onReveal(); startY.current = 0; } };
     const onTouchEnd = () => { startY.current = 0; };
     window.addEventListener('touchstart', onTouchStart, { passive: true });
     window.addEventListener('touchmove', onTouchMove, { passive: true });
     window.addEventListener('touchend', onTouchEnd, { passive: true });
-    return () => {
-      window.removeEventListener('touchstart', onTouchStart);
-      window.removeEventListener('touchmove', onTouchMove);
-      window.removeEventListener('touchend', onTouchEnd);
-    };
+    return () => { window.removeEventListener('touchstart', onTouchStart); window.removeEventListener('touchmove', onTouchMove); window.removeEventListener('touchend', onTouchEnd); };
   }, [onReveal]);
 }
 
 /* =======================================================
- * 🚀 3. EL DOCK ESTILO MAC (Auto Hide)
+ * 🚀 3. EL DOCK ESTILO MAC (Densidad Contable)
  * ======================================================= */
-type DockItemDef<T extends string> = { key: T; label: string; icon: any; group?: 'main'|'fin'|'ops'; };
+type DockItemDef<T extends string> = { key: T; label: string; icon: any; group?: 'main'|'fin'|'ops'; shortcut?: string };
 
-function AutoHideDock<T extends string>({ items, activeKey, onChange }: { items: DockItemDef<T>[], activeKey: T, onChange: (k:T)=>void, isOffline?: boolean, isSyncing?: boolean }) {
+function AutoHideDock<T extends string>({ items, activeKey, onChange }: { items: DockItemDef<T>[], activeKey: T, onChange: (k:T)=>void }) {
   const [visible, setVisible] = useState(false);
   const [hoveringDock, setHoveringDock] = useState(false);
   const hideTimerRef = useRef<number | null>(null);
@@ -169,21 +152,20 @@ function AutoHideDock<T extends string>({ items, activeKey, onChange }: { items:
   }, [hoveringDock]);
 
   useEffect(() => {
-    const onMouseMove = (e: MouseEvent) => { if (window.innerHeight - e.clientY <= 30) handleShow(); };
+    const onMouseMove = (e: MouseEvent) => { if (window.innerHeight - e.clientY <= 20) handleShow(); };
     window.addEventListener('mousemove', onMouseMove);
     return () => window.removeEventListener('mousemove', onMouseMove);
   }, [handleShow]);
 
   useSwipeUpToReveal(handleShow);
 
+  // Mostrar dock con la tecla 'D'
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const active = document.activeElement as HTMLElement;
-      const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+      const active = document.activeElement as HTMLElement; const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
       if (!isTyping && e.key.toLowerCase() === 'd') setVisible(v => !v);
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   useEffect(() => {
@@ -201,27 +183,24 @@ function AutoHideDock<T extends string>({ items, activeKey, onChange }: { items:
     <>
       <AnimatePresence>
         {!visible && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed bottom-3 left-1/2 -translate-x-1/2 w-20 h-1.5 rounded-full bg-slate-300/80 z-[119] pointer-events-none shadow-sm" />
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed bottom-1 left-1/2 -translate-x-1/2 w-16 h-1 rounded-full bg-slate-300 z-[119] pointer-events-none" />
         )}
       </AnimatePresence>
 
       <AnimatePresence>
         {visible && (
           <motion.nav
-            initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }} transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            className="fixed bottom-0 left-0 right-0 z-[120] px-4 pb-6 pt-10 flex justify-center"
+            initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            className="fixed bottom-0 left-0 right-0 z-[120] px-4 pb-3 pt-6 flex justify-center"
             onMouseEnter={() => setHoveringDock(true)} onMouseLeave={() => { setHoveringDock(false); handleShow(); }}
           >
-            <div className="bg-white/90 backdrop-blur-xl border border-slate-200/50 shadow-2xl rounded-[2.5rem] p-4 max-w-full overflow-x-auto">
-              <div className="flex items-center gap-2 no-scrollbar" style={{ WebkitOverflowScrolling: 'touch' }}>
+            <div className="bg-white/95 backdrop-blur-md border border-slate-200 shadow-xl rounded-xl p-2 max-w-full overflow-x-auto">
+              <div className="flex items-center gap-1 no-scrollbar" style={{ WebkitOverflowScrolling: 'touch' }}>
                 {groups.main.map(it => <DockButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
-                <div className="w-px h-10 bg-slate-200 mx-2 shrink-0" />
+                <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
                 {groups.fin.map(it => <DockButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
-                <div className="w-px h-10 bg-slate-200 mx-2 shrink-0" />
+                <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
                 {groups.ops.map(it => <DockButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
-              </div>
-              <div className="mt-4 flex items-center justify-center gap-3">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-100 px-4 py-1.5 rounded-lg">Busca rápido con <kbd className="font-sans text-indigo-500 bg-white px-1.5 py-0.5 rounded shadow-sm ml-1">⌘ K</kbd></span>
               </div>
             </div>
           </motion.nav>
@@ -234,9 +213,9 @@ function AutoHideDock<T extends string>({ items, activeKey, onChange }: { items:
 function DockButton<T extends string>({ item, active, onClick }: { item: DockItemDef<T>, active: boolean, onClick: () => void }) {
   const Icon = item.icon;
   return (
-    <button type="button" onClick={onClick} className={cn("min-w-[72px] h-16 px-3 rounded-2xl border-2 text-[10px] font-black uppercase tracking-wider flex flex-col items-center justify-center gap-1.5 transition active:scale-95 shrink-0", active ? "bg-slate-900 text-white border-slate-900 shadow-xl scale-105" : "bg-white text-slate-500 border-slate-100 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-100")}>
-      <Icon className={cn("w-5 h-5", active ? "text-white" : "")} />
-      <span className="hidden sm:block">{item.label}</span>
+    <button type="button" onClick={onClick} className={cn("min-w-[60px] h-14 px-1 rounded-lg border border-transparent text-[9px] font-bold flex flex-col items-center justify-center gap-1 transition-all shrink-0", active ? "bg-slate-800 text-white shadow-md" : "text-slate-500 hover:bg-slate-100 hover:text-slate-800 hover:border-slate-200")}>
+      <Icon className={cn("w-4 h-4", active ? "text-white" : "")} />
+      <span className="hidden sm:block truncate w-full text-center px-0.5">{item.label}</span>
     </button>
   );
 }
@@ -253,12 +232,14 @@ export default function App() {
   
   const [isCmdOpen, setIsCmdOpen] = useState(false);
 
+  // 🛡️ Detección de conexión
   useEffect(() => {
     const onOnline = () => setIsOffline(false); const onOffline = () => setIsOffline(true);
     window.addEventListener('online', onOnline); window.addEventListener('offline', onOffline);
     return () => { window.removeEventListener('online', onOnline); window.removeEventListener('offline', onOffline); };
   }, []);
 
+  // 🛡️ Suscripción a cambios en Supabase
   useEffect(() => {
     const channel = supabase.channel('arume-changes', { config: { broadcast: { self: false } } }).on('postgres_changes', { event: '*', schema: 'public', table: 'arume_data' }, () => { reloadData(); }).subscribe();
     return () => { try { supabase.removeChannel(channel); } catch { /* noop */ } };
@@ -266,6 +247,7 @@ export default function App() {
 
   const REQUIRED: (keyof AppData)[] = ['banco','platos','recetas','ingredientes','ventas_menu','cierres','facturas','albaranes','gastos_fijos'];
   
+  // 🛡️ EL ESCUDO: Inicialización segura de datos
   useEffect(() => {
     if (loading || !db) return; 
     
@@ -289,6 +271,7 @@ export default function App() {
     }
   }, [db, loading, setData]);
 
+  // 🛡️ Guardado seguro y backup local
   const isSyncingRef = useRef(false);
   const lastPayloadRef = useRef<AppData | null>(null);
 
@@ -307,26 +290,37 @@ export default function App() {
     finally { isSyncingRef.current = false; setIsSyncing(false); }
   }, [saveData, setData, isOffline]);
 
-  // ⌨️ ATAJO BUSCADOR (Ctrl+K)
+  // ⌨️ ATAJOS GLOBALES (Cmd+K y Cmd+1...5 para módulos rápidos)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const active = document.activeElement as HTMLElement;
+      const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+      if (isTyping) return;
+
       const mod = e.ctrlKey || e.metaKey;
-      if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); setIsCmdOpen(v => !v); }
+      if (mod) {
+        if (e.key.toLowerCase() === 'k') { e.preventDefault(); setIsCmdOpen(v => !v); }
+        if (e.key === '1') { e.preventDefault(); setActiveTab('dashboard'); }
+        if (e.key === '2') { e.preventDefault(); setActiveTab('diario'); }
+        if (e.key === '3') { e.preventDefault(); setActiveTab('facturas'); }
+        if (e.key === '4') { e.preventDefault(); setActiveTab('albaranes'); }
+        if (e.key === '5') { e.preventDefault(); setActiveTab('banco'); }
+      }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
   const navItems = useMemo<DockItemDef<TabKey>[]>(() => ([
-    { key: 'dashboard',  label: 'Dash',       icon: LayoutDashboard, group: 'main' },
+    { key: 'dashboard',  label: 'Dash',       icon: LayoutDashboard, group: 'main', shortcut: '⌘1' },
     { key: 'ia',         label: 'IA',         icon: Sparkles,        group: 'main' },
-    { key: 'diario',     label: 'Caja',       icon: Wallet,          group: 'main' },
+    { key: 'diario',     label: 'Caja',       icon: Wallet,          group: 'main', shortcut: '⌘2' },
     { key: 'importador', label: 'Subir',      icon: Import,          group: 'main' },
-    { key: 'facturas',   label: 'Facturas',   icon: FileText,        group: 'fin'  },
-    { key: 'albaranes',  label: 'Albaranes',  icon: Truck,           group: 'fin'  },
+    { key: 'facturas',   label: 'Facturas',   icon: FileText,        group: 'fin',  shortcut: '⌘3' },
+    { key: 'albaranes',  label: 'Albaranes',  icon: Truck,           group: 'fin',  shortcut: '⌘4' },
+    { key: 'banco',      label: 'Banco',      icon: Building2,       group: 'fin',  shortcut: '⌘5' },
     { key: 'tesoreria',  label: 'Tesorería',  icon: TrendingUp,      group: 'fin'  },
     { key: 'liquidez',   label: 'Liquidez',   icon: Scale,           group: 'fin'  },
-    { key: 'banco',      label: 'Banco',      icon: Building2,       group: 'fin'  },
     { key: 'fixed',      label: 'Fijos',      icon: Zap,             group: 'fin'  },
     { key: 'informes',   label: 'Informes',   icon: PieChart,        group: 'ops'  },
     { key: 'menus',      label: 'Menús',      icon: ChefHat,         group: 'ops'  },
@@ -357,51 +351,65 @@ export default function App() {
 
   if (loading) return (
     <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center">
-      <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full mb-6" />
-      <p className="text-indigo-400 font-black text-xs tracking-[0.4em] uppercase">Iniciando Arume Pro...</p>
+      <Loader2 className="w-8 h-8 text-indigo-500 animate-spin mb-4" />
+      <p className="text-indigo-400 font-bold text-[10px] uppercase tracking-widest">Iniciando Arume Pro...</p>
     </div>
   );
 
+  if (!loading && !db) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-center p-4">
+        <AlertTriangle className="w-12 h-12 text-amber-500 mb-4 animate-pulse" />
+        <h2 className="text-lg font-bold text-white mb-1">Error de conexión</h2>
+        <p className="text-slate-400 mb-6 text-xs max-w-sm">Supabase ha tardado en responder. Tus datos están a salvo.</p>
+        <button onClick={() => window.location.reload()} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-indigo-500 transition flex items-center gap-2">
+          <RefreshCw className="w-3 h-3" /> Reintentar
+        </button>
+      </div>
+    );
+  }
+
+  // 🚀 APLICAMOS LA BASE DENSIDAD (text-xs / 12px) PARA TODA LA APP EN EL CONTENEDOR RAIZ
   return (
-    <div id="app-root-container" className="min-h-screen bg-[#F8FAFC] flex flex-col font-sans relative overflow-x-hidden">
+    <div id="app-root-container" className="min-h-screen bg-slate-50 flex flex-col font-sans text-xs text-slate-800 relative overflow-x-hidden">
       
-      <header className="sticky top-0 z-[110] bg-white/80 backdrop-blur-xl border-b border-slate-200 px-6 py-4 flex justify-between items-center shadow-sm">
-        <div className="flex items-center gap-4">
-          <div>
-            <h1 className="text-2xl font-black text-slate-900 tracking-tighter flex items-center gap-2">
-              ARUME <span className="bg-indigo-600 text-white px-2 py-0.5 rounded-lg text-xs tracking-widest uppercase">PRO</span>
-            </h1>
-            <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mt-1">{TAB_LABELS[activeTab]}</p>
-          </div>
+      {/* HEADER CONTABLE (ULTRA COMPACTO) */}
+      <header className="sticky top-0 z-[110] bg-white border-b border-slate-200 px-4 py-2 flex justify-between items-center shadow-sm">
+        <div className="flex items-center gap-3">
+          <h1 className="text-sm font-black text-slate-900 tracking-tight flex items-center gap-1.5">
+            ARUME <span className="bg-indigo-600 text-white px-1.5 py-0.5 rounded text-[8px] uppercase tracking-widest">PRO</span>
+          </h1>
+          <div className="w-px h-4 bg-slate-200 hidden sm:block"></div>
+          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest hidden sm:block">{TAB_LABELS[activeTab]}</p>
         </div>
         
-        <div className="flex items-center gap-3">
-          <button onClick={() => setIsCmdOpen(true)} className="hidden sm:flex items-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200 hover:text-slate-800 transition font-black text-[10px] uppercase tracking-widest border border-slate-200">
-            <Search className="w-4 h-4" /> Buscar Módulo (⌘K)
+        <div className="flex items-center gap-2">
+          <button onClick={() => setIsCmdOpen(true)} className="hidden sm:flex items-center gap-1.5 px-2 py-1.5 bg-slate-50 text-slate-500 rounded border border-slate-200 hover:bg-slate-100 hover:text-slate-800 transition text-[10px] font-bold">
+            <Search className="w-3 h-3" /> Buscar (⌘K)
           </button>
 
           {isOffline && (
-            <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 px-3 py-2 rounded-xl shadow-sm">
-               <WifiOff className="w-4 h-4 text-rose-500 animate-pulse" />
-               <span className="text-[10px] text-rose-600 font-black uppercase tracking-widest">Sin Conexión</span>
+            <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-200 px-2 py-1.5 rounded">
+               <WifiOff className="w-3 h-3 text-rose-500" />
+               <span className="text-[9px] text-rose-600 font-bold uppercase">Offline</span>
             </div>
           )}
           {isSyncing && !isOffline && (
-            <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-100 px-3 py-2 rounded-xl">
-               <RefreshCw className="w-4 h-4 text-indigo-500 animate-spin" />
-               <span className="text-[10px] text-indigo-600 font-black uppercase tracking-widest">Guardando</span>
+            <div className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-100 px-2 py-1.5 rounded">
+               <RefreshCw className="w-3 h-3 text-indigo-500 animate-spin" />
+               <span className="text-[9px] text-indigo-600 font-bold uppercase">Guardando</span>
             </div>
           )}
-          <button onClick={() => setIsConfigOpen(true)} aria-label="Configuración" className="w-12 h-12 bg-white border border-slate-200 rounded-full flex items-center justify-center hover:bg-slate-50 text-slate-600 hover:text-indigo-600 shadow-sm transition hover:rotate-90">
-            <Settings className="w-5 h-5" />
+          <button onClick={() => setIsConfigOpen(true)} aria-label="Configuración" className="w-8 h-8 flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 rounded transition">
+            <Settings className="w-4 h-4" />
           </button>
         </div>
       </header>
 
       <main className="flex-1 overflow-y-auto">
         <AnimatePresence mode="wait">
-          <motion.div key={activeTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.15, ease: 'easeOut' }} className="p-4 md:p-6 lg:p-8 max-w-[1600px] mx-auto pb-10">
-            {/* 🛡️ El ErrorBoundary evita que un fallo en una pestaña rompa toda la App */}
+          {/* MARGEN REDUCIDO: p-2 md:p-4 */}
+          <motion.div key={activeTab} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} transition={{ duration: 0.1 }} className="p-2 md:p-4 max-w-[1600px] mx-auto pb-16">
             <ErrorBoundary key={activeTab}>
               {content}
             </ErrorBoundary>
@@ -412,8 +420,8 @@ export default function App() {
       {/* 🚀 COMPONENTES FLOTANTES */}
       <TelegramWidget currentModule={TAB_LABELS[activeTab]} telegramToken={db?.config?.telegramToken} chatId={db?.config?.telegramChatId} />
       
-      <AutoHideDock items={navItems} activeKey={activeTab} onChange={(k) => setActiveTab(k)} isOffline={isOffline} isSyncing={isSyncing} />
-      <CommandPalette open={isCmdOpen} onClose={() => setIsCmdOpen(false)} items={navItems.map(n => ({ key: n.key, label: TAB_LABELS[n.key], group: n.group, icon: n.icon }))} onSelect={(key) => { setActiveTab(key); setIsCmdOpen(false); }} />
+      <AutoHideDock items={navItems} activeKey={activeTab} onChange={(k) => setActiveTab(k)} />
+      <CommandPalette open={isCmdOpen} onClose={() => setIsCmdOpen(false)} items={navItems.map(n => ({ key: n.key, label: TAB_LABELS[n.key], group: n.group, icon: n.icon, shortcut: n.shortcut }))} onSelect={(key) => { setActiveTab(key); setIsCmdOpen(false); }} />
       <SettingsModal isOpen={isConfigOpen} onClose={() => setIsConfigOpen(false)} db={db} setDb={setData} onSave={handleSave} />
     </div>
   );
