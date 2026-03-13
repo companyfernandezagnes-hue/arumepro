@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
   LayoutDashboard, Wallet, ArrowUpRight, ArrowDownRight, AlertCircle, 
-  TrendingUp, Building2, Hotel, ShoppingBag, Users, SplitSquareHorizontal, 
+  TrendingDown, TrendingUp, Building2, Hotel, ShoppingBag, Users, SplitSquareHorizontal, 
   ChevronLeft, ChevronRight, CheckCircle2, ShieldCheck, Mail, Loader2, MailOpen,
   Sparkles, Coffee, ChefHat
 } from 'lucide-react';
@@ -13,7 +13,7 @@ import { createClient } from '@supabase/supabase-js';
 
 type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
 
-// 🔑 CREDENCIALES
+// 🔑 CREDENCIALES SUPABASE
 const SUPABASE_URL = "https://bgtelulbiaugawyrhvwt.supabase.co"; 
 const SUPABASE_ANON_KEY = "sb_publishable_jagYegyG8gGMijzpLEY9BQ_iWfL1MU4";
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -28,6 +28,33 @@ const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string
 const MONTHS_FULL = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const MONTHS_SHORT = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
 
+/* ==========================================
+ * 🛡️ VACUNA UNIVERSAL PARA FECHAS CORRUPTAS
+ * ========================================== */
+const safeParseDate = (dateStr: string | null | undefined): Date => {
+  if (!dateStr) return new Date();
+  
+  // Caso 1: Fecha corta del banco "12/01/26" (DD/MM/YY)
+  if (dateStr.includes('/')) {
+    const parts = dateStr.split('/');
+    if (parts.length === 3) {
+      let year = parseInt(parts[2], 10);
+      if (year < 100) year += 2000; // Convierte 26 a 2026
+      const month = parseInt(parts[1], 10) - 1; // JS meses 0-11
+      const day = parseInt(parts[0], 10);
+      const parsed = new Date(year, month, day);
+      if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+  }
+  
+  // Caso 2: Formato estándar "2026-01-30"
+  const fallback = new Date(dateStr);
+  if (!Number.isNaN(fallback.getTime())) return fallback;
+  
+  // Caso Crítico: Si todo falla, devolvemos hoy para evitar pantallas rojas
+  return new Date();
+};
+
 export const DashboardView = ({ data }: { data: AppData }) => {
   const [viewMode, setViewMode] = useState<'month' | 'quarter' | 'year'>('month');
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
@@ -37,7 +64,7 @@ export const DashboardView = ({ data }: { data: AppData }) => {
   const [generalEmails, setGeneralEmails] = useState<any[]>([]);
   const [loadingEmails, setLoadingEmails] = useState(true);
 
-  // 🛡️ PROTECCIÓN EXTREMA (Anti-Crash)
+  // 🛡️ PROTECCIÓN EXTREMA (Anti-Crash de Datos)
   const safeData = data || {};
   const cierres = Array.isArray(safeData.cierres) ? safeData.cierres : [];
   const albaranes = Array.isArray(safeData.albaranes) ? safeData.albaranes : [];
@@ -130,14 +157,11 @@ export const DashboardView = ({ data }: { data: AppData }) => {
 
     const isDateInPeriod = (dateStr?: string) => {
       if (!dateStr) return false;
-      try {
-        const d = new Date(dateStr);
-        if (Number.isNaN(d.getTime())) return false; // Protección fechas inválidas
-        if (d.getFullYear() !== year) return false;
-        if (mode === 'month') return d.getMonth() === month;
-        if (mode === 'quarter') return Math.floor(d.getMonth() / 3) + 1 === quarter;
-        return true;
-      } catch (e) { return false; }
+      const d = safeParseDate(dateStr); // 💉 Usamos la vacuna aquí
+      if (d.getFullYear() !== year) return false;
+      if (mode === 'month') return d.getMonth() === month;
+      if (mode === 'quarter') return Math.floor(d.getMonth() / 3) + 1 === quarter;
+      return true;
     };
 
     cierres.forEach((c: any) => {
@@ -244,8 +268,8 @@ export const DashboardView = ({ data }: { data: AppData }) => {
       const days = Array.from({ length: daysInMonth }, (_, i) => ({ name: String(i + 1).padStart(2, '0'), venta: 0 }));
       cierres.forEach(c => {
         if (!c?.date) return;
-        const d = new Date(c.date);
-        if (!Number.isNaN(d.getTime()) && d.getFullYear() === selectedYear && d.getMonth() === selectedMonth) {
+        const d = safeParseDate(c.date); // 💉 Usamos la vacuna aquí también
+        if (d.getFullYear() === selectedYear && d.getMonth() === selectedMonth) {
           const dayIdx = d.getDate() - 1;
           const ventaVal = Num.parse(c.totalVenta || 0) || 0;
           if (days[dayIdx]) days[dayIdx].venta += ventaVal;
@@ -258,8 +282,8 @@ export const DashboardView = ({ data }: { data: AppData }) => {
       const months = Array.from({ length: numMonths }, (_, i) => ({ name: MONTHS_SHORT[startMonth + i], venta: 0 }));
       cierres.forEach(c => {
         if (!c?.date) return;
-        const d = new Date(c.date);
-        if (!Number.isNaN(d.getTime()) && d.getFullYear() === selectedYear && d.getMonth() >= startMonth && d.getMonth() < startMonth + numMonths) {
+        const d = safeParseDate(c.date);
+        if (d.getFullYear() === selectedYear && d.getMonth() >= startMonth && d.getMonth() < startMonth + numMonths) {
           const mIdx = d.getMonth() - startMonth;
           const ventaVal = Num.parse(c.totalVenta || 0) || 0;
           if (months[mIdx]) months[mIdx].venta += ventaVal;
@@ -301,7 +325,7 @@ export const DashboardView = ({ data }: { data: AppData }) => {
   const lowStock = ingredientes.filter(i => (i?.stock ?? 0) <= (i?.min ?? 0));
   const facturasPendientes = facturas.filter((f: any) => !f?.paid && f?.status !== 'draft');
 
-  // Función segura para mostrar ratios
+  // Función ultra-segura para mostrar porcentajes sin crashear
   const safeFixed = (val: number | undefined) => (Number.isFinite(val) ? (val || 0).toFixed(1) : '0.0');
 
   return (
@@ -443,7 +467,7 @@ export const DashboardView = ({ data }: { data: AppData }) => {
                 <div className="h-3 bg-slate-100 rounded-full overflow-hidden shadow-inner">
                   <div 
                     className={cn("h-full rounded-full transition-all duration-1000", g.color)} 
-                    style={{ width: `${stats.gastos.total ? ((g.val || 0) / stats.gastos.total) * 100 : 0}%` }} 
+                    style={{ width: `${stats.gastos.total > 0 ? ((g.val || 0) / stats.gastos.total) * 100 : 0}%` }} 
                   />
                 </div>
               </div>
@@ -475,7 +499,7 @@ export const DashboardView = ({ data }: { data: AppData }) => {
                     </div>
                   </div>
                   <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden flex shadow-inner">
-                    <div className="h-full transition-all duration-1000" style={{ width: `${((uStat.income || 0) / maxIncome) * 100}%`, backgroundColor: unit.hex }} />
+                    <div className="h-full transition-all duration-1000" style={{ width: `${maxIncome > 0 ? ((uStat.income || 0) / maxIncome) * 100 : 0}%`, backgroundColor: unit.hex }} />
                   </div>
                   <p className="text-[9px] font-bold text-slate-400 mt-1.5 flex justify-between uppercase tracking-widest px-1">
                     <span>Ingresos: {Num.fmt(uStat.income || 0)}</span>
