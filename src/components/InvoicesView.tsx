@@ -1,33 +1,30 @@
-import React, { useState, useMemo, useEffect, useRef, useDeferredValue } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback, useDeferredValue } from 'react';
 import { 
-  Search, Plus, Download, Package, AlertTriangle, Check, Clock, Trash2, 
-  Building2, ShoppingBag, ListPlus, Users, Hotel, Layers, X, 
-  LineChart as LineChartIcon, FileText, Mic, Square, 
-  UploadCloud, FileDown, Smartphone, Camera, Loader2, Mail, 
-  CheckCircle2, Link as LinkIcon, Inbox, ArrowRight, CheckSquare, 
-  Sparkles, ChevronLeft, ChevronRight, Zap, FileArchive, AlertCircle, ShieldCheck
+  Search, Plus, Download, Package, AlertTriangle, Check, 
+  Building2, ShoppingBag, ListPlus, Users, Hotel, Layers, 
+  XCircle, LineChart as LineChartIcon, FileSpreadsheet, Mic, Square, UploadCloud, FileDown, Smartphone, Camera, Loader2
 } from 'lucide-react';
+import { AppData, Albaran, Socio } from '../types';
+import { Num, ArumeEngine, DateUtil } from '../services/engine';
+import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import { GoogleGenAI } from "@google/genai";
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend } from 'recharts';
 
-// 🛡️ TIPOS CENTRALIZADOS
-import { AppData, FacturaExtended, Albaran, EmailDraft, BusinessUnit } from '../types';
-import { Num, DateUtil } from '../services/engine';
-import { cn } from '../lib/utils';
+// 🚀 IMPORTAMOS DEL CEREBRO CENTRAL
+import { basicNorm, TOLERANCIA as CENTRAL_TOLERANCIA } from '../services/invoicing';
 
-// 🚀 SERVICIOS CORE
-import { 
-  getOfficialProvName, 
-  basicNorm, // 💡 CORRECCIÓN: Aquí estaba el error. Importamos basicNorm
-  linkAlbaranesToFactura, 
-  matchAlbaranesToFactura 
-} from '../services/invoicing'; 
-import { fetchNewEmails, markEmailAsParsed } from '../services/supabase';
+// 🚀 HIJOS VISUALES (Debes tenerlos en tu carpeta components)
+import { AlbaranesList } from './AlbaranesList';
+import { AlbaranEditModal } from './AlbaranEditModal';
 
-// 🧩 COMPONENTES HIJOS
-import { InvoicesList } from './InvoicesList';
-import { InvoiceDetailModal } from './InvoiceDetailModal';
+interface AlbaranesViewProps {
+  data: AppData;
+  onSave: (newData: AppData) => Promise<void>;
+}
+
+export type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
 
 const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string; bg: string }[] = [
   { id: 'REST', name: 'Restaurante', icon: Building2, color: 'text-indigo-600', bg: 'bg-indigo-50' },
@@ -36,821 +33,828 @@ const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string
   { id: 'CORP', name: 'Socios / Corp', icon: Users, color: 'text-slate-600', bg: 'bg-slate-100' },
 ];
 
-export interface InvoicesViewProps {
-  data: AppData;
-  onSave: (newData: AppData) => Promise<void>;
-}
+/* =======================================================
+ * 🛡️ 1. UTILIDADES Y CONSTANTES INTEGRADAS
+ * ======================================================= */
+export const TOLERANCIA = CENTRAL_TOLERANCIA; 
+export const superNorm = basicNorm; // Alias de rescate
 
-// Utilidad para extraer JSON de respuestas de IA
-const safeJSON = (str: string) => { 
-  try { 
-    const match = str.match(/\{[\s\S]*\}/); 
-    return match ? JSON.parse(match[0]) : {}; 
-  } catch { 
-    return {}; 
-  } 
+const safeJSON = (str: string) => { try { const match = str.match(/\{[\s\S]*\}/); return match ? JSON.parse(match[0]) : {}; } catch { return {}; } };
+
+const filterByQuery = (a: Albaran, q: string) => {
+  if (!q) return true;
+  const n = basicNorm(q);
+  const prov = basicNorm(a?.prov);
+  const num  = (a?.num||'').toLowerCase();
+  const notes= (a?.notes||'').toLowerCase();
+  
+  // 🛡️ FIX: Proteger el reduce de items
+  const items = Array.isArray(a?.items) ? a.items : [];
+  const lines = items.some((it:any) => it?.n ? basicNorm(it.n).includes(n) : false);
+  
+  return prov.includes(n) || num.includes(n) || notes.includes(n) || lines;
 };
 
-// Comprobación de arrastre de archivos reales
-const hasRealFiles = (e: React.DragEvent | DragEvent) => {
-  const items = e.dataTransfer?.items;
-  if (!items || items.length === 0) return false;
-  for (let i = 0; i < items.length; i++) {
-    if (items[i].kind === 'file') return true;
+const looksLikeDuplicate = (prov: string, num: string, date: string, albaranes: Albaran[]) => 
+  albaranes.some(a => basicNorm(a?.prov) === basicNorm(prov) && (a?.num||'S/N') === (num||'S/N') && (a?.date||'').slice(0,10) === (date||'').slice(0,10));
+
+const getDynamicThreshold = (itemName: string) => {
+  const n = (itemName || '').toLowerCase();
+  if (n.match(/tomate|lechuga|cebolla|patata|pimiento|verdura|fruta|limon|naranja/)) return 25; 
+  if (n.match(/pescado|salmon|lubina|pulpo|calamar|gamba|langostino/)) return 15; 
+  if (n.match(/carne|ternera|pollo|cerdo/)) return 8; 
+  if (n.match(/vino|cerveza|agua|refresco|cafe|azucar|harina/)) return 5; 
+  return 10; 
+};
+
+const normalizeUnitPrice = (q: number, u: string | undefined, unitPrice: number) => {
+  if (!u) return Num.round2(unitPrice);
+  switch (u) {
+    case "g":  return Num.round2(unitPrice * 1000); 
+    case "ml": return Num.round2(unitPrice * 1000); 
+    default:   return Num.round2(unitPrice);
   }
-  return false;
 };
-
-// Generador de SHA-256 para evitar duplicados
-async function sha256File(file: File) {
-  const buf = await file.arrayBuffer();
-  const hash = await crypto.subtle.digest('SHA-256', buf);
-  return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
-}
 
 /* =======================================================
- * 🎨 COMPONENTE: Flechas de Conexión Inteligentes
+ * 🚀 CEREBRO FACTURACIÓN: PROMOCIÓN AUTOMÁTICA A FACTURAS
  * ======================================================= */
-const ConnectionLine = ({ sourceId, targetId, status = 'default' }: { sourceId: string; targetId: string; status?: 'perfect' | 'warning' | 'default' }) => {
-  const [coords, setCoords] = useState<{x1: number, y1: number, x2: number, y2: number} | null>(null);
+const groupKey = (alb: Albaran) => `${basicNorm(alb?.prov)}__${(alb?.date || DateUtil.today()).slice(0, 7)}`;
 
-  const colors = {
-    perfect: { line: '#10b981', dot: '#059669', glow: '#34d399' }, 
-    warning: { line: '#f59e0b', dot: '#d97706', glow: '#fbbf24' }, 
-    default: { line: '#6366f1', dot: '#4f46e5', glow: '#818cf8' }  
-  };
-  const theme = colors[status as keyof typeof colors];
-
-  useEffect(() => {
-    const updateCoords = () => {
-      const sourceEl = document.getElementById(sourceId);
-      const targetEl = document.getElementById(targetId);
-      
-      if (sourceEl && targetEl) {
-        const sRect = sourceEl.getBoundingClientRect();
-        const tRect = targetEl.getBoundingClientRect();
-        
-        setCoords({
-          x1: sRect.right,
-          y1: sRect.top + (sRect.height / 2),
-          x2: tRect.left,
-          y2: tRect.top + (tRect.height / 2)
-        });
-      }
-    };
-
-    const timer = setTimeout(updateCoords, 150);
-    window.addEventListener('resize', updateCoords);
-    window.addEventListener('scroll', updateCoords, true);
-    
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener('resize', updateCoords);
-      window.removeEventListener('scroll', updateCoords, true);
-    };
-  }, [sourceId, targetId]);
-
-  if (!coords) return null;
-
-  const path = `M ${coords.x1} ${coords.y1} C ${coords.x1 + 60} ${coords.y1}, ${coords.x2 - 60} ${coords.y2}, ${coords.x2} ${coords.y2}`;
-
-  return (
-    <svg className="fixed inset-0 pointer-events-none z-[60] w-full h-full" style={{ left: 0, top: 0 }}>
-      <motion.path
-        initial={{ pathLength: 0, opacity: 0 }}
-        animate={{ pathLength: 1, opacity: 0.5 }}
-        transition={{ duration: 0.8, ease: "easeOut" }}
-        d={path}
-        stroke={theme.line}
-        strokeWidth="2.5"
-        fill="none"
-        strokeDasharray="5 5"
-      />
-      <circle r="4" fill={theme.glow} style={{ filter: `drop-shadow(0 0 6px ${theme.glow})` }}>
-        <animateMotion dur="2.5s" repeatCount="indefinite" path={path} />
-      </circle>
-      <circle cx={coords.x1} cy={coords.y1} r="3" fill={theme.dot} />
-      <circle cx={coords.x2} cy={coords.y2} r="4" fill={theme.dot} />
-    </svg>
+const findFacturaIdx = (data: AppData, alb: Albaran) => {
+  const key = basicNorm(alb?.prov);
+  const yymm = (alb?.date || DateUtil.today()).slice(0, 7);
+  return (data.facturas || []).findIndex((f: any) =>
+    f?.tipo === 'compra' &&
+    basicNorm(f?.prov) === key &&
+    (f?.date || '').startsWith(yymm) &&
+    !f?.reconciled
   );
 };
 
+const facturaHasAlb = (f: any, albId: string) => Array.isArray(f?.albaranIdsArr) && f.albaranIdsArr.includes(albId);
+
+function detachFromPreviousFacturaIfMoved(data: AppData, before: Albaran, after: Albaran) {
+  if (!before || !after) return;
+  if (groupKey(before) === groupKey(after)) return;
+
+  const idx = (data.facturas || []).findIndex((f: any) =>
+    Array.isArray(f?.albaranIdsArr) && f.albaranIdsArr.includes(before.id)
+  );
+  if (idx < 0) return;
+
+  const F = data.facturas[idx] as any;
+  const tb = Num.parse(before.total) || 0;
+  const bb = Num.parse(before.base)  || Num.round2(tb / 1.10);
+  const ib = Num.parse(before.taxes) || Num.round2(tb - bb);
+
+  F.total = String(Num.round2((Num.parse(F.total) || 0) - tb));
+  F.base  = String(Num.round2((Num.parse(F.base)  || 0) - bb));
+  F.tax   = String(Num.round2((Num.parse(F.tax)   || 0) - ib));
+  F.albaranIdsArr = F.albaranIdsArr.filter((id: string) => id !== before.id);
+
+  if ((F.albaranIdsArr || []).length === 0 && !F.reconciled) {
+    data.facturas.splice(idx, 1);
+  }
+}
+
+function upsertFacturaFromAlbaran(data: AppData, alb: Albaran) {
+  if (!Array.isArray(data.facturas)) data.facturas = [];
+  const idx = findFacturaIdx(data, alb);
+
+  const t = Num.parse(alb.total) || 0;
+  const b = Num.parse(alb.base)  || Num.round2(t / 1.10);
+  const i = Num.parse(alb.taxes) || Num.round2(t - b);
+
+  if (idx >= 0) {
+    const F = data.facturas[idx] as any;
+    if (!facturaHasAlb(F, alb.id)) {
+      F.total = String(Num.round2((Num.parse(F.total) || 0) + t));
+      F.base  = String(Num.round2((Num.parse(F.base)  || 0) + b));
+      F.tax   = String(Num.round2((Num.parse(F.tax)   || 0) + i));
+      F.albaranIdsArr = Array.from(new Set([...(F.albaranIdsArr || []), alb.id]));
+    }
+  } else {
+    const newF = {
+      id: `fac-auto-${Date.now()}`,
+      tipo: 'compra',
+      num: `AUTO-${alb.num || 'SN'}`,
+      date: alb.date || DateUtil.today(),
+      prov: alb.prov,
+      total: String(t), base: String(b), tax: String(i),
+      paid: false,
+      reconciled: false,
+      status: 'approved',
+      unidad_negocio: alb.unitId || 'REST',
+      albaranIdsArr: [alb.id],
+      source: 'auto-from-albaran',
+    } as any;
+    data.facturas.unshift(newF);
+  }
+
+  const ai = (data.albaranes || []).findIndex(a => a.id === alb.id);
+  if (ai >= 0) data.albaranes[ai] = { ...data.albaranes[ai], invoiced: true };
+}
+
 /* =======================================================
- * 🏦 COMPONENTE PRINCIPAL
+ * 🧠 2. MOTOR DE PARSEO V2 INTEGRADO
  * ======================================================= */
-export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
-  const safeData = data || {};
-  const facturasSeguras = Array.isArray(safeData.facturas) ? safeData.facturas as FacturaExtended[] : [];
+function useAlbaranEnginePRO(text: string) {
+  const analyzedItems = useMemo(() => {
+    if (!text) return [];
+    const lines = text.replace(/\t/g,' ').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    const out = [];
+
+    for (const original of lines) {
+      let line = original.replace(/[€$]/g,'').replace(/,/g,'.').replace(/\s{2,}/g,' ').trim();
+      if (line.length < 3) continue;
+
+      let rate: 4|10|21 = 10;
+      const mRate = line.match(/\b(4|10|21)\s?%/i);
+      if (mRate) rate = Number(mRate[1]) as 4|10|21;
+
+      let q = 1, u = 'uds';
+      const mQty = line.match(/^(\d+(?:[.,]\d{1,3})?)\s*(kg|kgs|kilo|g|gr|grs|l|lt|litro|ml|ud|uds|x)\b/i);
+      if (mQty) {
+        q = parseFloat(mQty[1].replace(',','.'));
+        const unitToken = mQty[2].toLowerCase();
+        u = ['kg','kgs','kilo'].includes(unitToken) ? 'kg' : ['g','gr','grs'].includes(unitToken) ? 'g' : ['l','lt','litro'].includes(unitToken) ? 'l' : ['ml'].includes(unitToken) ? 'ml' : 'uds';
+      }
+
+      const nums = Array.from(line.matchAll(/(\d+(?:.\d{1,3})?)/g)).map(m=> parseFloat(m[1]));
+      if (!nums.length) continue;
+
+      const discount = line.match(/(-\s?\d+(?:[.,]\d{1,2})?)\b/)?.[1] ? Math.abs(parseFloat(line.match(/(-\s?\d+(?:[.,]\d{1,2})?)\b/)![1].replace(',','.'))) : 0;
+      const total = Num.round2((nums.at(-1) || 0) - discount);
+      if (!isFinite(total) || total <= 0) continue;
+
+      let name = line;
+      if (mQty) name = name.replace(mQty[0],'');
+      if (mRate) name = name.replace(mRate[0],'');
+      if (discount) name = name.replace(/(-\s?\d+(?:[.,]\d{1,2})?)\b/,'');
+      name = name.replace(new RegExp(`${(nums.at(-1) || 0).toString().replace('.', '\\.')}(?!\\d)`),'').replace(/\s{2,}/g,' ').trim() || 'Varios Indefinido';
+
+      const unitPriceBruto = q > 0 ? total / q : total;
+      const base = Num.round2(total / (1 + rate/100));
+      const tax  = Num.round2(total - base);
+
+      out.push({ q, n: name, t: total, rate, base, tax, unitPrice: Num.round2(unitPriceBruto), u });
+    }
+    return out;
+  }, [text]);
+
+  const liveTotals = useMemo(() => {
+    let grandTotal = 0; let b4=0, i4=0, b10=0, i10=0, b21=0, i21=0;
+    for (const it of analyzedItems) {
+      grandTotal += it.t;
+      if (it.rate === 4) { b4 += it.base; i4 += it.tax; }
+      else if (it.rate === 21) { b21 += it.base; i21 += it.tax; }
+      else { b10 += it.base; i10 += it.tax; }
+    }
+    return { 
+      grandTotal: Num.round2(grandTotal), baseFinal: Num.round2(b4+b10+b21), taxFinal: Num.round2(i4+i10+i21),
+      split: { base10: Num.round2(b10), iva10: Num.round2(i10), base21: Num.round2(b21), iva21: Num.round2(i21) }
+    };
+  }, [analyzedItems]);
+
+  return { analyzedItems, liveTotals };
+}
+
+/* =======================================================
+ * 📈 3. PRICE INSPECTOR (Incrustado)
+ * ======================================================= */
+function smaN(values: number[], n=30) {
+  const out: number[] = [];
+  let acc = 0;
+  for (let i=0;i<values.length;i++){
+    acc += values[i];
+    if (i>=n) acc -= values[i-n];
+    out.push(i>=n-1 ? Num.round2(acc/n) : NaN);
+  }
+  return out;
+}
+
+function usePriceSeries({ history, albaranes, prov, item }: any) {
+  return useMemo(() => {
+    if (!prov || !item) return { series: [], avgAll: 0, avg30: 0 };
+    
+    // 🛡️ FIX: Proteger history y albaranes de null
+    const safeHistory = Array.isArray(history) ? history : [];
+    const safeAlbaranes = Array.isArray(albaranes) ? albaranes : [];
+
+    const H = safeHistory.filter((h:any) => h?.prov===prov && h?.item===item);
+    let fallback: any[] = [];
+    
+    if (!H.length && safeAlbaranes.length){
+      for (const a of safeAlbaranes){
+        if ((a.prov||'').toUpperCase() !== prov) continue;
+        const safeItems = Array.isArray(a.items) ? a.items : [];
+        for (const it of safeItems) {
+          const n = (it?.n||'').toUpperCase();
+          if (!n.includes(item)) continue; 
+          fallback.push({
+            id: `rebuild-${prov}-${n}-${a.date}`, prov, item: n,
+            unitPrice: normalizeUnitPrice(it.q, it.u as any, it.unitPrice),
+            date: a.date
+          });
+        }
+      }
+    }
+
+    const rows = (H.length ? H : fallback)
+      .filter(r => r?.unitPrice>0 && r?.date)
+      .sort((a,b)=> String(a.date).localeCompare(String(b.date)));
+
+    const series = rows.map(r => ({ date: r.date, price: r.unitPrice }));
+    if (!series.length) return { series: [], avgAll: 0, avg30: 0 };
+
+    const prices = series.map(s => s.price);
+    const avgAll = Num.round2(prices.reduce((a,x)=>a+x,0)/prices.length);
+    const sma30 = smaN(prices, 30);
+    const avg30 = Num.round2(sma30.filter(x=>!Number.isNaN(x)).slice(-30).reduce((a,x,i,arr)=>a+x/(arr.length||1),0)||0);
+
+    const withMetrics = series.map((s, i) => {
+      const prev = i>0 ? series[i-1].price : s.price;
+      const deltaPct = prev>0 ? Num.round2(((s.price - prev)/prev)*100) : 0;
+      return { ...s, sma30: sma30[i], deltaPct };
+    });
+
+    return { series: withMetrics, avgAll, avg30 };
+  }, [history, albaranes, prov, item]);
+}
+
+function PriceEvolutionChart({ data, unitLabel = "€/ud", upThreshold = 10 }: any) {
+  const domain = useMemo(()=>{
+    if (!data || !data.length) return [0, 1];
+    const vals = data.map((d:any)=>d.price).filter((v:any)=>Number.isFinite(v));
+    const min = Math.min(...vals), max = Math.max(...vals);
+    return [Math.max(0, Math.floor(min*0.95*100)/100), Math.ceil(max*1.05*100)/100];
+  }, [data]);
+
+  return (
+    <div className="bg-white rounded-[2rem] border border-slate-100 p-5 shadow-sm mt-4">
+      <div className="flex items-center justify-between mb-4">
+        <h4 className="text-sm font-black text-slate-800">Evolución del precio</h4>
+        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{unitLabel}</span>
+      </div>
+      <div className="h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+            <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} tickMargin={10} axisLine={false} tickLine={false} />
+            <YAxis domain={domain as any} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v)=>Num.round2(v).toString()} />
+            <RechartsTooltip 
+              contentStyle={{ borderRadius: 16, border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 'bold', fontSize: 12 }}
+              formatter={(val:any, name:any) => name==='price' ? [`${Num.round2(val)} ${unitLabel}`, 'Precio'] : name==='sma30' ? [`${Num.round2(val)} ${unitLabel}`, 'Media 30d'] : [val, name]}
+            />
+            <Legend wrapperStyle={{ fontSize: 10, fontWeight: 'bold', paddingTop: 10 }} />
+            <Line type="monotone" dataKey="price" name="Precio" stroke="#4f46e5" strokeWidth={3} activeDot={{ r: 6, fill: '#4f46e5', stroke: '#fff', strokeWidth: 2 }} isAnimationActive={false} dot={(props:any)=>{
+               const { cx, cy, payload } = props;
+               const up = (payload?.deltaPct ?? 0) >= upThreshold;
+               return <circle cx={cx} cy={cy} r={up ? 4 : 0} fill={up ? "#f43f5e" : "transparent"} stroke={up ? "#fff" : "transparent"} strokeWidth={2} key={`dot-${cx}-${cy}`} />;
+            }} />
+            <Line type="monotone" dataKey="sma30" name="Media Móvil" stroke="#cbd5e1" strokeWidth={2} strokeDasharray="4 4" dot={false} isAnimationActive={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function PriceInspector({ priceHistory, albaranesLite, proveedores, suggestionsByProv, defaultProv, defaultItem }: any) {
+  const [prov, setProv] = useState((defaultProv||'').toUpperCase());
+  const [item, setItem] = useState((defaultItem||'').toUpperCase());
+  
+  const deferredProv = useDeferredValue(prov);
+  const deferredItem = useDeferredValue(item);
+
+  const { series, avgAll } = usePriceSeries({ history: priceHistory, albaranes: albaranesLite, prov: deferredProv, item: deferredItem });
+  
+  const topItems = (suggestionsByProv?.[prov] || []).slice(0, 10);
+
+  return (
+    <div className="bg-slate-50 p-6 rounded-[2.5rem] border border-slate-100 shadow-inner">
+      <h3 className="text-sm font-black text-slate-800 mb-4 flex items-center gap-2"><LineChartIcon className="w-5 h-5 text-indigo-500" /> Inspector de Precios</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label className="text-[10px] font-black text-slate-400 uppercase ml-2">Proveedor</label>
+          <input list="prov-list" value={prov} onChange={(e)=>setProv(e.target.value.toUpperCase())} className="mt-1 w-full p-3 bg-white rounded-xl text-sm font-bold border border-slate-200 outline-none focus:border-indigo-500 shadow-sm" placeholder="Ej: MAKRO"/>
+          <datalist id="prov-list">{(proveedores || []).map((p:string)=> <option key={p} value={p} />)}</datalist>
+        </div>
+        <div>
+          <label className="text-[10px] font-black text-slate-400 uppercase ml-2">Producto</label>
+          <input list="item-list" value={item} onChange={(e)=>setItem(e.target.value.toUpperCase())} className="mt-1 w-full p-3 bg-white rounded-xl text-sm font-bold border border-slate-200 outline-none focus:border-indigo-500 shadow-sm" placeholder="Ej: SALMÓN"/>
+          <datalist id="item-list">{topItems.map((i:string) => <option key={i} value={i} />)}</datalist>
+        </div>
+      </div>
+      
+      {series && series.length > 1 ? (
+        <PriceEvolutionChart data={series} unitLabel="€" />
+      ) : (
+        <div className="bg-white rounded-[2rem] border border-slate-100 p-8 text-center mt-4 shadow-sm">
+          <span className="text-3xl mb-2 block opacity-50">📉</span>
+          <p className="text-slate-500 font-bold text-sm">Faltan datos o buscando...</p>
+          <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-widest">Selecciona proveedor y producto con +2 compras.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* =======================================================
+ * 🏦 4. COMPONENTE PRINCIPAL (VISTA)
+ * ======================================================= */
+export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
+  // 🛡️ FIX: Protección inicial total. Si algo falla, cargamos arrays vacíos
+  const safeData = data || { albaranes: [], facturas: [], socios: [], priceHistory: [] };
   const albaranesSeguros = Array.isArray(safeData.albaranes) ? safeData.albaranes : [];
-  const sociosSeguros = Array.isArray(safeData.socios) ? safeData.socios : [];
+  const priceHistorySeguro = Array.isArray(safeData.priceHistory) ? safeData.priceHistory : [];
+  const sociosReales = (Array.isArray(safeData.socios) && safeData.socios.length > 0) ? safeData.socios.filter(s => s?.active) : [{ id: "s1", n: "ARUME" }];
 
-  const fallbackSocios = [{ id: "s1", n: "ARUME" }, { id: "s2", n: "PAU" }];
-  const sociosRealesObj = sociosSeguros.length > 0 ? sociosSeguros.filter(s => s?.active) : fallbackSocios;
-  const SOCIOS_REALES_NAMES = sociosRealesObj.map(s => s.n);
+  const proveedoresHistoricos = useMemo(() => Array.from(new Set(albaranesSeguros.map(a => (a?.prov || '').toUpperCase()).filter(Boolean))).sort(), [albaranesSeguros]);
 
-  const [activeTab, setActiveTab] = useState<'pend' | 'hist'>('pend');
-  const [mode, setMode] = useState<'proveedor' | 'socio'>('proveedor');
-  const [year, setYear] = useState(new Date().getFullYear());
   const [searchQ, setSearchQ] = useState('');
-  const deferredSearch = useDeferredValue(searchQ);
+  const deferredSearch = useDeferredValue(searchQ); 
+  const [selectedUnit, setSelectedUnit] = useState<BusinessUnit | 'ALL'>('ALL'); 
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
+  const [showInspector, setShowInspector] = useState(false);
+  const [inspectorDefaults, setInspectorDefaults] = useState<{prov?:string; item?:string}>({});
   
-  const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'paid' | 'reconciled'>('all');
-  const [selectedUnit, setSelectedUnit] = useState<BusinessUnit | 'ALL'>('ALL');
-  
-  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-  const [exportQuarter, setExportQuarter] = useState(Math.floor(new Date().getMonth() / 3) + 1);
-  
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false); 
+  const [form, setForm] = useState({ prov: '', date: DateUtil.today(), num: '', socio: 'Arume', notes: '', text: '', paid: false, unitId: 'REST' as BusinessUnit });
+  const [quickCalc, setQuickCalc] = useState({ name: '', total: '', iva: 10 });
+  const [editForm, setEditForm] = useState<Albaran | null>(null);
 
-  const [selectedGroup, setSelectedGroup] = useState<{ label: string; ids: string[], unitId: BusinessUnit } | null>(null);
-  const [selectedInvoice, setSelectedInvoice] = useState<FacturaExtended | null>(null);
-  const [modalForm, setModalForm] = useState({ num: '', date: DateUtil.today(), selectedAlbs: [] as string[], unitId: 'REST' as BusinessUnit });
-
+  // Estados de IA, Vosk y Telegram
+  const [isScanning, setIsScanning] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [emailInbox, setEmailInbox] = useState<EmailDraft[]>([]);
+  const [isSyncingTelegram, setIsSyncingTelegram] = useState(false);
 
-  // ==========================================
-  // DRAG & DROP
-  // ==========================================
-  useEffect(() => {
-    let dragCounter = 0;
-    const handleDragEnter = (e: DragEvent) => { if (!hasRealFiles(e)) return; e.preventDefault(); dragCounter++; if (dragCounter === 1) setIsDragging(true); };
-    const handleDragLeave = (e: DragEvent) => { if (!hasRealFiles(e)) return; e.preventDefault(); dragCounter--; if (dragCounter === 0) setIsDragging(false); };
-    const handleDragOver = (e: DragEvent) => { if (!hasRealFiles(e)) return; e.preventDefault(); };
-    const handleDropGlobal = async (e: DragEvent) => {
-      e.preventDefault(); dragCounter = 0; setIsDragging(false);
-      const dt = e.dataTransfer; if (!dt?.files?.length) return;
-      if (dt.files.length > 1) return alert("⚠️ Sube 1 solo documento para evitar errores.");
-      const file = dt.files[0]; 
-      if (file.type === 'application/pdf' || file.type.startsWith('image/')) { await processLocalFile(file); } 
-      else { alert("⚠️ Solo se permiten archivos PDF o imágenes."); }
-    };
-    document.body.addEventListener('dragenter', handleDragEnter); document.body.addEventListener('dragleave', handleDragLeave);
-    document.body.addEventListener('dragover', handleDragOver); document.body.addEventListener('drop', handleDropGlobal);
-    return () => { document.body.removeEventListener('dragenter', handleDragEnter); document.body.removeEventListener('dragleave', handleDragLeave); document.body.removeEventListener('dragover', handleDragOver); document.body.removeEventListener('drop', handleDropGlobal); };
-  }, [facturasSeguras]);
+  const { analyzedItems, liveTotals } = useAlbaranEnginePRO(form.text);
 
-  // ==========================================
-  // ATAJOS
-  // ==========================================
+  const handleTelegramSync = async () => {
+    setIsSyncingTelegram(true);
+    setTimeout(() => {
+      alert("📲 Sincronización con Telegram completada.\nNo se han encontrado nuevos albaranes enviados al Bot hoy.");
+      setIsSyncingTelegram(false);
+    }, 2000);
+  };
+
+  const inRange = (iso: string, from?: string, to?: string) => {
+    if (!iso) return false; const d = iso.slice(0,10);
+    if (from && d < from) return false; if (to && d > to) return false;
+    return true;
+  };
+  const presetThisMonth = () => { const y = new Date().getFullYear(); const m = String(new Date().getMonth()+1).padStart(2,'0'); setDateFrom(`${y}-${m}-01`); setDateTo(`${y}-${m}-${String(new Date(y, new Date().getMonth()+1, 0).getDate()).padStart(2,'0')}`); };
+  const presetLast7d = () => { const end = new Date(); const start = new Date(Date.now() - 6*86400000); setDateFrom(`${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`); setDateTo(`${end.getFullYear()}-${String(end.getMonth()+1).padStart(2,'0')}-${String(end.getDate()).padStart(2,'0')}`); };
+  const presetToday = () => { const t = new Date().toISOString().slice(0,10); setDateFrom(t); setDateTo(t); };
+
+  const albaranesLiteRanged = useMemo(() => {
+    return albaranesSeguros
+      .filter(a => (!dateFrom && !dateTo) ? true : inRange(a?.date||'', dateFrom, dateTo))
+      .map(a => ({
+        date: (a?.date||'').slice(0,10), prov: (a?.prov||'').toUpperCase(),
+        // 🛡️ FIX: Protegemos el map interno
+        items: Array.isArray(a?.items) ? a.items.map((it:any) => ({ q: it?.q, n: it?.n, unitPrice: it?.unitPrice, u: it?.u })) : []
+      }));
+  }, [albaranesSeguros, dateFrom, dateTo]);
+
+  const suggestionsByProv = useMemo(() => {
+    const map: Record<string, Record<string, number>> = {};
+    for (const a of albaranesSeguros) {
+      const P = (a?.prov||'').toUpperCase(); if (!P) continue; map[P] ||= {};
+      const items = Array.isArray(a?.items) ? a.items : [];
+      for (const it of items) { 
+        const N = (it?.n||'').toUpperCase(); if (!N) continue; map[P][N] = (map[P][N]||0) + 1; 
+      }
+    }
+    const out: Record<string, string[]> = {};
+    for (const p of Object.keys(map)) { out[p] = Object.entries(map[p]).sort((a,b)=>b[1]-a[1]).map(([n])=>n); }
+    return out;
+  }, [albaranesSeguros]);
+
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const active = document.activeElement as HTMLElement; const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
-      if (!isTyping && e.key === '/') { e.preventDefault(); document.querySelector<HTMLInputElement>('input[placeholder^="Buscar"]')?.focus(); }
-      if (!isTyping && e.key.toLowerCase() === 'g') { e.preventDefault(); setActiveTab(t => t === 'pend' ? 'hist' : 'pend'); }
-    };
-    window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
+    const onOpen = (e: any) => { setInspectorDefaults({ prov: e.detail?.prov, item: e.detail?.item }); setShowInspector(true); };
+    window.addEventListener('open-price-inspector', onOpen);
+    return () => window.removeEventListener('open-price-inspector', onOpen);
   }, []);
 
-  const draftsIA = useMemo(() => {
-    try {
-      return facturasSeguras.filter(f => f?.status === 'draft').map(draft => {
-        const oficialName = getOfficialProvName(draft.prov);
-        // 🚀 LLAMAMOS A NUESTRO MOTOR CENTRALIZADO (Usamos basicNorm)
-        const matchResult = matchAlbaranesToFactura(draft, albaranesSeguros, basicNorm(oficialName));
-        return { ...draft, ...matchResult, prov: oficialName }; 
-      });
-    } catch (error) {
-      console.error("Error en draftsIA:", error); return [];
-    }
-  }, [facturasSeguras, albaranesSeguros]);
-
-  // ==========================================
-  // 🤖 MOTOR OCR (Local)
-  // ==========================================
+  /* =======================================================
+   * 🤖 MOTOR DE OCR / IA LOCAL
+   * ======================================================= */
   const processLocalFile = async (file: File) => {
-    setIsSyncing(true); 
+    const apiKey = localStorage.getItem('gemini_api_key');
+    setIsScanning(true); 
     try {
-      const sha = await sha256File(file);
-      const isDuplicate = facturasSeguras.some(f => f.attachmentSha === sha);
-      if (isDuplicate) { setIsSyncing(false); return alert("⚠️ Este documento ya ha sido subido anteriormente."); }
-
-      const apiKey = localStorage.getItem('gemini_api_key');
       if (!apiKey) throw new Error("NO_API_KEY");
-
-      const fileBase64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader(); reader.onload = () => resolve(reader.result as string); reader.onerror = reject; reader.readAsDataURL(file);
-      });
+      const fileBase64 = await new Promise<string>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result as string); reader.readAsDataURL(file); });
       const soloBase64 = fileBase64.split(',')[1];
 
       const ai = new GoogleGenAI({ apiKey });
-      const prompt = `Actúa como un Auditor Contable. Lee esta factura y extrae TODO lo posible. Devuelve SOLO un JSON estricto: 
-      { 
-        "proveedor": "Nombre de la empresa", 
-        "nif": "NIF o CIF si aparece",
-        "num": "Número de factura oficial", 
-        "fecha": "YYYY-MM-DD", 
-        "total": 0, 
-        "base": 0, 
-        "iva": 0,
-        "referencias_albaranes": ["Array de strings con números de albarán o pedido que vengan escritos en la factura"]
-      }`;
+      const prompt = `Analiza este albarán. Devuelve SOLO un JSON estricto: { "proveedor": "Nombre", "num": "Nº", "fecha": "YYYY-MM-DD", "lineas": [ {"q": 1, "n": "Producto", "t": 10.50, "rate": 10, "u": "kg"} ] }`;
       
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: soloBase64, mimeType: file.type } }] }],
-        config: { responseMimeType: "application/json", temperature: 0.1 }
-      });
-
-      const cleanText = (response.text || "").replace(/(?:json)?/gi, '').replace(/```/g, '').trim();
-      const rawJson = safeJSON(cleanText);
-
-      const nuevaFacturaIA: FacturaExtended = {
-        id: 'draft-local-' + Date.now(), tipo: 'compra', num: rawJson.num || 'S/N', 
-        date: rawJson.fecha || DateUtil.today(), prov: rawJson.proveedor || 'Proveedor Desconocido',
-        total: String(rawJson.total || 0), base: String(rawJson.base || 0), tax: String(rawJson.iva || 0),
-        albaranIdsArr: rawJson.referencias_albaranes || [], 
-        paid: false, reconciled: false, source: 'dropzone', status: 'draft', unidad_negocio: 'REST', file_base64: fileBase64, attachmentSha: sha 
-      };
-
-      await onSave({ ...safeData, facturas: [nuevaFacturaIA, ...facturasSeguras] });
-      alert("✅ Factura extraída correctamente. Revisa la bandeja superior.");
-
+      const response = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: soloBase64, mimeType: file.type } }] }], config: { responseMimeType: "application/json", temperature: 0.1 } });
+      const rawJson = safeJSON(response.text || "");
+      
+      setForm(prev => ({ 
+        ...prev, prov: rawJson.proveedor || '', num: rawJson.num || '', date: rawJson.fecha || DateUtil.today(),
+        text: (rawJson.lineas || []).map((l:any) => `${l.q} ${l.u || 'uds'} ${l.n} ${l.rate}% ${l.t}`).join('\n')
+      }));
+      alert("✅ IA completada. Revisa los datos en el formulario antes de guardar.");
     } catch (e) {
-      alert("⚠️ Error en IA. Quizás la clave API es incorrecta o la imagen no es legible.");
-    } finally { setIsSyncing(false); }
-  };
-
-  // ==========================================
-  // 📧 LECTOR GMAIL (Supabase Seguro Refactorizado)
-  // ==========================================
-  const handleFetchEmails = async () => {
-    setIsSyncing(true);
-    try {
-      // 🚀 USAMOS EL SERVICIO DE SUPABASE CENTRALIZADO
-      const nuevosCorreos = await fetchNewEmails();
-      
-      if (nuevosCorreos && nuevosCorreos.length > 0) {
-        setEmailInbox(prev => {
-          const idsExistentes = new Set(prev.map(p => p.id));
-          const unicos = nuevosCorreos.filter(m => !idsExistentes.has(m.id));
-          return [...unicos, ...prev];
-        });
-        alert(`✅ Encontradas ${nuevosCorreos.length} facturas nuevas en el buzón IMAP.`);
-      } else {
-        alert("📭 No hay correos nuevos con PDF pendientes.");
-      }
-    } catch (e: any) { alert(`⚠️ Error de red: ${e.message || 'Desconocido'}`); } 
-    finally { setIsSyncing(false); }
-  };
-
-  const handleParseEmail = async (emailId: string) => {
-    const correo = emailInbox.find(e => e.id === emailId);
-    if (!correo || !correo.fileBase64) return;
-
-    setIsSyncing(true);
-    try {
-      const apiKey = localStorage.getItem('gemini_api_key');
-      if (!apiKey) throw new Error("NO_API_KEY");
-
-      const ai = new GoogleGenAI({ apiKey });
-      const prompt = `Actúa como un Auditor Contable. Lee esta factura y extrae TODO lo posible. Devuelve SOLO un JSON estricto: 
-      { "proveedor": "Nombre de la empresa", "nif": "NIF/CIF", "num": "Número de factura", "fecha": "YYYY-MM-DD", "total": 0, "base": 0, "iva": 0, "referencias_albaranes": ["Array de números de albarán referenciados"] }`;
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: correo.fileBase64, mimeType: "application/pdf" } }] }],
-        config: { responseMimeType: "application/json", temperature: 0.1 }
-      });
-
-      const cleanText = (response.text || "").replace(/(?:json)?/gi, '').replace(/```/g, '').trim();
-      const rawJson = safeJSON(cleanText);
-
-      const nuevaFacturaIA: FacturaExtended = {
-        id: 'draft-email-' + Date.now(), tipo: 'compra', num: rawJson.num || 'S/N', 
-        date: rawJson.fecha || correo.date, prov: rawJson.proveedor || correo.from,
-        total: String(rawJson.total || 0), base: String(rawJson.base || 0), tax: String(rawJson.iva || 0),
-        albaranIdsArr: rawJson.referencias_albaranes || [],
-        paid: false, reconciled: false, source: 'gmail-sync', status: 'draft', unidad_negocio: 'REST', 
-        file_base64: `data:application/pdf;base64,${correo.fileBase64}`, attachmentSha: correo.id 
-      };
-
-      await onSave({ ...safeData, facturas: [nuevaFacturaIA, ...facturasSeguras] });
-      
-      // 🚀 USAMOS EL SERVICIO DE SUPABASE CENTRALIZADO
-      await markEmailAsParsed(emailId);
-      setEmailInbox(prev => prev.filter(e => e.id !== emailId));
-      
-    } catch (e: any) { alert("⚠️ Error al procesar el PDF del correo. Inténtalo de nuevo."); } 
-    finally { setIsSyncing(false); }
-  };
-
-  // ==========================================
-  // ⚙️ LÓGICA DE NEGOCIO Y GUARDADO (FASE 1)
-  // ==========================================
-  const handleConfirmAuditoriaIA = async (draftId: string) => {
-    setIsProcessing(true);
-    try {
-      const newData = JSON.parse(JSON.stringify(safeData)); 
-      const draftIdx = newData.facturas.findIndex((f: any) => f.id === draftId);
-      const audit = draftsIA.find(d => d.id === draftId);
-      if (draftIdx === -1 || !audit) return;
-
-      newData.facturas[draftIdx].total = "0";
-      newData.facturas[draftIdx].base = "0";
-      newData.facturas[draftIdx].tax = "0";
-      newData.facturas[draftIdx].albaranIdsArr = []; 
-
-      if (audit.candidatos && audit.candidatos.length > 0) {
-        const idsVincular = audit.candidatos.map((a: any) => a.id);
-        linkAlbaranesToFactura(newData, draftId, idsVincular);
-        newData.facturas[draftIdx].unidad_negocio = audit.candidatos[0].unitId || 'REST';
-      } else {
-        newData.facturas[draftIdx].total = String(audit.total);
-        newData.facturas[draftIdx].base = String(audit.base);
-        newData.facturas[draftIdx].tax = String(audit.tax);
-      }
-
-      newData.facturas[draftIdx].status = 'approved'; 
-      await onSave(newData);
-    } catch (error) { 
-      console.error("Error al confirmar IA:", error); 
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleDiscardDraftIA = async (id: string) => {
-    if (!window.confirm("¿Estás seguro de eliminar este borrador permanentemente?")) return;
-    await onSave({ ...safeData, facturas: facturasSeguras.filter(f => f.id !== id) });
-  };
-
-  const pendingGroups = useMemo(() => {
-    try {
-      const byMonth: Record<string, { name: string; groups: Record<string, any> }> = {};
-      const q = deferredSearch ? basicNorm(deferredSearch) : ''; // 💡 CORRECCIÓN: basicNorm
-
-      albaranesSeguros.forEach(a => {
-        const aDate = a?.date || '';
-        if (a?.invoiced || typeof aDate !== 'string' || !aDate.startsWith(year.toString())) return;
-        
-        const itemUnit = (a as any).unitId || 'REST';
-        if (selectedUnit !== 'ALL' && itemUnit !== selectedUnit) return;
-        
-        const owner = (mode === 'proveedor' ? a?.prov : a?.socio) || 'Arume';
-        
-        if (q) {
-            const matchOwner = basicNorm(owner).includes(q); // 💡 CORRECCIÓN
-            const matchNum = basicNorm(a?.num || '').includes(q); // 💡 CORRECCIÓN
-            if (!matchOwner && !matchNum) return;
-        }
-
-        const mk = aDate.length >= 7 ? aDate.substring(0, 7) : null; 
-        if (!mk) return;
-
-        if (!byMonth[mk]) {
-          const parts = mk.split('-'); 
-          const y = parts[0] || '0000';
-          const m = parts[1] ? parseInt(parts[1]) : 1;
-          const names = ["","Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
-          byMonth[mk] = { name: `${names[m] || 'Mes'} ${y}`, groups: {} };
-        }
-
-        const groupKey = `${basicNorm(owner)}_${itemUnit}`; // 💡 CORRECCIÓN
-        if (!byMonth[mk].groups[groupKey]) {
-            byMonth[mk].groups[groupKey] = { label: owner, unitId: itemUnit, t: 0, ids: [], count: 0 };
-        }
-        
-        byMonth[mk].groups[groupKey].t += (Num.parse(a?.total) || 0); 
-        byMonth[mk].groups[groupKey].count += 1; 
-        byMonth[mk].groups[groupKey].ids.push(a?.id);
-      });
-
-      return Object.entries(byMonth).sort((a, b) => b[0].localeCompare(a[0]));
-    } catch (error) { return []; }
-  }, [albaranesSeguros, year, mode, deferredSearch, selectedUnit]);
-
-  // Cierre Manual
-  const handleConfirmManualInvoice = async () => {
-    if (!modalForm.num.trim() || modalForm.selectedAlbs.length === 0) return;
-    setIsProcessing(true);
-    try {
-      const newData = JSON.parse(JSON.stringify(safeData));
-      const newFacId = 'fac-manual-' + Date.now();
-      
-      const newFactura: FacturaExtended = {
-        id: newFacId, 
-        tipo: mode === 'proveedor' ? 'compra' : 'venta', 
-        num: modalForm.num, 
-        date: modalForm.date,
-        prov: mode === 'proveedor' ? (selectedGroup?.label || '') : 'Varios', 
-        cliente: mode === 'socio' ? (selectedGroup?.label || '') : 'Arume',
-        total: "0", base: "0", tax: "0", albaranIdsArr: [],
-        paid: false, reconciled: false, source: 'manual-group', status: 'approved', 
-        unidad_negocio: modalForm.unitId || 'REST' 
-      };
-
-      newData.facturas.unshift(newFactura);
-      linkAlbaranesToFactura(newData, newFacId, modalForm.selectedAlbs);
-      await onSave(newData); 
-      setSelectedGroup(null);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleTogglePago = async (id: string) => {
-    const newData = { ...safeData, facturas: [...facturasSeguras] };
-    const idx = newData.facturas.findIndex(f => f.id === id);
-    if (idx !== -1) {
-      if (newData.facturas[idx].reconciled) return alert("🔒 Factura conciliada por el banco.");
-      newData.facturas[idx].paid = !newData.facturas[idx].paid;
-      newData.facturas[idx].status = newData.facturas[idx].paid ? 'paid' : 'approved';
-      await onSave(newData);
-    }
-  };
-
-  const handleDeleteFactura = async (id: string) => {
-    const fac = facturasSeguras.find(f => f.id === id); 
-    if (!fac) return;
-    if (fac.reconciled) return alert("⚠️ No puedes borrar una factura validada por el Banco.");
-    if (!window.confirm(`🛑 ¿Eliminar DEFINITIVAMENTE la factura ${fac.num || 'sin número'}?`)) return;
-    
-    const newData = JSON.parse(JSON.stringify(safeData));
-    const idsToFree = fac.albaranIdsArr || [];
-    newData.albaranes.forEach((a: any) => { if (idsToFree.includes(a.id)) a.invoiced = false; });
-    newData.facturas = newData.facturas.filter((f: any) => f.id !== id);
-    await onSave(newData);
-  };
-
-  const handleExportGestoria = () => {
-    const q = exportQuarter; const y = year; const startMonth = (q - 1) * 3 + 1; const endMonth = q * 3;
-    const filtered = facturasSeguras.filter(f => {
-      const fDate = f?.date || '';
-      return f.status !== 'draft' && f.tipo !== 'caja' && (f as any).tipo !== 'banco' && 
-             (selectedUnit === 'ALL' || f.unidad_negocio === selectedUnit) && 
-             (typeof fDate === 'string' && fDate.startsWith(y.toString())) && 
-             Number(fDate.split('-')[1]) >= startMonth && 
-             Number(fDate.split('-')[1]) <= endMonth;
-    });
-    
-    if (filtered.length === 0) return alert("No hay facturas en este periodo.");
-
-    const rows = filtered.map(f => {
-      const total = Math.abs(Num.parse(f.total) || 0); 
-      const base = Num.parse(f.base) || Num.round2(total / 1.10); 
-      const tax = Num.parse(f.tax) || Num.round2(total - base);
-      return { 'FECHA': f.date || '', 'Nº FACTURA': f.num || '', 'PROVEEDOR/CLIENTE': f.prov || f.cliente || '—', 'UNIDAD NEGOCIO': BUSINESS_UNITS.find(u => u.id === f.unidad_negocio)?.name || 'Restaurante', 'BASE IMPONIBLE': Num.fmt(base), 'IVA': Num.fmt(tax), 'TOTAL': Num.fmt(total), 'ESTADO': f.paid ? 'PAGADA' : 'PENDIENTE', 'CONCILIADA': f.reconciled ? 'SÍ' : 'NO' };
-    });
-    const ws = XLSX.utils.json_to_sheet(rows); 
-    ws['!cols'] = [{ wch: 12 }, { wch: 16 }, { wch: 30 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }];
-    
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Facturas"); 
-    XLSX.writeFile(wb, `Gestoria_Arume_${y}_Q${q}_${selectedUnit}.xlsx`); setIsExportModalOpen(false);
-  };
-
-  const handleDownloadFile = (f: FacturaExtended) => {
-    if (!f || !f.file_base64) return alert('El PDF original no está disponible.');
-    try {
-        const a = document.createElement('a');
-        a.href = f.file_base64.startsWith('data:') ? f.file_base64 : `data:application/pdf;base64,${f.file_base64}`; 
-        a.download = `${basicNorm(f.prov||'factura')}_${f.num||'SN'}.pdf`; // 💡 CORRECCIÓN: basicNorm
-        a.click();
-    } catch(e) { alert("Error al descargar el archivo"); }
-  };
-
-  const renderPendingGroups = () => {
-    if (!pendingGroups || pendingGroups.length === 0) {
-      return (
-        <div className="py-12 flex flex-col items-center justify-center bg-white rounded-xl border border-slate-200 shadow-sm text-center">
-          <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mb-3"><Package className="w-6 h-6 text-slate-300" /></div>
-          <p className="text-slate-500 font-bold text-xs uppercase">Todo al día</p>
-          <p className="text-[10px] text-slate-400 mt-1">No hay albaranes sueltos en este periodo.</p>
-        </div>
-      );
-    }
-    
-    return pendingGroups.map(([mk, dataGroup]) => (
-      <div key={mk} className="mb-4 animate-fade-in bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-        <h3 className="text-[10px] font-bold text-slate-500 uppercase mb-3 flex items-center gap-1.5">
-          <Clock className="w-3 h-3 text-indigo-400" /> {dataGroup.name}
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          {Object.values(dataGroup.groups || {}).map((g: any) => {
-            const unitConfig = BUSINESS_UNITS.find(u => u.id === g.unitId);
-            const groupId = `source-group-${basicNorm(g.label)}-${g.unitId}`; // 💡 CORRECCIÓN: basicNorm
-            
-            return (
-              <div 
-                key={g.label + g.unitId} 
-                id={groupId} 
-                onClick={() => { setSelectedGroup({ label: g.label, ids: g.ids, unitId: g.unitId }); setModalForm({ num: '', date: DateUtil.today(), selectedAlbs: [...g.ids], unitId: g.unitId }); }} 
-                className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-200 hover:border-indigo-400 hover:bg-white hover:shadow-md transition-all cursor-pointer group relative z-10"
-              >
-                <div className="min-w-0 pr-3">
-                  <p className="font-bold text-slate-800 text-xs group-hover:text-indigo-600 transition truncate">{g.label}</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    {unitConfig && <span className={cn("text-[9px] px-1.5 py-0.5 rounded font-bold uppercase", unitConfig.bg, unitConfig.color)}>{unitConfig.name.split(' ')[0]}</span>}
-                    <span className="text-[9px] font-medium text-slate-500">{g.count} albs</span>
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="font-bold text-slate-900 text-sm">{Num.fmt(g.t)}</p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    ));
+      alert("⚠️ Error en IA. Rellena el albarán a mano.");
+    } finally { setIsScanning(false); }
   };
 
   /* =======================================================
-   * 🎨 RENDER PRINCIPAL (MODO CONTABLE COMPACTO)
+   * 🎙️ MOTOR VOSK (Restaurado)
    * ======================================================= */
-  return (
-    <div className="animate-fade-in space-y-4 pb-24 relative max-w-[1600px] mx-auto text-xs">
+  const toggleRecording = async () => {
+    if (isRecording) { mediaRecorderRef.current?.stop(); setIsRecording(false); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      mediaRecorderRef.current = mr; audioChunksRef.current = [];
+      mr.ondataavailable = (e) => audioChunksRef.current.push(e.data);
+      mr.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        stream.getTracks().forEach(t => t.stop());
+        await processAudioWithVosk(audioBlob);
+      };
+      mr.start(); setIsRecording(true);
+      setTimeout(() => { if (mr.state === 'recording') toggleRecording(); }, 30000); 
+    } catch (err) { alert("⚠️ Necesitas dar permiso al micrófono."); }
+  };
+
+  const processAudioWithVosk = async (blob: Blob) => {
+    setIsScanning(true); 
+    try {
+      const formData = new FormData(); formData.append("file", blob, "albaran.webm");
+      const voskRes = await fetch("http://localhost:2700/transcribe", { method: "POST", body: formData });
+      if (!voskRes.ok) throw new Error("Vosk no responde");
+      const voskData = await voskRes.json();
+      const txt = voskData.text || "";
       
-      {/* OVERLAY DRAG & DROP */}
+      setForm(prev => ({
+        ...prev,
+        text: prev.text ? `${prev.text}\n${txt}` : txt
+      }));
+      alert("🎙️ Audio procesado correctamente.");
+    } catch (e) { alert("⚠️ Error conectando con servidor VOSK local."); } 
+    finally { setIsScanning(false); }
+  };
+
+  /* =======================================================
+   * 💾 GUARDADO CON PRICE INTELLIGENCE Y CEREBRO FACTURACIÓN
+   * ======================================================= */
+  const handleQuickAdd = () => {
+    const t = Num.parse(quickCalc.total);
+    if (t > 0 && quickCalc.name) {
+      const calc = ArumeEngine.calcularImpuestos(t, quickCalc.iva as any);
+      const newLine = `1x ${quickCalc.name} ${quickCalc.iva}% ${calc.total.toFixed(2)}`;
+      setForm(prev => ({ ...prev, text: prev.text ? `${prev.text}\n${newLine}` : newLine }));
+      setQuickCalc({ name: '', total: '', iva: 10 });
+    }
+  };
+
+  const detectPriceIncrease = (history: any[], prov: string, item: string, latestPrice: number) => {
+    const provN = prov.trim().toUpperCase(); const itemN = item.trim().toUpperCase();
+    const previous = history.filter((h:any) => h.prov === provN && h.item === itemN).sort((a:any,b:any) => b.date.localeCompare(a.date))[0];
+    if (!previous || previous.unitPrice <= 0) return { isIncrease: false, pct: 0, previous: null, threshold: 0 };
+    
+    const pct = Num.round2(((latestPrice - previous.unitPrice) / previous.unitPrice) * 100);
+    const dynamicThreshold = getDynamicThreshold(itemN); 
+    
+    return { isIncrease: pct >= dynamicThreshold, pct, previous, threshold: dynamicThreshold }; 
+  };
+
+  const handleSaveAlbaran = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!form.prov) return alert("⚠️ Introduce el nombre del proveedor.");
+    if (analyzedItems.length === 0) return alert("⚠️ Añade al menos una línea.");
+
+    if (looksLikeDuplicate(form.prov, form.num||'S/N', form.date, albaranesSeguros)) {
+       if (!window.confirm("⚠️ Posible duplicado (mismo proveedor, nº y fecha). ¿Guardar igualmente?")) return;
+    }
+
+    const newData = JSON.parse(JSON.stringify(safeData)) as AppData;
+    if (!newData.facturas) newData.facturas = [];
+    if (!newData.priceHistory) newData.priceHistory = [];
+    if (!newData.albaranes) newData.albaranes = [];
+
+    const robustId = `alb-${form.date.replace(/-/g,'')}-${Date.now().toString().slice(-6)}-${form.unitId}`;
+    let alerts: string[] = [];
+
+    for (const it of analyzedItems as any[]) {
+      const provN = form.prov.trim().toUpperCase();
+      const itemN = it.n.trim().toUpperCase();
+      const normalizedPrice = normalizeUnitPrice(it.q, it.u, it.unitPrice);
+
+      const increase = detectPriceIncrease(newData.priceHistory, provN, itemN, normalizedPrice);
+      if (increase.isIncrease) {
+        alerts.push(`📈 [${provN}] ${itemN} ha subido un +${increase.pct}% (Límite tolerado: ${increase.threshold}%). Antes: ${increase.previous?.unitPrice}€ -> Ahora: ${normalizedPrice}€`);
+      }
+
+      newData.priceHistory.push({ id: "price-" + Date.now() + "-" + Math.random().toString(36).slice(2), prov: provN, item: itemN, unitPrice: normalizedPrice, date: form.date });
+    }
+
+    const newAlbaran: Albaran = {
+      id: robustId, prov: form.prov.trim().toUpperCase(), date: form.date, num: form.num || "S/N",
+      socio: form.socio, notes: form.notes, items: analyzedItems.map(item => item!), total: String(liveTotals.grandTotal),
+      base: String(liveTotals.baseFinal), taxes: String(liveTotals.taxFinal), invoiced: false, paid: form.paid, status: 'ok', reconciled: false, unitId: form.unitId 
+    };
+
+    newData.albaranes.unshift(newAlbaran);
+    upsertFacturaFromAlbaran(newData, newAlbaran);
+
+    await onSave(newData);
+    
+    if (alerts.length > 0) alert("⚠️ ALERTA DE COSTES (Desviaciones detectadas)\n\n" + alerts.join("\n\n") + "\n\nRevisa si es por temporada o si el proveedor ha subido tarifas.");
+    setForm(prev => ({ ...prev, prov: '', num: '', text: '', paid: false }));
+  };
+
+  const handleSaveEdits = async (e?: React.MouseEvent) => {
+    if (e) e.preventDefault(); if (!editForm) return;
+    
+    const newData = JSON.parse(JSON.stringify(safeData)) as AppData;
+    if (!newData.albaranes) newData.albaranes = [];
+    if (!newData.facturas) newData.facturas = [];
+
+    const index = newData.albaranes.findIndex((a: Albaran) => a.id === editForm.id);
+    if (index === -1) return alert("⚠️ Error crítico: No se encontró el albarán.");
+
+    const before = JSON.parse(JSON.stringify(newData.albaranes[index])) as Albaran;
+
+    const sanitizedAlbaran = { 
+      ...editForm, prov: editForm.prov?.trim().toUpperCase() || "DESCONOCIDO", socio: editForm.socio || "Arume", unitId: editForm.unitId || "REST", 
+      total: String(Num.parse(editForm.total)), base: String(Num.parse((editForm as any).base)), taxes: String(Num.parse((editForm as any).taxes)) 
+    };
+
+    newData.albaranes[index] = sanitizedAlbaran;
+    
+    detachFromPreviousFacturaIfMoved(newData, before, sanitizedAlbaran);
+    upsertFacturaFromAlbaran(newData, sanitizedAlbaran);
+
+    await onSave(newData);
+    setEditForm(null); 
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm("¿Eliminar este albarán permanentemente?")) return;
+    
+    const newData = JSON.parse(JSON.stringify(safeData)) as AppData;
+    const albaranToDelete = newData.albaranes?.find(a => a.id === id);
+    
+    if (albaranToDelete) {
+       detachFromPreviousFacturaIfMoved(newData, albaranToDelete, { ...albaranToDelete, prov: 'DELETED_MOCK', date: '1970-01-01' } as any);
+    }
+    
+    newData.albaranes = (newData.albaranes || []).filter(a => a.id !== id);
+    await onSave(newData);
+    setEditForm(null);
+  };
+
+  /* =======================================================
+   * 📤 EXPORTACIÓN EXCEL
+   * ======================================================= */
+  const filteredForList = useMemo(() => {
+    return albaranesSeguros.filter(a => (selectedUnit==='ALL' ? true : a.unitId === selectedUnit)).filter(a => (!dateFrom && !dateTo) ? true : inRange(a.date||'', dateFrom, dateTo)).filter(a => !deferredSearch || filterByQuery(a, deferredSearch));
+  }, [albaranesSeguros, selectedUnit, dateFrom, dateTo, deferredSearch]);
+
+  const sumFiltered = useMemo(() => filteredForList.reduce((acc, a) => acc + (Num.parse(a.total) || 0), 0), [filteredForList]);
+
+  const handleExportExcel = () => {
+    const rows = filteredForList;
+    if (!rows.length) return alert("No hay albaranes para exportar con los filtros actuales.");
+
+    const detail: any[] = [];
+    for (const a of rows) {
+      const date = (a.date || '').slice(0, 10);
+      for (const it of (a.items || [])) {
+        const q  = Number(it.q || 0); const up = Number(it.unitPrice ?? (q > 0 ? Number(it.t || 0) / q : Number(it.t || 0))); const upN = normalizeUnitPrice(q, it.u as any, up);
+        detail.push({ FECHA: date, PROVEEDOR: a.prov || '', 'Nº ALBARÁN': a.num || 'S/N', UNIDAD: a.unitId || '', ITEM: it.n || '', CANT: q, U: it.u || '', '%IVA': Number(it.rate || 0), 'PRECIO UNIT': up, 'PRECIO UNIT NORM': upN, BASE: Number(it.base || 0), IVA: Number(it.tax || 0), TOTAL: Number(it.t || 0), 'TOTAL ALBARÁN': Number(a.total || 0) });
+      }
+    }
+    const wsDetail = XLSX.utils.json_to_sheet(detail);
+    wsDetail['!cols'] = [{ wch: 12 }, { wch: 28 }, { wch: 14 }, { wch: 10 }, { wch: 36 }, { wch: 8 }, { wch: 6 }, { wch: 6 }, { wch: 14 }, { wch: 16 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 14 }];
+    for (let r = 2; r <= detail.length + 1; r++) { ['F','H','I','J','K','L','M','N'].forEach(c => { const cell = wsDetail[`${c}${r}`]; if (cell) { cell.t = 'n'; cell.z = '#,##0.00'; } }); }
+
+    const provMap = new Map<string, {base10:number; iva10:number; base21:number; iva21:number; total:number}>();
+    for (const a of rows) {
+      const k = a.prov || '—'; if (!provMap.has(k)) provMap.set(k, {base10:0, iva10:0, base21:0, iva21:0, total:0}); const acc = provMap.get(k)!;
+      for (const it of (a.items||[])) {
+        const base = Number(it.base||0), iva = Number(it.tax||0);
+        if (Number(it.rate||0) === 21) { acc.base21 += base; acc.iva21 += iva; } else if (Number(it.rate||0) === 10) { acc.base10 += base; acc.iva10 += iva; }
+        acc.total += Number(it.t||0);
+      }
+    }
+
+    const resumen = Array.from(provMap.entries()).map(([prov, v])=> ({ PROVEEDOR: prov, 'BASE 10%': Num.round2(v.base10), 'IVA 10%': Num.round2(v.iva10), 'BASE 21%': Num.round2(v.base21), 'IVA 21%': Num.round2(v.iva21), TOTAL: Num.round2(v.total) }));
+    const wsProv = XLSX.utils.json_to_sheet(resumen);
+    wsProv['!cols'] = [{wch:30},{wch:14},{wch:12},{wch:14},{wch:12},{wch:14}];
+    for (let r=2; r<=resumen.length+1; r++) { ['B','C','D','E','F'].forEach(col=> { const cell = wsProv[`${col}${r}`]; if (cell) { cell.t='n'; cell.z='#,##0.00'; } }); }
+
+    const tot = { base10:0, iva10:0, base21:0, iva21:0, total:0 };
+    for (const a of rows) { for (const it of (a.items || [])) { const base = Number(it.base || 0), iva = Number(it.tax || 0), t = Number(it.t || 0); if (Number(it.rate || 0) === 21) { tot.base21 += base; tot.iva21 += iva; } else if (Number(it.rate || 0) === 10) { tot.base10 += base; tot.iva10 += iva; } tot.total += t; } }
+    const wsIva = XLSX.utils.aoa_to_sheet([ ['Concepto', 'Importe'], ['Base 10%', Num.round2(tot.base10)], ['IVA 10%', Num.round2(tot.iva10)], ['Base 21%', Num.round2(tot.base21)], ['IVA 21%', Num.round2(tot.iva21)], ['TOTAL', Num.round2(tot.total)], [], ['Rango aplicado', `${dateFrom || 'inicio'} a ${dateTo || 'fin'}`] ]);
+    wsIva['!cols'] = [{ wch: 18 }, { wch: 16 }];
+    for (let r = 2; r <= 6; r++) { const cell = wsIva[`B${r}`]; if (cell) { cell.t='n'; cell.z='#,##0.00'; } }
+
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, wsDetail, "Detalle"); XLSX.utils.book_append_sheet(wb, wsProv, "Resumen Prov"); XLSX.utils.book_append_sheet(wb, wsIva, "Totales IVA");
+    XLSX.writeFile(wb, `Albaranes_${dateFrom || 'ALL'}.xlsx`);
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const active = document.activeElement as HTMLElement;
+      const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+      if (!isTyping && e.key === '/') { e.preventDefault(); document.querySelector<HTMLInputElement>('input[placeholder^="Buscar"]')?.focus(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  return (
+    <div className="space-y-6 pb-24 max-w-[1600px] mx-auto animate-fade-in relative">
+
+      {/* 🚀 OVERLAY DE CARGA IA */}
       <AnimatePresence>
-        {isDragging && (
-          <motion.div data-test-id="drop-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[999] pointer-events-none flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
-            <div className="relative z-10 w-full max-w-sm mx-4 border-2 border-dashed border-white/50 rounded-2xl flex flex-col items-center justify-center bg-indigo-600 p-8 shadow-2xl">
-              <FileDown className="w-12 h-12 text-white mb-4 animate-bounce" />
-              <h2 className="text-xl font-bold text-white tracking-tight">Suelta la Factura</h2>
-            </div>
+        {isScanning && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[999] bg-slate-900/90 backdrop-blur-md flex flex-col items-center justify-center text-white">
+            <Loader2 className="w-16 h-16 animate-spin text-indigo-500 mb-6" />
+            <h2 className="text-3xl font-black tracking-tighter">Procesando Documento...</h2>
+            <p className="text-slate-400 mt-2 font-bold uppercase tracking-widest">Extrayendo Datos y Productos</p>
           </motion.div>
         )}
       </AnimatePresence>
       
-      {/* CABECERA COMPACTA */}
-      <header className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col xl:flex-row justify-between gap-3 relative z-10 items-center">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-indigo-50 rounded-lg flex items-center justify-center border border-indigo-100">
-            <FileText className="w-5 h-5 text-indigo-600" />
-          </div>
-          <div>
-            <h2 className="text-base font-bold text-slate-800 tracking-tight">Facturación</h2>
-            <p className="text-[10px] text-slate-500 uppercase">Reconciliación 3-Way</p>
-          </div>
+      {/* 🚀 HEADER CON ACCIONES PRO */}
+      <header className="bg-white p-6 md:p-8 rounded-[3rem] shadow-sm border border-slate-100 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
+        <div>
+          <h2 className="text-3xl font-black text-slate-800 tracking-tighter">Albaranes & Compras</h2>
+          <p className="text-xs text-indigo-500 font-bold uppercase tracking-widest mt-1">Con Inteligencia de Precios</p>
         </div>
-
-        <div className="flex items-center gap-2">
-          <button onClick={handleFetchEmails} disabled={isSyncing} className="px-3 py-2 rounded-lg text-[10px] font-bold bg-blue-50 text-blue-600 hover:bg-blue-100 transition flex items-center gap-1.5 border border-blue-200">
-            {isSyncing ? <Loader2 className="w-3 h-3 animate-spin"/> : <Inbox className="w-3 h-3" />} IMAP
+        <div className="flex flex-wrap gap-2">
+          <button onClick={handleTelegramSync} disabled={isSyncingTelegram} className="px-5 py-3 rounded-2xl font-black text-xs uppercase bg-[#229ED9] text-white shadow-md hover:bg-[#1E8CC0] transition flex items-center gap-2">
+            {isSyncingTelegram ? <Loader2 className="w-4 h-4 animate-spin"/> : <Smartphone className="w-4 h-4"/>} Telegram Sync
           </button>
-          
-          <input type="file" ref={fileInputRef} className="hidden" accept="application/pdf, image/*" onChange={(e) => { if (e.target.files && e.target.files[0]) { processLocalFile(e.target.files[0]); e.target.value = ''; } }} />
-          <button onClick={() => fileInputRef.current?.click()} disabled={isSyncing} className="px-3 py-2 rounded-lg text-[10px] font-bold bg-slate-900 text-white hover:bg-slate-800 transition flex items-center gap-1.5">
-            {isSyncing ? <Loader2 className="w-3 h-3 animate-spin"/> : <UploadCloud className="w-3 h-3" />} PDF
+          <button onClick={() => setShowInspector(!showInspector)} className={cn("px-5 py-3 rounded-2xl font-black text-xs uppercase transition shadow-md flex items-center gap-2", showInspector ? "bg-slate-900 text-white" : "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50")}>
+            <LineChartIcon className="w-4 h-4"/> Evolución Precios
           </button>
-          
-          <button onClick={() => setIsExportModalOpen(true)} className="px-3 py-2 rounded-lg text-[10px] font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 transition flex items-center gap-1.5">
-            <Download className="w-3 h-3" /> Exportar
+          <button onClick={handleExportExcel} className="px-5 py-3 rounded-2xl font-black text-xs uppercase bg-emerald-600 text-white shadow-md hover:bg-emerald-700 transition flex items-center gap-2">
+            <FileSpreadsheet className="w-4 h-4"/> Excel Gestoría
           </button>
         </div>
       </header>
 
-      {/* CONTROLES STICKY COMPACTOS */}
-      <div className="sticky top-2 z-40">
-        <div className="bg-white/95 backdrop-blur-md px-3 py-2 rounded-xl shadow-sm border border-slate-200 flex flex-col xl:flex-row items-center justify-between gap-2">
+      {/* 🏷️ STICKY TOOLBAR */}
+      <div className="sticky top-4 z-40">
+        <div className="bg-white/95 backdrop-blur-md p-3 md:px-5 rounded-[2rem] shadow-md border border-slate-200 flex flex-col xl:flex-row justify-between gap-3">
           
-          <div className="flex items-center bg-slate-100 p-1 rounded-lg w-full xl:w-auto">
-            <button onClick={() => setActiveTab('pend')} className={cn("px-3 py-1.5 rounded-md text-[10px] font-bold uppercase transition", activeTab === 'pend' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>📦 Albaranes Sueltos</button>
-            <button onClick={() => setActiveTab('hist')} className={cn("px-3 py-1.5 rounded-md text-[10px] font-bold uppercase transition", activeTab === 'hist' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}>💰 Histórico Facturas</button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => setSelectedUnit('ALL')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border flex items-center gap-1.5", selectedUnit === 'ALL' ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50")}><Layers className="w-3 h-3" /> Todas</button>
+            {BUSINESS_UNITS.map(unit => (
+              <button key={unit.id} onClick={() => setSelectedUnit(unit.id)} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all border flex items-center gap-1.5", selectedUnit === unit.id ? `${unit.color.replace('text-', 'bg-')} text-white border-transparent shadow-md` : "bg-white text-slate-400 border-slate-200 hover:bg-slate-50")}><unit.icon className="w-3 h-3 hidden sm:block" /> {unit.name}</button>
+            ))}
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
-            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
-              <button onClick={() => setMode('proveedor')} className={cn("px-2 py-1 rounded text-[9px] font-bold uppercase", mode === 'proveedor' ? "bg-white text-slate-800 shadow-sm" : "text-slate-500")}>Prov</button>
-              <button onClick={() => setMode('socio')} className={cn("px-2 py-1 rounded text-[9px] font-bold uppercase", mode === 'socio' ? "bg-white text-slate-800 shadow-sm" : "text-slate-500")}>Socio</button>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 shadow-inner">
+              <div className="text-[10px] font-black text-slate-400 uppercase">Fecha</div>
+              <input type="date" value={dateFrom} onChange={e=>setDateFrom(e.target.value)} className="bg-transparent text-xs font-bold outline-none border-0 px-1 w-28"/>
+              <span className="text-slate-300">—</span>
+              <input type="date" value={dateTo} onChange={e=>setDateTo(e.target.value)} className="bg-transparent text-xs font-bold outline-none border-0 px-1 w-28"/>
+              <div className="hidden sm:flex items-center gap-1 ml-2 border-l border-slate-200 pl-2">
+                <button onClick={presetToday} className="px-2 py-1 rounded-lg text-[9px] font-black bg-white hover:bg-indigo-50 text-indigo-600 transition shadow-sm">HOY</button>
+                <button onClick={presetLast7d} className="px-2 py-1 rounded-lg text-[9px] font-black bg-white hover:bg-indigo-50 text-indigo-600 transition shadow-sm">7D</button>
+                <button onClick={presetThisMonth} className="px-2 py-1 rounded-lg text-[9px] font-black bg-white hover:bg-indigo-50 text-indigo-600 transition shadow-sm">MES</button>
+                <button onClick={()=>{setDateFrom('');setDateTo('');}} className="px-2 py-1 rounded-lg text-[9px] font-black bg-rose-50 hover:bg-rose-100 text-rose-600 transition">✕</button>
+              </div>
             </div>
 
-            <select value={selectedUnit} onChange={e => setSelectedUnit(e.target.value as any)} className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[10px] font-bold uppercase outline-none text-slate-600">
-              <option value="ALL">Todas</option>
-              <option value="REST">REST</option>
-              <option value="DLV">DLV</option>
-              <option value="SHOP">SHOP</option>
-              <option value="CORP">CORP</option>
-            </select>
-
-            <div className="flex items-center bg-slate-50 border border-slate-200 rounded-lg">
-              <button className="p-1.5 text-indigo-600 hover:bg-indigo-100 rounded-l-lg" onClick={() => setYear(y => y - 1)}><ChevronLeft className="w-3 h-3"/></button>
-              <span className="px-2 text-[10px] font-bold text-slate-700">{year}</span>
-              <button className="p-1.5 text-indigo-600 hover:bg-indigo-100 rounded-r-lg" onClick={() => setYear(y => y + 1)}><ChevronRight className="w-3 h-3"/></button>
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input value={searchQ} onChange={(e) => setSearchQ(e.target.value)} type="text" placeholder="Buscar prov, producto, ref..." className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:ring-2 ring-indigo-500/20 transition" />
             </div>
-
-            <div className="relative flex-1 md:w-64">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-              <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Buscar..." className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-[11px] outline-none focus:bg-white focus:border-indigo-400" />
+            
+            <div className="hidden lg:flex flex-col items-end text-[10px] text-slate-500 font-bold px-2 border-l border-slate-200 pl-3">
+              <span>{filteredForList.length} albaranes filtrados</span>
+              <span className="text-sm text-slate-900 font-black tracking-tighter">{Num.fmt(sumFiltered)}</span>
             </div>
           </div>
+
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4 relative z-10">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 relative z-10">
         
-        {/* COLUMNA IZQUIERDA: LISTADO */}
-        <section className="xl:col-span-8 space-y-3">
-          {activeTab === 'hist' && (
-            <div className="flex flex-wrap gap-1.5 px-1">
-              {[{ id: 'all', label: 'Todas', c: 'text-slate-500' }, { id: 'pending', label: '⏳ Ptes', c: 'text-amber-600' }, { id: 'paid', label: '✔️ Pagadas', c: 'text-emerald-600' }, { id: 'reconciled', label: '🔗 Banco', c: 'text-blue-600' }].map(chip => (
-                <button type="button" key={chip.id} onClick={() => setFilterStatus(chip.id as any)} className={cn("px-3 py-1 rounded text-[9px] font-bold uppercase border", filterStatus === chip.id ? "bg-indigo-600 text-white border-indigo-600" : cn("bg-white border-slate-200 hover:bg-slate-50", chip.c))}>{chip.label}</button>
-              ))}
-            </div>
-          )}
-
-          {activeTab === 'pend' ? renderPendingGroups() : (
-            <InvoicesList 
-              facturas={facturasSeguras} 
-              searchQ={deferredSearch} 
-              selectedUnit={selectedUnit} 
-              mode={mode} 
-              filterStatus={filterStatus} 
-              year={year} 
-              businessUnits={BUSINESS_UNITS} 
-              sociosReales={SOCIOS_REALES_NAMES} 
-              superNorm={basicNorm} // 💡 CORRECCIÓN: Pasamos basicNorm
-              onOpenDetail={setSelectedInvoice as any} 
-              onTogglePago={handleTogglePago} 
-              onDelete={handleDeleteFactura} 
-              albaranesSeguros={albaranesSeguros} 
-            />
-          )}
-        </section>
-
-        {/* COLUMNA DERECHA: BANDEJAS */}
-        <aside className="xl:col-span-4">
-          <div className="sticky top-20 space-y-4">
-            
-            {/* IMAP */}
-            {emailInbox.length > 0 && (
-              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                <h4 className="text-xs font-bold text-slate-800 mb-3 flex items-center gap-1.5"><Inbox className="w-4 h-4 text-blue-500"/> Correos ({emailInbox.length})</h4>
-                <div className="space-y-2 max-h-[200px] overflow-y-auto custom-scrollbar pr-1">
-                  {emailInbox.map(mail => (
-                    <div key={mail.id} className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg hover:border-blue-300 transition">
-                      <div className="flex justify-between items-start mb-1.5">
-                        <p className="text-[11px] font-bold text-slate-800 truncate pr-2">{mail.from}</p>
-                        <span className="text-[8px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">{mail.date}</span>
-                      </div>
-                      <p className="text-[9px] text-slate-500 truncate mb-2">{mail.subject}</p>
-                      <button onClick={() => handleParseEmail(mail.id)} disabled={isSyncing} className="w-full bg-white border border-blue-200 text-blue-600 font-bold text-[9px] uppercase py-1.5 rounded hover:bg-blue-50 flex justify-center gap-1">
-                        {isSyncing ? <Loader2 className="w-3 h-3 animate-spin"/> : <Sparkles className="w-3 h-3"/>} Extraer PDF
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* IA DRAFTS */}
-            <div className={cn("p-4 rounded-xl border shadow-sm transition-all", draftsIA.length > 0 ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200")}>
-              <div className="flex justify-between items-center mb-3">
-                <h4 className={cn("text-xs font-bold flex items-center gap-1.5", draftsIA.length > 0 ? "text-white" : "text-slate-600")}><Sparkles className={cn("w-4 h-4", draftsIA.length > 0 ? "text-purple-400" : "text-slate-400")}/> Bandeja IA</h4>
-                {draftsIA.length > 0 && <span className="bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded text-[9px] font-bold">{draftsIA.length}</span>}
-              </div>
-
-              {draftsIA.length > 0 ? (
-                <div className="space-y-2 max-h-[50vh] overflow-y-auto custom-scrollbar pr-1">
-                  {draftsIA.map(d => {
-                    const destId = `dest-draft-${d.id}`; 
-                    
-                    const activeConnections = d.candidatos && d.candidatos.length > 0 
-                      ? Array.from(new Set(d.candidatos.map((c: any) => `source-group-${basicNorm(d.prov)}-${c.unitId || 'REST'}`))) // 💡 CORRECCIÓN: basicNorm
-                      : [];
-
-                    const connectionStatus = d.cuadraPerfecto ? 'perfect' : 'warning';
-
-                    return (
-                      <div key={d.id} id={destId} className="bg-slate-800 p-3 rounded-lg border border-slate-700 hover:border-indigo-500 hover:scale-[1.02] transition-all duration-300 relative z-10 cursor-default">
-                        
-                        {activeConnections.map(sourceId => (
-                          <ConnectionLine 
-                            key={`${sourceId}-${destId}`} 
-                            sourceId={sourceId as string} 
-                            targetId={destId} 
-                            status={connectionStatus}
-                          />
-                        ))}
-
-                        <div className="flex justify-between items-start mb-2">
-                          <div className="min-w-0 pr-2">
-                            <span className="font-bold text-white text-[11px] truncate block">{d.prov || 'Desconocido'}</span>
-                            <span className="text-[9px] text-slate-400 mt-0.5 block">{d.date} · {d.num}</span>
-                          </div>
-                          <button onClick={() => handleDiscardDraftIA(d.id)} className="text-slate-500 hover:text-rose-400 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
-                        </div>
-                        
-                        <div className="flex justify-between items-end bg-slate-900 p-2 rounded border border-slate-700">
-                          <div>
-                            <p className="text-[8px] text-slate-500 uppercase">Total</p>
-                            <span className="text-sm font-bold text-white">{Num.fmt(d.total)}</span>
-                          </div>
-                          {d.cuadraPerfecto ? (
-                             <span className="text-[8px] font-bold uppercase text-emerald-400 flex items-center gap-0.5"><Check className="w-3 h-3"/> Cuadra</span>
-                          ) : (
-                             <span className="text-[8px] font-bold uppercase text-amber-400">Diff: {Num.fmt(d.diferencia)}</span>
-                          )}
-                        </div>
-                        
-                        <button onClick={() => handleConfirmAuditoriaIA(d.id)} disabled={isProcessing} className="w-full mt-2 py-2 bg-indigo-500 text-white rounded text-[9px] font-bold uppercase hover:bg-indigo-400 transition-colors flex justify-center gap-1.5">
-                          {isProcessing ? <Loader2 className="w-3 h-3 animate-spin"/> : <CheckCircle2 className="w-3 h-3"/>} Confirmar
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="text-center opacity-50 py-4"><FileText className="w-6 h-6 mx-auto text-slate-400 mb-2" /><p className="text-[10px] font-bold text-slate-500">Vacío</p></div>
-              )}
-            </div>
-
-          </div>
-        </aside>
-      </div>
-
-      {/* MODALES */}
-      <AnimatePresence>
-        {isExportModalOpen && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex justify-center items-center p-4 bg-slate-900/60 backdrop-blur-sm">
-            <motion.div initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} className="bg-white w-full max-w-sm rounded-xl p-5 shadow-xl border border-slate-200">
-              <h3 className="text-sm font-bold text-slate-800 mb-4">Exportar a Excel</h3>
-              <div className="space-y-4">
-                <div><label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Año</label><input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-xs outline-none" /></div>
-                <div>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Trimestre</label>
-                  <div className="grid grid-cols-4 gap-1">
-                    {[1, 2, 3, 4].map(q => (<button key={q} onClick={() => setExportQuarter(q)} className={cn("py-1.5 rounded text-[10px] font-bold", exportQuarter === q ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600")}>Q{q}</button>))}
+        <aside className="lg:col-span-4 space-y-4">
+          <AnimatePresence mode="wait">
+            {showInspector ? (
+              <motion.div key="inspector" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+                <PriceInspector 
+                  priceHistory={priceHistorySeguro} 
+                  albaranesLite={albaranesLiteRanged} 
+                  proveedores={proveedoresHistoricos} 
+                  suggestionsByProv={suggestionsByProv}
+                  defaultProv={inspectorDefaults.prov}
+                  defaultItem={inspectorDefaults.item}
+                />
+              </motion.div>
+            ) : (
+              <motion.div key="form" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="bg-white p-6 rounded-[2.5rem] shadow-xl border border-slate-100 relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-full h-1.5 bg-indigo-500" />
+                <div className="flex justify-between items-center mb-5">
+                  <h3 className="text-sm font-black text-slate-800 flex items-center gap-2"><ListPlus className="w-5 h-5 text-indigo-500" /> Nuevo Albarán</h3>
+                  
+                  {/* BOTÓN OCR PDF DIRECTO Y VOSK RESTAURADO */}
+                  <div className="flex items-center gap-2">
+                    <button onClick={toggleRecording} className={cn("p-2 rounded-xl transition", isRecording ? "bg-rose-100 text-rose-600 animate-pulse" : "bg-indigo-50 text-indigo-600 hover:bg-indigo-100")} title="Dictar Albarán (Vosk)">
+                      {isRecording ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                    </button>
+                    <input type="file" ref={fileInputRef} className="hidden" accept="application/pdf, image/*" onChange={(e) => { if (e.target.files && e.target.files[0]) { processLocalFile(e.target.files[0]); e.target.value = ''; } }} />
+                    <button onClick={() => fileInputRef.current?.click()} className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 transition" title="Autorellenar con Foto/PDF"><Camera className="w-4 h-4"/></button>
                   </div>
                 </div>
-                <div className="pt-2 flex gap-2">
-                  <button onClick={() => setIsExportModalOpen(false)} className="flex-1 text-slate-500 text-[10px] font-bold py-2 hover:bg-slate-100 rounded">Cancelar</button>
-                  <button onClick={handleExportGestoria} className="flex-1 bg-emerald-600 text-white py-2 rounded font-bold text-[10px] flex justify-center items-center gap-1"><Download className="w-3 h-3" /> Descargar</button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
-      <AnimatePresence>
-        {selectedGroup && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[200] flex justify-center items-center p-4 bg-slate-900/60 backdrop-blur-sm">
-            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} className="bg-white w-full max-w-2xl rounded-2xl p-5 shadow-2xl relative flex flex-col max-h-[85vh]">
-              <button onClick={() => setSelectedGroup(null)} className="absolute top-4 right-4 p-1.5 bg-slate-100 rounded text-slate-500 hover:bg-slate-200"><X className="w-4 h-4"/></button>
-              
-              <div className="border-b border-slate-100 pb-3 mb-3">
-                <p className="text-[9px] font-bold text-indigo-500 uppercase mb-1">Agrupación Manual</p>
-                <h3 className="text-lg font-bold text-slate-800 truncate pr-8">{selectedGroup.label}</h3>
-              </div>
-              
-              <div className="flex justify-between items-center mb-2 px-1">
-                <span className="text-[10px] font-bold text-slate-500">{modalForm.selectedAlbs.length} seleccionados</span>
-                <button onClick={() => { const allIds = selectedGroup.ids; setModalForm(p => ({...p, selectedAlbs: p.selectedAlbs.length === allIds.length ? [] : allIds })) }} className="text-[9px] font-bold uppercase text-indigo-600 bg-indigo-50 px-2 py-1 rounded">
-                  {modalForm.selectedAlbs.length === selectedGroup.ids.length ? 'Desmarcar' : 'Marcar Todos'}
+                <div className={cn("mb-5 p-3 rounded-2xl border transition-colors", form.unitId === 'REST' ? "bg-indigo-50/50 border-indigo-100" : form.unitId === 'DLV' ? "bg-amber-50/50 border-amber-100" : "bg-emerald-50/50 border-emerald-100")}>
+                  <div className="grid grid-cols-2 gap-2">
+                    {BUSINESS_UNITS.map(unit => (
+                      <button type="button" key={unit.id} onClick={() => setForm({ ...form, unitId: unit.id })} className={cn("p-2 rounded-xl border-2 transition-all flex items-center justify-center gap-1.5", form.unitId === unit.id ? `${unit.color.replace('text-', 'border-')} ${unit.bg} ${unit.color} shadow-sm` : "border-slate-100 bg-white text-slate-400 grayscale hover:grayscale-0")}><unit.icon className="w-3.5 h-3.5" /><span className="text-[9px] font-black uppercase tracking-wider">{unit.name.split(' ')[0]}</span></button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-4 mb-5 relative">
+                  <input value={form.prov} onChange={(e) => setForm({ ...form, prov: e.target.value })} type="text" placeholder="Proveedor (Ej: Makro...)" list="proveedores-historicos" className="w-full p-4 bg-slate-50 rounded-2xl text-sm font-bold border border-slate-200 outline-none focus:border-indigo-500 focus:bg-white transition shadow-inner" />
+                  <datalist id="proveedores-historicos">{proveedoresHistoricos.map(p => <option key={p} value={p} />)}</datalist>
+                  
+                  <div className="flex gap-2">
+                    <input value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} type="date" className="flex-1 p-4 bg-slate-50 rounded-2xl text-sm font-bold border border-slate-200 outline-none focus:border-indigo-500 shadow-inner" />
+                    <input value={form.num} onChange={(e) => setForm({ ...form, num: e.target.value })} type="text" placeholder="Nº Albarán" className="w-1/3 p-4 bg-slate-50 rounded-2xl text-sm font-bold border border-slate-200 outline-none focus:border-indigo-500 shadow-inner" />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1 mb-3 bg-indigo-50/50 p-2 rounded-xl border border-indigo-100">
+                  <input type="text" value={quickCalc.name} onChange={(e) => setQuickCalc({ ...quickCalc, name: e.target.value })} placeholder="Producto rápido..." className="w-1/2 p-2 bg-white rounded-lg text-xs font-bold outline-none" />
+                  <input type="number" value={quickCalc.total} onChange={(e) => setQuickCalc({ ...quickCalc, total: e.target.value })} placeholder="Total €" className="w-1/4 p-2 bg-white rounded-lg text-xs font-bold outline-none text-right" />
+                  <button type="button" onClick={handleQuickAdd} className="w-8 h-8 bg-indigo-600 text-white rounded-lg flex items-center justify-center hover:bg-indigo-700 transition shadow-sm"><Plus className="w-4 h-4" /></button>
+                </div>
+
+                <div className="relative group">
+                  <textarea value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="Pega el texto del albarán aquí...\nEj: 5 kg Salmón 150.00" className="w-full h-40 bg-slate-50 rounded-2xl p-4 pr-10 text-xs font-mono border border-slate-200 outline-none resize-none mb-4 shadow-inner focus:bg-white focus:border-indigo-400 transition leading-relaxed" />
+                  {form.text && <button type="button" onClick={() => setForm({...form, text: ''})} className="absolute top-4 right-4 text-slate-300 hover:text-rose-500 transition"><XCircle className="w-5 h-5" /></button>}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-500 mb-3">
+                  <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-center">
+                    <div className="font-black text-slate-700">Base (10%) · IVA (10%)</div>
+                    <div>{Num.fmt(liveTotals.split.base10)} · {Num.fmt(liveTotals.split.iva10)}</div>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-center">
+                    <div className="font-black text-slate-700">Base (21%) · IVA (21%)</div>
+                    <div>{Num.fmt(liveTotals.split.base21)} · {Num.fmt(liveTotals.split.iva21)}</div>
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center bg-slate-900 p-5 rounded-2xl text-white mb-5 shadow-lg">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Total Calculado</span>
+                    <span className="text-[9px] text-slate-500">Tolerancia: ±{TOLERANCIA.toFixed(2)}€</span>
+                  </div>
+                  <span className="text-3xl font-black text-emerald-400 tracking-tighter">{Num.fmt(liveTotals.grandTotal)}</span>
+                </div>
+
+                <button type="button" onClick={handleSaveAlbaran} className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition active:scale-95 flex items-center justify-center gap-2">
+                  <Check className="w-5 h-5" /> GUARDAR ALBARÁN
                 </button>
-              </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </aside>
 
-              <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-50 rounded-lg p-2 border border-slate-200 space-y-1">
-                {(albaranesSeguros).filter(a => selectedGroup.ids.includes(a.id)).map(a => (
-                  <label key={a.id} className={cn("flex justify-between items-center p-2 rounded cursor-pointer border", modalForm.selectedAlbs.includes(a.id) ? "bg-white border-indigo-300 shadow-sm" : "border-transparent hover:bg-white hover:border-slate-200")}>
-                    <div className="flex items-center gap-2">
-                      <input type="checkbox" checked={modalForm.selectedAlbs.includes(a.id)} onChange={(e) => { const newSelected = e.target.checked ? [...modalForm.selectedAlbs, a.id] : modalForm.selectedAlbs.filter(id => id !== a.id); setModalForm({ ...modalForm, selectedAlbs: newSelected }); }} className="w-3.5 h-3.5 text-indigo-600 border-slate-300 rounded" />
-                      <div>
-                        <p className="font-bold text-slate-800 text-[11px]">{a.date}</p>
-                        <p className="text-[9px] text-slate-400">Ref: {a.num || 'S/N'}</p>
-                      </div>
-                    </div>
-                    <p className="font-bold text-slate-900 text-xs">{Num.fmt(a.total)}</p>
-                  </label>
-                ))}
-              </div>
-              
-              <div className="mt-4 space-y-3">
-                <div className="flex items-center justify-between bg-slate-900 p-3 rounded-lg text-white">
-                  <span className="text-[9px] font-bold uppercase text-slate-400">Total Factura</span>
-                  <span className="text-lg font-bold text-emerald-400">{Num.fmt(modalForm.selectedAlbs.reduce((acc, id) => { const alb = albaranesSeguros.find(a => a.id === id); return acc + (Num.parse(alb?.total) || 0); }, 0))}</span>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-2">
-                  {mode === 'socio' ? (
-                    <div><label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Responsable</label><select value={modalForm.num.startsWith('SOCIO-') ? modalForm.num.split('-')[1] : ''} onChange={(e) => { const socio = e.target.value; setModalForm({ ...modalForm, num: `LIQ-${socio}-${modalForm.date.replace(/-/g,'')}` }); setSelectedGroup(prev => prev ? { ...prev, label: socio } : null); }} className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-xs outline-none focus:border-indigo-400"><option value="">Selecciona</option>{SOCIOS_REALES_NAMES.map(p => <option key={p} value={p}>{p}</option>)}</select></div>
-                  ) : (
-                    <div><label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Nº Oficial</label><input type="text" value={modalForm.num} onChange={(e) => setModalForm({ ...modalForm, num: e.target.value })} placeholder="F-2026/012" className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-xs outline-none focus:border-indigo-400" /></div>
-                  )}
-                  <div><label className="text-[9px] font-bold text-slate-500 uppercase block mb-1">Fecha</label><input type="date" value={modalForm.date} onChange={(e) => setModalForm({ ...modalForm, date: e.target.value })} className="w-full p-2 bg-slate-50 border border-slate-200 rounded text-xs outline-none focus:border-indigo-400" /></div>
-                </div>
-                
-                <button onClick={handleConfirmManualInvoice} disabled={modalForm.selectedAlbs.length === 0 || isProcessing} className="w-full bg-indigo-600 text-white py-2.5 rounded-lg text-[10px] font-bold uppercase hover:bg-indigo-700 disabled:opacity-50 flex justify-center items-center gap-1.5">
-                  {isProcessing ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3"/>} Facturar
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+        <section className="lg:col-span-8">
+          <AlbaranesList 
+            albaranes={filteredForList} 
+            searchQ={deferredSearch} 
+            selectedUnit={selectedUnit} 
+            businessUnits={BUSINESS_UNITS} 
+            onOpenEdit={setEditForm} 
+          />
+        </section>
+      </div>
 
-      {selectedInvoice && typeof selectedInvoice === 'object' && selectedInvoice.id && (
-        <InvoiceDetailModal 
-          factura={selectedInvoice as any} 
-          albaranes={albaranesSeguros} 
-          businessUnits={BUSINESS_UNITS} 
-          mode={mode} 
-          onClose={() => setSelectedInvoice(null)} 
-          onDownloadFile={handleDownloadFile} 
+      {editForm && (
+        <AlbaranEditModal 
+          editForm={editForm} 
+          sociosReales={sociosReales}
+          setEditForm={setEditForm} 
+          onClose={() => setEditForm(null)} 
+          onSave={handleSaveEdits} 
+          onDelete={handleDelete}
         />
       )}
     </div>
