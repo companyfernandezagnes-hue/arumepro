@@ -26,6 +26,20 @@ export interface AppConfig {
   emailGeneral?: string;
 }
 
+export interface Albaran {
+  id: string;
+  date: string;
+  prov?: string;
+  socio?: string;
+  num: string;
+  total: number | string;
+  unitId?: BusinessUnit;
+  invoiced: boolean;
+  reconciled?: boolean;
+  paid?: boolean;
+  status?: string;
+}
+
 export interface Factura {
   id: string;
   tipo: 'compra' | 'venta' | 'caja';
@@ -39,26 +53,35 @@ export interface Factura {
   paid: boolean;
   reconciled: boolean;
   unidad_negocio?: BusinessUnit;
-  source?: 'manual' | 'email-ia' | 'manual-group' | 'banco';
-  status?: 'draft' | 'approved' | 'paid' | 'reconciled';
+  source?: 'manual' | 'email-ia' | 'manual-group' | 'banco' | 'gmail-sync' | 'dropzone';
+  status?: 'ingested' | 'parsed' | 'draft' | 'approved' | 'paid' | 'reconciled' | 'mismatch';
   file_base64?: string;
   albaranIdsArr?: string[];
   albaranIds?: string;
   fecha_pago?: string;
 }
 
-export interface Albaran {
+// 🚀 NUEVO: Tipo extendido para la UI y la lógica de conciliación
+export interface FacturaExtended extends Factura {
+  attachmentSha?: string; 
+  dueDate?: string;
+  candidatos?: Albaran[]; // Usamos el tipo Albaran real en lugar de any
+  sumaAlbaranes?: number;
+  diferencia?: number;
+  cuadraPerfecto?: boolean;
+  emailMeta?: any; 
+}
+
+// 📧 NUEVO: Tipo para los borradores de correo de Supabase
+export interface EmailDraft {
   id: string;
+  from: string;
+  subject: string;
   date: string;
-  prov?: string;
-  socio?: string;
-  num: string;
-  total: number | string;
-  unitId?: BusinessUnit;
-  invoiced: boolean;
-  reconciled?: boolean;
-  paid?: boolean;
-  status?: string;
+  hasAttachment: boolean;
+  status: 'new' | 'parsed';
+  fileBase64?: string;
+  fileName?: string;
 }
 
 export interface Socio {
@@ -82,7 +105,7 @@ export interface BankMovement {
 export interface AppData {
   config?: AppConfig;
   socios?: Socio[];
-  facturas?: Factura[];
+  facturas?: FacturaExtended[]; // 💡 Actualizado a FacturaExtended
   albaranes?: Albaran[];
   banco?: BankMovement[];
   cierres?: any[];
