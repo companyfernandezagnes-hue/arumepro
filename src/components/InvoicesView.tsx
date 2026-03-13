@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback, useDeferredValue } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useDeferredValue } from 'react';
 import { 
   Search, Plus, Download, Package, AlertTriangle, Check, Clock, Trash2, 
   Building2, ShoppingBag, ListPlus, Users, Hotel, Layers, X, 
@@ -10,49 +10,24 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import { GoogleGenAI } from "@google/genai";
-import { AppData, Factura, Albaran, Socio } from '../types';
+
+// 🛡️ TIPOS CENTRALIZADOS
+import { AppData, FacturaExtended, Albaran, EmailDraft, BusinessUnit } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
 
-// 🚀 IMPORTAMOS EL CEREBRO DE LA FASE 1
-import { getOfficialProvName, basicNorm, linkAlbaranesToFactura } from '../services/invoicing'; 
-import { createClient } from '@supabase/supabase-js';
+// 🚀 SERVICIOS CORE
+import { 
+  getOfficialProvName, 
+  superNorm, // 💡 Renombrado desde basicNorm si lo exportas así en tu invoicing.ts, o usa basicNorm
+  linkAlbaranesToFactura, 
+  matchAlbaranesToFactura 
+} from '../services/invoicing'; 
+import { fetchNewEmails, markEmailAsParsed } from '../services/supabase';
 
-// 🔑 NUEVAS CREDENCIALES DE SUPABASE
-const SUPABASE_URL = "https://bgtelulbiaugawyrhvwt.supabase.co"; 
-const SUPABASE_ANON_KEY = "sb_publishable_jagYegyG8gGMijzpLEY9BQ_iWfL1MU4";
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
+// 🧩 COMPONENTES HIJOS
 import { InvoicesList } from './InvoicesList';
 import { InvoiceDetailModal } from './InvoiceDetailModal';
-
-export type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
-
-export type FacturaExtended = Factura & {
-  status?: 'ingested' | 'parsed' | 'draft' | 'approved' | 'paid' | 'reconciled' | 'mismatch';
-  file_base64?: string;
-  attachmentSha?: string; 
-  albaranIdsArr?: string[];
-  fecha_pago?: string;
-  source?: string;
-  dueDate?: string;
-  candidatos?: any[];
-  sumaAlbaranes?: number;
-  diferencia?: number;
-  cuadraPerfecto?: boolean;
-  emailMeta?: any; 
-};
-
-type EmailDraft = {
-  id: string;
-  from: string;
-  subject: string;
-  date: string;
-  hasAttachment: boolean;
-  status: 'new' | 'parsed';
-  fileBase64?: string;
-  fileName?: string;
-};
 
 const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string; bg: string }[] = [
   { id: 'REST', name: 'Restaurante', icon: Building2, color: 'text-indigo-600', bg: 'bg-indigo-50' },
@@ -66,16 +41,17 @@ export interface InvoicesViewProps {
   onSave: (newData: AppData) => Promise<void>;
 }
 
-const TOLERANCIA = 0.50; 
-
-export const superNorm = (s: string | undefined | null) => {
-  if (!s) return ''; 
-  if (typeof s !== 'string') return 'desconocido';
-  try { return basicNorm(s); } catch (e) { return 'desconocido'; }
+// Utilidad para extraer JSON de respuestas de IA
+const safeJSON = (str: string) => { 
+  try { 
+    const match = str.match(/\{[\s\S]*\}/); 
+    return match ? JSON.parse(match[0]) : {}; 
+  } catch { 
+    return {}; 
+  } 
 };
 
-const safeJSON = (str: string) => { try { const match = str.match(/\{[\s\S]*\}/); return match ? JSON.parse(match[0]) : {}; } catch { return {}; } };
-
+// Comprobación de arrastre de archivos reales
 const hasRealFiles = (e: React.DragEvent | DragEvent) => {
   const items = e.dataTransfer?.items;
   if (!items || items.length === 0) return false;
@@ -85,6 +61,7 @@ const hasRealFiles = (e: React.DragEvent | DragEvent) => {
   return false;
 };
 
+// Generador de SHA-256 para evitar duplicados
 async function sha256File(file: File) {
   const buf = await file.arrayBuffer();
   const hash = await crypto.subtle.digest('SHA-256', buf);
@@ -92,44 +69,15 @@ async function sha256File(file: File) {
 }
 
 /* =======================================================
- * 🚀 CEREBRO 3-WAY MATCH MEJORADO
- * ======================================================= */
-const matchAlbaranesToFactura = (factura: FacturaExtended, albaranes: Albaran[], provNormalizado: string) => {
-  const fDate = factura?.date || DateUtil.today();
-  const fTotal = Num.parse(factura?.total) || 0;
-  
-  let candidatos: Albaran[] = [];
-  if (factura.albaranIdsArr && factura.albaranIdsArr.length > 0) {
-     candidatos = albaranes.filter(a => !a.invoiced && factura.albaranIdsArr!.includes(a.num));
-  }
-  
-  if (candidatos.length === 0) {
-    const mesDraft = typeof fDate === 'string' ? fDate.substring(0, 7) : '0000-00';
-    candidatos = albaranes.filter(a => {
-      const aDate = a?.date || '';
-      return !a?.invoiced && superNorm(a?.prov) === provNormalizado && (typeof aDate === 'string' && aDate.startsWith(mesDraft));
-    });
-  }
-
-  const sumaAlbaranes = candidatos.reduce((acc, a) => acc + (Num.parse(a?.total) || 0), 0);
-  const diff = Math.abs(sumaAlbaranes - Math.abs(fTotal));
-  const toleranciaPermitida = Math.max(TOLERANCIA, Math.abs(fTotal) * 0.005);
-  const cuadraPerfecto = diff <= toleranciaPermitida && candidatos.length > 0;
-
-  return { candidatos, sumaAlbaranes, diferencia: diff, cuadraPerfecto };
-};
-
-/* =======================================================
  * 🎨 COMPONENTE: Flechas de Conexión Inteligentes
  * ======================================================= */
 const ConnectionLine = ({ sourceId, targetId, status = 'default' }: { sourceId: string; targetId: string; status?: 'perfect' | 'warning' | 'default' }) => {
   const [coords, setCoords] = useState<{x1: number, y1: number, x2: number, y2: number} | null>(null);
 
-  // Definimos los colores según el estado (verde si cuadra, naranja si hay diferencia)
   const colors = {
-    perfect: { line: '#10b981', dot: '#059669', glow: '#34d399' }, // Emerald
-    warning: { line: '#f59e0b', dot: '#d97706', glow: '#fbbf24' }, // Amber
-    default: { line: '#6366f1', dot: '#4f46e5', glow: '#818cf8' }  // Indigo
+    perfect: { line: '#10b981', dot: '#059669', glow: '#34d399' }, 
+    warning: { line: '#f59e0b', dot: '#d97706', glow: '#fbbf24' }, 
+    default: { line: '#6366f1', dot: '#4f46e5', glow: '#818cf8' }  
   };
   const theme = colors[status];
 
@@ -168,7 +116,6 @@ const ConnectionLine = ({ sourceId, targetId, status = 'default' }: { sourceId: 
 
   return (
     <svg className="fixed inset-0 pointer-events-none z-[60] w-full h-full" style={{ left: 0, top: 0 }}>
-      {/* Línea principal */}
       <motion.path
         initial={{ pathLength: 0, opacity: 0 }}
         animate={{ pathLength: 1, opacity: 0.5 }}
@@ -179,13 +126,9 @@ const ConnectionLine = ({ sourceId, targetId, status = 'default' }: { sourceId: 
         fill="none"
         strokeDasharray="5 5"
       />
-      
-      {/* 🌟 Bolita de energía (Flujo de datos) */}
       <circle r="4" fill={theme.glow} style={{ filter: `drop-shadow(0 0 6px ${theme.glow})` }}>
         <animateMotion dur="2.5s" repeatCount="indefinite" path={path} />
       </circle>
-
-      {/* Puntos de conexión fijos */}
       <circle cx={coords.x1} cy={coords.y1} r="3" fill={theme.dot} />
       <circle cx={coords.x2} cy={coords.y2} r="4" fill={theme.dot} />
     </svg>
@@ -265,6 +208,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     try {
       return facturasSeguras.filter(f => f?.status === 'draft').map(draft => {
         const oficialName = getOfficialProvName(draft.prov);
+        // 🚀 LLAMAMOS A NUESTRO MOTOR CENTRALIZADO
         const matchResult = matchAlbaranesToFactura(draft, albaranesSeguros, superNorm(oficialName));
         return { ...draft, ...matchResult, prov: oficialName }; 
       });
@@ -330,26 +274,21 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   };
 
   // ==========================================
-  // 📧 LECTOR GMAIL (Supabase Seguro)
+  // 📧 LECTOR GMAIL (Supabase Seguro Refactorizado)
   // ==========================================
   const handleFetchEmails = async () => {
     setIsSyncing(true);
     try {
-      const { data: correosBD, error } = await supabase.from('inbox_gmail').select('*').eq('status', 'new');
-      if (error) throw error;
+      // 🚀 USAMOS EL SERVICIO DE SUPABASE CENTRALIZADO
+      const nuevosCorreos = await fetchNewEmails();
       
-      if (correosBD && correosBD.length > 0) {
-        const nuevosCorreos: EmailDraft[] = correosBD.map((fila: any) => ({
-          id: fila.id, from: fila.remitente, subject: fila.asunto, date: fila.fecha ? fila.fecha.slice(0, 10) : DateUtil.today(),
-          hasAttachment: true, status: 'new', fileBase64: fila.archivo_base64, fileName: fila.archivo_nombre
-        }));
-
+      if (nuevosCorreos && nuevosCorreos.length > 0) {
         setEmailInbox(prev => {
           const idsExistentes = new Set(prev.map(p => p.id));
           const unicos = nuevosCorreos.filter(m => !idsExistentes.has(m.id));
           return [...unicos, ...prev];
         });
-        alert(`✅ Encontradas ${correosBD.length} facturas nuevas en el buzón IMAP.`);
+        alert(`✅ Encontradas ${nuevosCorreos.length} facturas nuevas en el buzón IMAP.`);
       } else {
         alert("📭 No hay correos nuevos con PDF pendientes.");
       }
@@ -390,8 +329,8 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
       await onSave({ ...safeData, facturas: [nuevaFacturaIA, ...facturasSeguras] });
       
-      // Actualizamos en Supabase para no volver a leerlo
-      await supabase.from('inbox_gmail').update({ status: 'parsed' }).eq('id', emailId);
+      // 🚀 USAMOS EL SERVICIO DE SUPABASE CENTRALIZADO
+      await markEmailAsParsed(emailId);
       setEmailInbox(prev => prev.filter(e => e.id !== emailId));
       
     } catch (e: any) { alert("⚠️ Error al procesar el PDF del correo. Inténtalo de nuevo."); } 
@@ -591,7 +530,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
           {Object.values(dataGroup.groups || {}).map((g: any) => {
             const unitConfig = BUSINESS_UNITS.find(u => u.id === g.unitId);
-            const groupId = `source-group-${superNorm(g.label)}-${g.unitId}`; // 💡 ID AÑADIDO PARA LA FLECHA
+            const groupId = `source-group-${superNorm(g.label)}-${g.unitId}`; 
             
             return (
               <div 
@@ -714,7 +653,21 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           )}
 
           {activeTab === 'pend' ? renderPendingGroups() : (
-            <InvoicesList facturas={facturasSeguras} searchQ={deferredSearch} selectedUnit={selectedUnit} mode={mode} filterStatus={filterStatus} year={year} businessUnits={BUSINESS_UNITS} sociosReales={SOCIOS_REALES_NAMES} superNorm={superNorm} onOpenDetail={setSelectedInvoice as any} onTogglePago={handleTogglePago} onDelete={handleDeleteFactura} />
+            <InvoicesList 
+              facturas={facturasSeguras} 
+              searchQ={deferredSearch} 
+              selectedUnit={selectedUnit} 
+              mode={mode} 
+              filterStatus={filterStatus} 
+              year={year} 
+              businessUnits={BUSINESS_UNITS} 
+              sociosReales={SOCIOS_REALES_NAMES} 
+              superNorm={superNorm} 
+              onOpenDetail={setSelectedInvoice as any} 
+              onTogglePago={handleTogglePago} 
+              onDelete={handleDeleteFactura} 
+              albaranesSeguros={albaranesSeguros} // 💡 PASAMOS LOS ALBARANES PARA EL INSPECTOR VISUAL
+            />
           )}
         </section>
 
@@ -753,20 +706,17 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
               {draftsIA.length > 0 ? (
                 <div className="space-y-2 max-h-[50vh] overflow-y-auto custom-scrollbar pr-1">
                   {draftsIA.map(d => {
-                    const destId = `dest-draft-${d.id}`; // 💡 ID AÑADIDO PARA LA FLECHA
+                    const destId = `dest-draft-${d.id}`; 
                     
-                    // Extraemos y deduplicamos los grupos de origen necesarios
                     const activeConnections = d.candidatos && d.candidatos.length > 0 
                       ? Array.from(new Set(d.candidatos.map((c: any) => `source-group-${superNorm(d.prov)}-${c.unitId || 'REST'}`)))
                       : [];
 
-                    // Calculamos el estado de la conexión visual
                     const connectionStatus = d.cuadraPerfecto ? 'perfect' : 'warning';
 
                     return (
                       <div key={d.id} id={destId} className="bg-slate-800 p-3 rounded-lg border border-slate-700 hover:border-indigo-500 hover:scale-[1.02] transition-all duration-300 relative z-10 cursor-default">
                         
-                        {/* 💡 AQUI RENDERIZAMOS LAS FLECHAS INTELIGENTES */}
                         {activeConnections.map(sourceId => (
                           <ConnectionLine 
                             key={`${sourceId}-${destId}`} 
