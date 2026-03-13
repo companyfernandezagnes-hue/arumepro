@@ -19,7 +19,7 @@ import { cn } from '../lib/utils';
 // 🚀 SERVICIOS CORE
 import { 
   getOfficialProvName, 
-  superNorm, // 💡 Renombrado desde basicNorm si lo exportas así en tu invoicing.ts, o usa basicNorm
+  basicNorm, // 💡 CORRECCIÓN: Aquí estaba el error. Importamos basicNorm
   linkAlbaranesToFactura, 
   matchAlbaranesToFactura 
 } from '../services/invoicing'; 
@@ -79,7 +79,7 @@ const ConnectionLine = ({ sourceId, targetId, status = 'default' }: { sourceId: 
     warning: { line: '#f59e0b', dot: '#d97706', glow: '#fbbf24' }, 
     default: { line: '#6366f1', dot: '#4f46e5', glow: '#818cf8' }  
   };
-  const theme = colors[status];
+  const theme = colors[status as keyof typeof colors];
 
   useEffect(() => {
     const updateCoords = () => {
@@ -208,8 +208,8 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     try {
       return facturasSeguras.filter(f => f?.status === 'draft').map(draft => {
         const oficialName = getOfficialProvName(draft.prov);
-        // 🚀 LLAMAMOS A NUESTRO MOTOR CENTRALIZADO
-        const matchResult = matchAlbaranesToFactura(draft, albaranesSeguros, superNorm(oficialName));
+        // 🚀 LLAMAMOS A NUESTRO MOTOR CENTRALIZADO (Usamos basicNorm)
+        const matchResult = matchAlbaranesToFactura(draft, albaranesSeguros, basicNorm(oficialName));
         return { ...draft, ...matchResult, prov: oficialName }; 
       });
     } catch (error) {
@@ -380,7 +380,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const pendingGroups = useMemo(() => {
     try {
       const byMonth: Record<string, { name: string; groups: Record<string, any> }> = {};
-      const q = deferredSearch ? superNorm(deferredSearch) : '';
+      const q = deferredSearch ? basicNorm(deferredSearch) : ''; // 💡 CORRECCIÓN: basicNorm
 
       albaranesSeguros.forEach(a => {
         const aDate = a?.date || '';
@@ -392,8 +392,8 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         const owner = (mode === 'proveedor' ? a?.prov : a?.socio) || 'Arume';
         
         if (q) {
-            const matchOwner = superNorm(owner).includes(q);
-            const matchNum = superNorm(a?.num || '').includes(q);
+            const matchOwner = basicNorm(owner).includes(q); // 💡 CORRECCIÓN
+            const matchNum = basicNorm(a?.num || '').includes(q); // 💡 CORRECCIÓN
             if (!matchOwner && !matchNum) return;
         }
 
@@ -408,7 +408,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           byMonth[mk] = { name: `${names[m] || 'Mes'} ${y}`, groups: {} };
         }
 
-        const groupKey = `${superNorm(owner)}_${itemUnit}`;
+        const groupKey = `${basicNorm(owner)}_${itemUnit}`; // 💡 CORRECCIÓN
         if (!byMonth[mk].groups[groupKey]) {
             byMonth[mk].groups[groupKey] = { label: owner, unitId: itemUnit, t: 0, ids: [], count: 0 };
         }
@@ -506,7 +506,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     try {
         const a = document.createElement('a');
         a.href = f.file_base64.startsWith('data:') ? f.file_base64 : `data:application/pdf;base64,${f.file_base64}`; 
-        a.download = `${superNorm(f.prov||'factura')}_${f.num||'SN'}.pdf`;
+        a.download = `${basicNorm(f.prov||'factura')}_${f.num||'SN'}.pdf`; // 💡 CORRECCIÓN: basicNorm
         a.click();
     } catch(e) { alert("Error al descargar el archivo"); }
   };
@@ -530,7 +530,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
           {Object.values(dataGroup.groups || {}).map((g: any) => {
             const unitConfig = BUSINESS_UNITS.find(u => u.id === g.unitId);
-            const groupId = `source-group-${superNorm(g.label)}-${g.unitId}`; 
+            const groupId = `source-group-${basicNorm(g.label)}-${g.unitId}`; // 💡 CORRECCIÓN: basicNorm
             
             return (
               <div 
@@ -662,11 +662,11 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
               year={year} 
               businessUnits={BUSINESS_UNITS} 
               sociosReales={SOCIOS_REALES_NAMES} 
-              superNorm={superNorm} 
+              superNorm={basicNorm} // 💡 CORRECCIÓN: Pasamos basicNorm
               onOpenDetail={setSelectedInvoice as any} 
               onTogglePago={handleTogglePago} 
               onDelete={handleDeleteFactura} 
-              albaranesSeguros={albaranesSeguros} // 💡 PASAMOS LOS ALBARANES PARA EL INSPECTOR VISUAL
+              albaranesSeguros={albaranesSeguros} 
             />
           )}
         </section>
@@ -709,7 +709,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                     const destId = `dest-draft-${d.id}`; 
                     
                     const activeConnections = d.candidatos && d.candidatos.length > 0 
-                      ? Array.from(new Set(d.candidatos.map((c: any) => `source-group-${superNorm(d.prov)}-${c.unitId || 'REST'}`)))
+                      ? Array.from(new Set(d.candidatos.map((c: any) => `source-group-${basicNorm(d.prov)}-${c.unitId || 'REST'}`))) // 💡 CORRECCIÓN: basicNorm
                       : [];
 
                     const connectionStatus = d.cuadraPerfecto ? 'perfect' : 'warning';
