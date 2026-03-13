@@ -66,7 +66,8 @@ function useMenuIntelligencePRO(
       omnes: { precioMedioOfertado: 0, precioMedioDemandado: 0, ratioOmnes: 0, rangoMax: 0, rangoMin: 0, amplitud: 0, cumple1: false, cumple2: false, grupos: { bajo:0, medio:0, alto:0} }
     };
     
-    if (!db.platos || db.platos.length === 0) return result;
+    // 🛡️ PARACAÍDAS: Si db.platos es null o no es un array, devolvemos result vacío
+    if (!db || !Array.isArray(db.platos) || db.platos.length === 0) return result;
 
     const checkDate = (dateStr?: string) => {
       if (!dateStr) return false;
@@ -76,12 +77,12 @@ function useMenuIntelligencePRO(
       return false;
     };
 
-    const ventasFiltradas = (db.ventas_menu || []).filter(v => checkDate(v.date) && Num.parse(v.qty) > 0);
-    const cierresFiltrados = (db.cierres || []).filter(c => checkDate(c.date) && c.unitId === 'REST');
+    const ventasFiltradas = (Array.isArray(db.ventas_menu) ? db.ventas_menu : []).filter(v => checkDate(v?.date) && Num.parse(v?.qty) > 0);
+    const cierresFiltrados = (Array.isArray(db.cierres) ? db.cierres : []).filter(c => checkDate(c?.date) && c?.unitId === 'REST');
     
-    result.global.cajaRealNeta = cierresFiltrados.reduce((acc, c) => acc + (Num.parse(c.totalVenta) / 1.10), 0);
-    result.global.clientes = cierresFiltrados.reduce((acc, c) => acc + (Num.parse((c as any).clientes) || 0), 0);
-    result.global.totalComprasNetas = (db.albaranes || []).filter(a => checkDate(a.date) && (a.unitId === 'REST' || !a.unitId)).reduce((sum, alb) => sum + (Num.parse(alb.base) || 0), 0);
+    result.global.cajaRealNeta = cierresFiltrados.reduce((acc, c) => acc + (Num.parse(c?.totalVenta) / 1.10), 0);
+    result.global.clientes = cierresFiltrados.reduce((acc, c) => acc + (Num.parse((c as any)?.clientes) || 0), 0);
+    result.global.totalComprasNetas = (Array.isArray(db.albaranes) ? db.albaranes : []).filter(a => checkDate(a?.date) && (a?.unitId === 'REST' || !a?.unitId)).reduce((sum, alb) => sum + (Num.parse(alb?.base) || 0), 0);
     result.global.consumoReal = invInicial + result.global.totalComprasNetas - invFinal;
     result.global.foodCostReal = result.global.cajaRealNeta > 0 ? (result.global.consumoReal / result.global.cajaRealNeta) * 100 : 0;
 
@@ -99,15 +100,22 @@ function useMenuIntelligencePRO(
     const tempFamilias: Record<string, any> = {};
 
     const analisis = db.platos.map(p => {
-      const iva = getIva(p.category || 'General');
-      const precioBruto = Num.parse(p.price);
+      // 🛡️ PARACAÍDAS: Saneamiento de propiedades de cada plato
+      const platoName = String(p?.name || 'Plato sin nombre');
+      const cat = String(p?.category || 'General');
+      
+      const iva = getIva(cat);
+      const precioBruto = Num.parse(p?.price);
       const precioNeto = getNetPrice(precioBruto, iva);
       
-      const costeBruto = Num.parse(p.cost) || 0; 
-      const mermaPct = Num.parse((p as any).merma) || 0;
-      const costeRealEscandallo = mermaPct < 100 ? Num.round2(costeBruto / (1 - (mermaPct / 100))) : costeBruto;
+      const costeBruto = Num.parse(p?.cost) || 0; 
+      const mermaPct = Num.parse((p as any)?.merma) || 0;
       
-      const qty = ventasPorPlato[p.id] || 0;
+      // 🛡️ PARACAÍDAS: Evitar división por cero o mermas absurdas
+      const mermaSegura = mermaPct >= 100 ? 99 : mermaPct; 
+      const costeRealEscandallo = costeBruto > 0 ? Num.round2(costeBruto / (1 - (mermaSegura / 100))) : costeBruto;
+      
+      const qty = p?.id ? (ventasPorPlato[p.id] || 0) : 0;
       const margenUnitario = precioNeto - costeRealEscandallo;
       const fcUnitario = precioNeto > 0 ? (costeRealEscandallo / precioNeto) * 100 : 0;
       const precioIdeal = costeRealEscandallo > 0 ? Num.round2((costeRealEscandallo / (targetFC / 100)) * (1 + iva)) : precioBruto; 
@@ -125,7 +133,6 @@ function useMenuIntelligencePRO(
       result.global.totalCosteIdeal += totalCosteLinea;
       result.global.totalBeneficioBruto += totalBeneficioLinea;
 
-      const cat = p.category || 'General';
       if (!tempFamilias[cat]) tempFamilias[cat] = { qty: 0, ventasBrutas: 0, ventasNetas: 0, coste: 0, beneficio: 0 };
       tempFamilias[cat].qty += qty;
       tempFamilias[cat].ventasNetas += totalVentasNetoLinea;
@@ -134,14 +141,14 @@ function useMenuIntelligencePRO(
       tempFamilias[cat].beneficio += totalBeneficioLinea;
 
       return { 
-        ...p, qty, precioNeto, costeRealEscandallo, margenUnitario, fcUnitario, precioIdeal,
+        ...p, name: platoName, category: cat, qty, precioNeto, costeRealEscandallo, margenUnitario, fcUnitario, precioIdeal,
         totalVentasLinea: totalVentasNetoLinea, totalVentasBruto: totalVentasBrutoLinea, totalCosteLinea, totalBeneficioLinea 
       };
     });
 
     result.global.foodCostTeorico = result.global.totalTeoricoNeto > 0 ? (result.global.totalCosteIdeal / result.global.totalTeoricoNeto) * 100 : 0;
 
-    const categorias = [...new Set(analisis.map(p => p.category || 'General'))];
+    const categorias = [...new Set(analisis.map(p => p.category))];
     categorias.forEach(cat => {
       const platosFamilia = analisis.filter(p => p.category === cat);
       const activosFamilia = platosFamilia.filter(p => p.qty > 0);
@@ -196,7 +203,7 @@ function useMenuIntelligencePRO(
 
     result.mixTable.sort((a, b) => b.totalBeneficioLinea - a.totalBeneficioLinea);
     return result;
-  }, [db.platos, db.ventas_menu, db.cierres, db.albaranes, filterMode, filterValue, searchQ, targetFC, invInicial, invFinal, costesFijos]);
+  }, [db?.platos, db?.ventas_menu, db?.cierres, db?.albaranes, filterMode, filterValue, searchQ, targetFC, invInicial, invFinal, costesFijos]);
 }
 
 /* =======================================================
@@ -302,7 +309,6 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
         const newPlatos = [...(db.platos || [])]; const newVentas = [...(db.ventas_menu || [])];
         let count = 0;
         
-        // Asumimos que la primera fila es cabecera, iteramos desde la 1
         rows.slice(1).forEach(row => {
           const name = String(row[colName] || '').trim(); 
           const sold = Num.parse(row[colQty]); 
@@ -343,7 +349,6 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
     setEditingPlato(null);
   };
 
-  // --- RENDER DE CUADRANTES BCG COMPACTADO ---
   const renderQuad = (title: string, subtitle: string, color: string, list: any[]) => (
     <div className={`bg-white p-4 rounded-3xl border border-slate-200 shadow-sm h-72 flex flex-col group`}>
       <div className="flex justify-between items-start mb-2 border-b border-slate-100 pb-2">
@@ -362,7 +367,7 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
   );
 
   return (
-    <div className="animate-fade-in space-y-4 pb-24 relative max-w-[1600px] mx-auto">
+    <div className="animate-fade-in space-y-4 pb-24 relative max-w-[1600px] mx-auto text-xs">
       
       <AnimatePresence>
         {isScanning && (
@@ -374,59 +379,59 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
       </AnimatePresence>
 
       {/* 🚀 HEADER CON KPIs (DISEÑO COMPACTO Y LIMPIO) */}
-      <header className="bg-white p-5 rounded-[2rem] shadow-sm border border-slate-200">
+      <header className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
         <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 mb-4 border-b border-slate-100 pb-4">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100">
-              <ChefHat className="w-6 h-6" />
+            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg border border-indigo-100">
+              <ChefHat className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-slate-800 tracking-tight">Análisis de Carta</h2>
-              <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-0.5">Ingeniería de Menú & Mermas</p>
+              <h2 className="text-base font-bold text-slate-800 tracking-tight">Análisis de Carta</h2>
+              <p className="text-[9px] text-slate-500 uppercase mt-0.5">Ingeniería de Menú & Mermas</p>
             </div>
           </div>
           
-          <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-xl border border-slate-200">
-            <select value={filterMode} onChange={(e) => setFilterMode(e.target.value as FilterMode)} className="bg-white text-[10px] font-bold uppercase py-1.5 px-2 rounded-lg border border-slate-200 outline-none text-slate-700 cursor-pointer">
+          <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-lg border border-slate-200">
+            <select value={filterMode} onChange={(e) => setFilterMode(e.target.value as FilterMode)} className="bg-white text-[9px] font-bold uppercase py-1 px-2 rounded border border-slate-200 outline-none text-slate-700 cursor-pointer">
               <option value="day">Día</option><option value="month">Mes</option><option value="year">Año</option>
             </select>
-            <input type={filterMode === 'year' ? 'number' : (filterMode === 'month' ? 'month' : 'date')} value={filterValue} onChange={(e) => setFilterValue(e.target.value)} className="bg-transparent font-bold text-slate-700 text-xs outline-none px-2 cursor-pointer" />
+            <input type={filterMode === 'year' ? 'number' : (filterMode === 'month' ? 'month' : 'date')} value={filterValue} onChange={(e) => setFilterValue(e.target.value)} className="bg-transparent font-bold text-slate-700 text-[11px] outline-none px-2 cursor-pointer" />
           </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-          <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl">
-            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Ventas Netas</p>
-            <p className="text-lg font-black text-slate-800">{Num.fmt(data.global.totalTeoricoNeto)}</p>
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+          <div className="p-2 bg-slate-50 border border-slate-100 rounded-lg">
+            <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-1">Ventas Netas</p>
+            <p className="text-sm font-black text-slate-800">{Num.fmt(data.global.totalTeoricoNeto)}</p>
           </div>
-          <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl">
-            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Beneficio Bruto</p>
-            <p className="text-lg font-black text-emerald-600">{Num.fmt(data.global.totalBeneficioBruto)}</p>
+          <div className="p-2 bg-slate-50 border border-slate-100 rounded-lg">
+            <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-1">Beneficio Bruto</p>
+            <p className="text-sm font-black text-emerald-600">{Num.fmt(data.global.totalBeneficioBruto)}</p>
           </div>
-          <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl">
-            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Ticket Medio</p>
-            <p className="text-lg font-black text-indigo-600">{Num.fmt(data.global.ticketMedio)}</p>
+          <div className="p-2 bg-slate-50 border border-slate-100 rounded-lg">
+            <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-1">Ticket Medio</p>
+            <p className="text-sm font-black text-indigo-600">{Num.fmt(data.global.ticketMedio)}</p>
           </div>
-          <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl">
-            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Refs/Cliente</p>
-            <p className="text-lg font-black text-indigo-600">{Num.round2(data.global.nrc)}</p>
+          <div className="p-2 bg-slate-50 border border-slate-100 rounded-lg">
+            <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-1">Refs/Cliente</p>
+            <p className="text-sm font-black text-indigo-600">{Num.round2(data.global.nrc)}</p>
           </div>
-          <div className="col-span-2 bg-slate-800 p-3 rounded-xl flex justify-between items-center text-white">
+          <div className="col-span-2 bg-slate-800 p-2 rounded-lg flex justify-between items-center text-white">
             <div>
-              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1">Food Cost Real vs Teórico</p>
+              <p className="text-[8px] font-bold text-slate-400 uppercase tracking-widest mb-1">Food Cost Real vs Teórico</p>
               <div className="flex items-end gap-1.5">
-                <p className={cn("text-lg font-black", data.global.foodCostReal > data.global.foodCostTeorico + 2 ? "text-rose-400" : "text-emerald-400")}>{Num.round2(data.global.foodCostReal)}%</p>
-                <p className="text-xs font-bold text-slate-400 mb-0.5">/ {Num.round2(data.global.foodCostTeorico)}%</p>
+                <p className={cn("text-sm font-black", data.global.foodCostReal > data.global.foodCostTeorico + 2 ? "text-rose-400" : "text-emerald-400")}>{Num.round2(data.global.foodCostReal)}%</p>
+                <p className="text-[10px] font-bold text-slate-400 mb-0.5">/ {Num.round2(data.global.foodCostTeorico)}%</p>
               </div>
             </div>
-            <Scale className="w-6 h-6 text-slate-600" />
+            <Scale className="w-5 h-5 text-slate-600" />
           </div>
         </div>
       </header>
 
       {/* 🚀 TABS Y BOTONES IA/OCR (ESTILO INTERRUPTOR) */}
       <div className="flex flex-col md:flex-row justify-between items-center gap-3">
-        <div className="flex bg-white p-1 rounded-xl border border-slate-200 w-full md:w-auto shadow-sm">
+        <div className="flex bg-white p-1 rounded-lg border border-slate-200 w-full md:w-auto shadow-sm">
           {[
             { id: 'financials', label: 'Dashboard' },
             { id: 'matrix', label: 'BCG' },
@@ -434,21 +439,21 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
             { id: 'omnes', label: 'Omnes' },
             { id: 'simulator', label: 'Simulador' }
           ].map(t => (
-            <button key={t.id} onClick={() => setViewTab(t.id as ViewTab)} className={cn("px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase transition-colors", viewTab === t.id ? "bg-indigo-600 text-white" : "text-slate-500 hover:bg-slate-50")}>
+            <button key={t.id} onClick={() => setViewTab(t.id as ViewTab)} className={cn("px-3 py-1.5 rounded-md text-[9px] font-bold uppercase transition-colors", viewTab === t.id ? "bg-indigo-600 text-white" : "text-slate-500 hover:bg-slate-50")}>
               {t.label}
             </button>
           ))}
         </div>
 
         <div className="flex items-center gap-2 w-full md:w-auto">
-          <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-sm w-full md:w-48">
-            <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-            <input type="text" placeholder="Buscar plato..." value={searchQ} onChange={(e) => setSearchQ(e.target.value)} className="text-[11px] font-semibold outline-none w-full bg-transparent" />
+          <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-sm w-full md:w-48">
+            <Search className="w-3 h-3 text-slate-400 shrink-0" />
+            <input type="text" placeholder="Buscar plato..." value={searchQ} onChange={(e) => setSearchQ(e.target.value)} className="text-[10px] font-semibold outline-none w-full bg-transparent" />
           </div>
           
-          <button onClick={() => setEditingPlato({ id: 'p-' + Date.now(), name: '', price: 0, cost: 0, category: 'General', iva: 10, merma: 0 })} className="bg-slate-800 text-white p-2 rounded-xl shadow-sm hover:bg-slate-700 transition" title="Añadir Plato"><Plus className="w-4 h-4" /></button>
-          <label className="bg-emerald-500 text-white p-2 rounded-xl shadow-sm hover:bg-emerald-600 transition cursor-pointer" title="Subir Excel TPV"><FileText className="w-4 h-4" /><input type="file" ref={fileInputRef} onChange={handleImportExcel} className="hidden" accept=".csv, .xlsx, .xls" /></label>
-          <label className="bg-indigo-600 text-white p-2 rounded-xl shadow-sm hover:bg-indigo-700 transition cursor-pointer" title="Leer Ticket Z con IA"><Camera className="w-4 h-4" /><input type="file" ref={iaInputRef} onChange={handleUploadIA} className="hidden" accept=".pdf, image/*" /></label>
+          <button onClick={() => setEditingPlato({ id: 'p-' + Date.now(), name: '', price: 0, cost: 0, category: 'General', iva: 10, merma: 0 })} className="bg-slate-800 text-white p-1.5 rounded-lg shadow-sm hover:bg-slate-700 transition" title="Añadir Plato"><Plus className="w-4 h-4" /></button>
+          <label className="bg-emerald-500 text-white p-1.5 rounded-lg shadow-sm hover:bg-emerald-600 transition cursor-pointer" title="Subir Excel TPV"><FileText className="w-4 h-4" /><input type="file" ref={fileInputRef} onChange={handleImportExcel} className="hidden" accept=".csv, .xlsx, .xls" /></label>
+          <label className="bg-indigo-600 text-white p-1.5 rounded-lg shadow-sm hover:bg-indigo-700 transition cursor-pointer" title="Leer Ticket Z con IA"><Camera className="w-4 h-4" /><input type="file" ref={iaInputRef} onChange={handleUploadIA} className="hidden" accept=".pdf, image/*" /></label>
         </div>
       </div>
 
@@ -457,42 +462,42 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
         
         {/* PANEL FINANCIERO */}
         {viewTab === 'financials' && (
-          <motion.div key="fin" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-white p-5 rounded-[2rem] border border-slate-200 shadow-sm">
-              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-widest mb-4 flex items-center gap-1.5"><Receipt className="w-4 h-4 text-indigo-500"/> Análisis de Consumo</h3>
-              <div className="grid grid-cols-2 gap-3 mb-4">
-                <div><label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Inv. Inicial (€)</label><input type="number" value={invInicial || ''} onChange={e => setInvInicial(Number(e.target.value))} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg text-sm font-bold outline-none focus:border-indigo-400" /></div>
-                <div><label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Inv. Final (€)</label><input type="number" value={invFinal || ''} onChange={e => setInvFinal(Number(e.target.value))} className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg text-sm font-bold outline-none focus:border-indigo-400" /></div>
+          <motion.div key="fin" initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+              <h3 className="text-[11px] font-bold text-slate-700 uppercase tracking-widest mb-3 flex items-center gap-1.5"><Receipt className="w-3 h-3 text-indigo-500"/> Análisis de Consumo</h3>
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                <div><label className="text-[8px] font-bold text-slate-400 uppercase block mb-1">Inv. Inicial (€)</label><input type="number" value={invInicial || ''} onChange={e => setInvInicial(Number(e.target.value))} className="w-full bg-slate-50 border border-slate-200 p-1.5 rounded text-[11px] font-bold outline-none focus:border-indigo-400" /></div>
+                <div><label className="text-[8px] font-bold text-slate-400 uppercase block mb-1">Inv. Final (€)</label><input type="number" value={invFinal || ''} onChange={e => setInvFinal(Number(e.target.value))} className="w-full bg-slate-50 border border-slate-200 p-1.5 rounded text-[11px] font-bold outline-none focus:border-indigo-400" /></div>
               </div>
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2">
-                <div className="flex justify-between text-[11px] font-semibold text-slate-500"><span>+ Inventario Inicial</span><span>{Num.fmt(invInicial)}</span></div>
-                <div className="flex justify-between text-[11px] font-semibold text-slate-500"><span>+ Compras Albaranes</span><span>{Num.fmt(data.global.totalComprasNetas)}</span></div>
-                <div className="flex justify-between text-[11px] font-semibold text-slate-500"><span>- Inventario Final</span><span className="text-rose-500">-{Num.fmt(invFinal)}</span></div>
-                <div className="border-t border-slate-200 pt-2 flex justify-between items-center mt-2">
-                  <span className="text-[10px] font-bold uppercase text-slate-800">Consumo Real</span>
-                  <span className="text-base font-black text-slate-900">{Num.fmt(data.global.consumoReal)}</span>
+              <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-1.5">
+                <div className="flex justify-between text-[10px] font-semibold text-slate-500"><span>+ Inventario Inicial</span><span>{Num.fmt(invInicial)}</span></div>
+                <div className="flex justify-between text-[10px] font-semibold text-slate-500"><span>+ Compras Albaranes</span><span>{Num.fmt(data.global.totalComprasNetas)}</span></div>
+                <div className="flex justify-between text-[10px] font-semibold text-slate-500"><span>- Inventario Final</span><span className="text-rose-500">-{Num.fmt(invFinal)}</span></div>
+                <div className="border-t border-slate-200 pt-1.5 flex justify-between items-center mt-1.5">
+                  <span className="text-[9px] font-bold uppercase text-slate-800">Consumo Real</span>
+                  <span className="text-sm font-black text-slate-900">{Num.fmt(data.global.consumoReal)}</span>
                 </div>
               </div>
             </div>
 
-            <div className="bg-slate-900 p-5 rounded-[2rem] text-white shadow-xl">
-              <h3 className="text-xs font-bold text-amber-400 uppercase tracking-widest mb-4 flex items-center gap-1.5"><TrendingUp className="w-4 h-4"/> Punto de Equilibrio</h3>
-              <div className="mb-4">
-                <label className="text-[9px] font-bold text-slate-400 uppercase block mb-1">Costes Fijos Mensuales (€)</label>
-                <input type="number" value={costesFijos} onChange={e => setCostesFijos(Number(e.target.value))} className="w-full bg-slate-800 border border-slate-700 p-2.5 rounded-xl text-sm font-black text-white outline-none focus:border-amber-500" />
+            <div className="bg-slate-900 p-4 rounded-xl text-white shadow-xl">
+              <h3 className="text-[11px] font-bold text-amber-400 uppercase tracking-widest mb-3 flex items-center gap-1.5"><TrendingUp className="w-3 h-3"/> Punto de Equilibrio</h3>
+              <div className="mb-3">
+                <label className="text-[8px] font-bold text-slate-400 uppercase block mb-1">Costes Fijos Mensuales (€)</label>
+                <input type="number" value={costesFijos} onChange={e => setCostesFijos(Number(e.target.value))} className="w-full bg-slate-800 border border-slate-700 p-1.5 rounded text-[11px] font-black text-white outline-none focus:border-amber-500" />
               </div>
-              <div className="space-y-3">
-                <div className="flex justify-between items-center border-b border-slate-800 pb-2">
-                  <span className="text-[11px] text-slate-400 font-semibold uppercase">Margen Contribución</span>
-                  <span className="text-base font-bold">{Num.round2(data.global.mcPct * 100)}%</span>
+              <div className="space-y-2">
+                <div className="flex justify-between items-center border-b border-slate-800 pb-1.5">
+                  <span className="text-[10px] text-slate-400 font-semibold uppercase">Margen Contribución</span>
+                  <span className="text-xs font-bold">{Num.round2(data.global.mcPct * 100)}%</span>
                 </div>
-                <div className="flex justify-between items-center border-b border-slate-800 pb-2">
-                  <span className="text-[11px] text-slate-400 font-semibold uppercase">Ventas Necesarias (P.E.)</span>
-                  <span className="text-base font-bold text-emerald-400">{Num.fmt(data.global.breakEvenVentas)}</span>
+                <div className="flex justify-between items-center border-b border-slate-800 pb-1.5">
+                  <span className="text-[10px] text-slate-400 font-semibold uppercase">Ventas Necesarias (P.E.)</span>
+                  <span className="text-xs font-bold text-emerald-400">{Num.fmt(data.global.breakEvenVentas)}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-[11px] text-slate-400 font-semibold uppercase">Clientes Necesarios</span>
-                  <span className="text-base font-bold text-indigo-400">{Math.ceil(data.global.breakEvenClientes)} pax</span>
+                  <span className="text-[10px] text-slate-400 font-semibold uppercase">Clientes Necesarios</span>
+                  <span className="text-xs font-bold text-indigo-400">{Math.ceil(data.global.breakEvenClientes)} pax</span>
                 </div>
               </div>
             </div>
@@ -501,11 +506,11 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
 
         {/* MATRIZ BCG COMPACTA */}
         {viewTab === 'matrix' && (
-          <motion.div key="matrix" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-6">
+          <motion.div key="matrix" initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} className="space-y-4">
             {Object.entries(data.familiasData).map(([familia, fData]: any) => (
-              <div key={familia} className="bg-white p-5 rounded-[2rem] border border-slate-200 shadow-sm">
-                <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide mb-3 pl-1">{familia}</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div key={familia} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide mb-2 pl-1">{familia}</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
                   {renderQuad('⭐ Estrellas', 'Alta Vta / Alto Bº', 'emerald', fData.stars)}
                   {renderQuad('🐴 Vacas', 'Alta Vta / Bajo Bº', 'amber', fData.horses)}
                   {renderQuad('❓ Puzzles', 'Baja Vta / Alto Bº', 'indigo', fData.puzzles)}
@@ -518,50 +523,50 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
 
         {/* TABLA MIX DE VENTAS */}
         {viewTab === 'table' && (
-          <motion.div key="table" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-            <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden">
-              <div className="p-3 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-2">Rentabilidad</p>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold text-slate-600 uppercase">FC% Objetivo:</span>
-                  <input type="number" value={targetFC} onChange={e => setTargetFC(Number(e.target.value))} className="w-14 p-1 text-center text-xs font-bold bg-white border border-slate-300 rounded outline-none" />
+          <motion.div key="table" initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }}>
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="p-2 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest pl-2">Rentabilidad</p>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[9px] font-bold text-slate-600 uppercase">FC% Objetivo:</span>
+                  <input type="number" value={targetFC} onChange={e => setTargetFC(Number(e.target.value))} className="w-12 p-0.5 text-center text-[10px] font-bold bg-white border border-slate-300 rounded outline-none" />
                 </div>
               </div>
               <div className="overflow-x-auto custom-scrollbar">
                 <table className="w-full text-left border-collapse min-w-[800px]">
                   <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200 text-[9px] font-bold text-slate-500 uppercase tracking-wider">
-                      <th className="p-3">Plato</th><th className="p-3 text-center">Uds</th><th className="p-3 text-center">Mix %</th>
-                      <th className="p-3 text-right">PVP Neto</th><th className="p-3 text-right">Coste MP</th>
-                      <th className="p-3 text-center">FC % Real</th>
-                      <th className="p-3 text-right text-indigo-600 bg-indigo-50/50">PVP Bruto Ideal</th>
-                      <th className="p-3 text-right">Bº Ud.</th><th className="p-3 text-right text-emerald-600">Total Bº</th>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-[8px] font-bold text-slate-500 uppercase tracking-wider">
+                      <th className="p-2">Plato</th><th className="p-2 text-center">Uds</th><th className="p-2 text-center">Mix %</th>
+                      <th className="p-2 text-right">PVP Neto</th><th className="p-2 text-right">Coste MP</th>
+                      <th className="p-2 text-center">FC % Real</th>
+                      <th className="p-2 text-right text-indigo-600 bg-indigo-50/50">PVP Bruto Ideal</th>
+                      <th className="p-2 text-right">Bº Ud.</th><th className="p-2 text-right text-emerald-600">Total Bº</th>
                     </tr>
                   </thead>
-                  <tbody className="text-[11px] font-semibold text-slate-700 divide-y divide-slate-100">
+                  <tbody className="text-[10px] font-semibold text-slate-700 divide-y divide-slate-100">
                     {data.mixTable.map(p => (
                       <tr key={p.id} onClick={() => setEditingPlato(p)} className="hover:bg-indigo-50/50 cursor-pointer transition-colors">
-                        <td className="p-3 text-slate-900 flex items-center gap-1.5">{p.name} {p.fcUnitario > targetFC && <AlertTriangle className="w-3 h-3 text-rose-500" />}</td>
-                        <td className="p-3 text-center text-slate-900 font-bold">{p.qty}</td>
-                        <td className="p-3 text-center text-slate-500">{Num.round2(p.mixPct)}%</td>
-                        <td className="p-3 text-right">{Num.fmt(p.precioNeto)}</td>
-                        <td className="p-3 text-right text-rose-500">{Num.fmt(p.costeRealEscandallo)}</td>
-                        <td className="p-3 text-center"><span className={cn("px-1.5 py-0.5 rounded", p.fcUnitario > targetFC ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-600")}>{Num.round2(p.fcUnitario)}%</span></td>
-                        <td className="p-3 text-right text-indigo-600 bg-indigo-50/50 font-bold">{Num.fmt(p.precioIdeal)}</td>
-                        <td className="p-3 text-right">{Num.fmt(p.margenUnitario)}</td>
-                        <td className="p-3 text-right text-emerald-600 font-bold">{Num.fmt(p.totalBeneficioLinea)}</td>
+                        <td className="p-2 text-slate-900 flex items-center gap-1">{p.name} {p.fcUnitario > targetFC && <AlertTriangle className="w-2.5 h-2.5 text-rose-500" />}</td>
+                        <td className="p-2 text-center text-slate-900 font-bold">{p.qty}</td>
+                        <td className="p-2 text-center text-slate-500">{Num.round2(p.mixPct)}%</td>
+                        <td className="p-2 text-right">{Num.fmt(p.precioNeto)}</td>
+                        <td className="p-2 text-right text-rose-500">{Num.fmt(p.costeRealEscandallo)}</td>
+                        <td className="p-2 text-center"><span className={cn("px-1.5 py-0.5 rounded", p.fcUnitario > targetFC ? "bg-rose-100 text-rose-700" : "bg-slate-100 text-slate-600")}>{Num.round2(p.fcUnitario)}%</span></td>
+                        <td className="p-2 text-right text-indigo-600 bg-indigo-50/50 font-bold">{Num.fmt(p.precioIdeal)}</td>
+                        <td className="p-2 text-right">{Num.fmt(p.margenUnitario)}</td>
+                        <td className="p-2 text-right text-emerald-600 font-bold">{Num.fmt(p.totalBeneficioLinea)}</td>
                       </tr>
                     ))}
                   </tbody>
                   {data.mixTable.length > 0 && (
-                    <tfoot className="bg-slate-900 text-white font-bold text-xs">
+                    <tfoot className="bg-slate-900 text-white font-bold text-[9px]">
                       <tr>
-                        <td className="p-3">TOTALES</td>
-                        <td className="p-3 text-center">{data.mixTable.reduce((acc, p) => acc + p.qty, 0)}</td>
-                        <td className="p-3 text-center">100%</td>
-                        <td className="p-3" colSpan={4}></td>
-                        <td className="p-3 text-right text-indigo-400">{Num.fmt(data.global.totalBeneficioBruto)}</td>
-                        <td className="p-3 text-right text-emerald-400">{Num.fmt(data.global.totalTeoricoNeto)}</td>
+                        <td className="p-2">TOTALES</td>
+                        <td className="p-2 text-center">{data.mixTable.reduce((acc, p) => acc + p.qty, 0)}</td>
+                        <td className="p-2 text-center">100%</td>
+                        <td className="p-2" colSpan={4}></td>
+                        <td className="p-2 text-right text-indigo-400">{Num.fmt(data.global.totalBeneficioBruto)}</td>
+                        <td className="p-2 text-right text-emerald-400">{Num.fmt(data.global.totalTeoricoNeto)}</td>
                       </tr>
                     </tfoot>
                   )}
@@ -573,32 +578,32 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
 
         {/* OMNES COMPACTO */}
         {viewTab === 'omnes' && (
-          <motion.div key="omnes" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-4">
+          <motion.div key="omnes" initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} className="space-y-4">
              {Object.entries(data.familiasData).map(([familia, fData]: any) => (
-               <div key={familia} className="bg-white p-5 rounded-[2rem] border border-slate-200 shadow-sm">
-                  <h3 className="text-sm font-bold text-slate-800 uppercase mb-4 flex items-center gap-2"><Target className="w-4 h-4 text-indigo-500"/> {familia}</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
-                      <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">P. Medio Ofertado</p>
-                      <p className="text-xl font-bold text-slate-800">{Num.fmt(fData.omnes.pMedioOfertado)}</p>
+               <div key={familia} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                  <h3 className="text-xs font-bold text-slate-800 uppercase mb-3 flex items-center gap-1.5"><Target className="w-3 h-3 text-indigo-500"/> {familia}</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mb-3">
+                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 text-center">
+                      <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mb-1">P. Medio Ofertado</p>
+                      <p className="text-sm font-bold text-slate-800">{Num.fmt(fData.omnes.pMedioOfertado)}</p>
                     </div>
-                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
-                      <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">P. Medio Demandado</p>
-                      <p className="text-xl font-bold text-indigo-600">{Num.fmt(fData.omnes.pMedioDemandado)}</p>
+                    <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 text-center">
+                      <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mb-1">P. Medio Demandado</p>
+                      <p className="text-sm font-bold text-indigo-600">{Num.fmt(fData.omnes.pMedioDemandado)}</p>
                     </div>
-                    <div className={cn("p-4 rounded-2xl border text-center", fData.omnes.ratio >= 0.9 && fData.omnes.ratio <= 1 ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200")}>
-                      <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">Ratio Omnes</p>
-                      <p className={cn("text-2xl font-black", fData.omnes.ratio >= 0.9 && fData.omnes.ratio <= 1 ? "text-emerald-600" : "text-amber-600")}>{Num.round2(fData.omnes.ratio)}</p>
+                    <div className={cn("p-3 rounded-lg border text-center", fData.omnes.ratio >= 0.9 && fData.omnes.ratio <= 1 ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200")}>
+                      <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mb-1">Ratio Omnes</p>
+                      <p className={cn("text-base font-black", fData.omnes.ratio >= 0.9 && fData.omnes.ratio <= 1 ? "text-emerald-600" : "text-amber-600")}>{Num.round2(fData.omnes.ratio)}</p>
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div className={cn("p-4 rounded-2xl border shadow-sm", fData.omnes.cumple1 ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200")}>
-                      <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">Principio 1: Dispersión</p>
-                      <p className="text-[11px] font-semibold text-slate-800">Baja: {fData.omnes.grupos.bajo} | Media: {fData.omnes.grupos.medio} | Alta: {fData.omnes.grupos.alto}</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <div className={cn("p-3 rounded-lg border shadow-sm", fData.omnes.cumple1 ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200")}>
+                      <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mb-1">Principio 1: Dispersión</p>
+                      <p className="text-[9px] font-semibold text-slate-800">Baja: {fData.omnes.grupos.bajo} | Media: {fData.omnes.grupos.medio} | Alta: {fData.omnes.grupos.alto}</p>
                     </div>
-                    <div className={cn("p-4 rounded-2xl border shadow-sm", fData.omnes.cumple2 ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200")}>
-                      <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1">Principio 2: Amplitud Gama</p>
-                      <p className="text-[11px] font-semibold text-slate-800">Amplitud actual: {Num.round2(fData.omnes.amplitud)} (Máx {fData.omnes.max} / Mín {fData.omnes.min})</p>
+                    <div className={cn("p-3 rounded-lg border shadow-sm", fData.omnes.cumple2 ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200")}>
+                      <p className="text-[8px] font-bold text-slate-500 uppercase tracking-widest mb-1">Principio 2: Amplitud Gama</p>
+                      <p className="text-[9px] font-semibold text-slate-800">Amplitud actual: {Num.round2(fData.omnes.amplitud)} (Máx {fData.omnes.max} / Mín {fData.omnes.min})</p>
                     </div>
                   </div>
                </div>
@@ -608,24 +613,24 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
 
         {/* SIMULADOR COMPACTO */}
         {viewTab === 'simulator' && (
-          <motion.div key="sim" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="bg-slate-900 rounded-[2.5rem] p-6 shadow-xl text-white">
-            <div className="mb-4 flex justify-between items-center border-b border-slate-800 pb-4">
+          <motion.div key="sim" initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} className="bg-slate-900 rounded-xl p-4 shadow-xl text-white">
+            <div className="mb-3 flex justify-between items-center border-b border-slate-800 pb-2">
               <div>
-                <h3 className="text-lg font-bold text-amber-400 flex items-center gap-2"><Calculator className="w-5 h-5" /> Simulador de Precios</h3>
+                <h3 className="text-sm font-bold text-amber-400 flex items-center gap-1.5"><Calculator className="w-4 h-4" /> Simulador de Precios</h3>
               </div>
-              <button onClick={() => setSimulatedPlatos(JSON.parse(JSON.stringify(data.mixTable)))} className="bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase hover:bg-slate-700 transition">Resetear</button>
+              <button onClick={() => setSimulatedPlatos(JSON.parse(JSON.stringify(data.mixTable)))} className="bg-slate-800 text-slate-300 px-2 py-1 rounded text-[9px] font-bold uppercase hover:bg-slate-700 transition">Resetear</button>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
-              <div className="bg-slate-800 p-4 rounded-2xl">
-                <p className="text-[9px] text-slate-400 uppercase tracking-widest mb-1">Proyección Beneficio Bruto</p>
-                <p className="text-2xl font-black text-emerald-400">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-4">
+              <div className="bg-slate-800 p-3 rounded-lg">
+                <p className="text-[8px] text-slate-400 uppercase tracking-widest mb-1">Proyección Beneficio Bruto</p>
+                <p className="text-lg font-black text-emerald-400">
                   {Num.fmt(simulatedPlatos.reduce((acc, p) => acc + ((p.price / (1 + getIva(p.category))) - p.costeRealEscandallo) * p.qty, 0))}
                 </p>
               </div>
-              <div className="bg-slate-800 p-4 rounded-2xl">
-                <p className="text-[9px] text-slate-400 uppercase tracking-widest mb-1">Proyección Food Cost %</p>
-                <p className="text-2xl font-black text-amber-400">
+              <div className="bg-slate-800 p-3 rounded-lg">
+                <p className="text-[8px] text-slate-400 uppercase tracking-widest mb-1">Proyección Food Cost %</p>
+                <p className="text-lg font-black text-amber-400">
                   {Num.round2(
                     (simulatedPlatos.reduce((acc, p) => acc + (p.costeRealEscandallo * p.qty), 0) / 
                     (simulatedPlatos.reduce((acc, p) => acc + ((p.price / (1 + getIva(p.category))) * p.qty), 0) || 1)) * 100
@@ -634,27 +639,27 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
               </div>
             </div>
 
-            <div className="space-y-1.5 max-h-[50vh] overflow-y-auto custom-scrollbar pr-2">
+            <div className="space-y-1 max-h-[50vh] overflow-y-auto custom-scrollbar pr-1">
               {simulatedPlatos.map((p, i) => {
                 const iva = getIva(p.category);
                 const pvpNeto = p.price / (1 + iva);
                 const pFC = pvpNeto > 0 ? (p.costeRealEscandallo / pvpNeto) * 100 : 0;
                 
                 return (
-                  <div key={p.id} className="flex flex-col md:flex-row items-center justify-between bg-slate-800/50 p-3 rounded-xl gap-3 border border-slate-700">
-                    <div className="flex-1 min-w-0 w-full"><p className="font-semibold text-xs truncate text-white">{p.name}</p><p className="text-[9px] text-slate-400">Vendidos: {p.qty}</p></div>
-                    <div className="flex items-center gap-3 w-full md:w-auto">
+                  <div key={p.id} className="flex flex-col md:flex-row items-center justify-between bg-slate-800/50 p-2 rounded-lg gap-2 border border-slate-700">
+                    <div className="flex-1 min-w-0 w-full"><p className="font-semibold text-[10px] truncate text-white">{p.name}</p><p className="text-[8px] text-slate-400">Vendidos: {p.qty}</p></div>
+                    <div className="flex items-center gap-2 w-full md:w-auto">
                       <div>
-                        <label className="text-[8px] text-slate-500 uppercase block mb-0.5">Coste (Mermado)</label>
-                        <input type="number" step="0.01" value={p.costeRealEscandallo} onChange={(e) => { const n = [...simulatedPlatos]; n[i].costeRealEscandallo = Number(e.target.value); setSimulatedPlatos(n); }} className="w-20 bg-slate-900 border border-slate-700 rounded-lg p-1.5 text-rose-400 font-bold text-center text-sm outline-none focus:border-indigo-500" />
+                        <label className="text-[7px] text-slate-500 uppercase block mb-0.5">Coste (Mermado)</label>
+                        <input type="number" step="0.01" value={p.costeRealEscandallo} onChange={(e) => { const n = [...simulatedPlatos]; n[i].costeRealEscandallo = Number(e.target.value); setSimulatedPlatos(n); }} className="w-16 bg-slate-900 border border-slate-700 rounded p-1 text-rose-400 font-bold text-center text-[10px] outline-none focus:border-indigo-500" />
                       </div>
                       <div>
-                        <label className="text-[8px] text-slate-500 uppercase block mb-0.5">PVP Bruto</label>
-                        <input type="number" step="0.01" value={p.price} onChange={(e) => { const n = [...simulatedPlatos]; n[i].price = Number(e.target.value); setSimulatedPlatos(n); }} className="w-20 bg-slate-900 border border-slate-700 rounded-lg p-1.5 text-emerald-400 font-bold text-center text-sm outline-none focus:border-indigo-500" />
+                        <label className="text-[7px] text-slate-500 uppercase block mb-0.5">PVP Bruto</label>
+                        <input type="number" step="0.01" value={p.price} onChange={(e) => { const n = [...simulatedPlatos]; n[i].price = Number(e.target.value); setSimulatedPlatos(n); }} className="w-16 bg-slate-900 border border-slate-700 rounded p-1 text-emerald-400 font-bold text-center text-[10px] outline-none focus:border-indigo-500" />
                       </div>
-                      <div className="text-right w-12">
-                        <label className="text-[8px] text-slate-500 uppercase block mb-0.5">Nuevo FC</label>
-                        <span className={cn("font-bold text-xs", pFC > targetFC ? "text-rose-500" : "text-emerald-500")}>
+                      <div className="text-right w-10">
+                        <label className="text-[7px] text-slate-500 uppercase block mb-0.5">Nuevo FC</label>
+                        <span className={cn("font-bold text-[9px]", pFC > targetFC ? "text-rose-500" : "text-emerald-500")}>
                           {Num.round2(pFC)}%
                         </span>
                       </div>
@@ -673,43 +678,43 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
         {editingPlato && (
           <div className="fixed inset-0 z-[9999] flex justify-center items-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setEditingPlato(null)} className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" />
-            <motion.div initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }} className="bg-white p-6 rounded-[2rem] shadow-2xl w-full max-w-sm relative z-10">
-              <h3 className="font-bold text-slate-800 text-lg mb-4 flex items-center gap-2 border-b border-slate-100 pb-3">
-                <ChefHat className="w-5 h-5 text-indigo-500" /> {db.platos?.some(p => p.id === editingPlato.id) ? 'Editar' : 'Nuevo'} Plato
+            <motion.div initial={{ scale: 0.95, opacity: 0, y: 10 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 10 }} className="bg-white p-5 rounded-xl shadow-2xl w-full max-w-sm relative z-10">
+              <h3 className="font-bold text-slate-800 text-sm mb-3 flex items-center gap-1.5 border-b border-slate-100 pb-2">
+                <ChefHat className="w-4 h-4 text-indigo-500" /> {db.platos?.some(p => p.id === editingPlato.id) ? 'Editar' : 'Nuevo'} Plato
               </h3>
-              <form onSubmit={handleSavePlato} className="space-y-4">
+              <form onSubmit={handleSavePlato} className="space-y-3">
                 <div>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase ml-1 block mb-1">Nombre del Plato</label>
-                  <input value={editingPlato.name} onChange={(e) => setEditingPlato({ ...editingPlato, name: e.target.value })} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold outline-none focus:border-indigo-400" required />
+                  <label className="text-[9px] font-bold text-slate-500 uppercase ml-1 block mb-1">Nombre del Plato</label>
+                  <input value={editingPlato.name} onChange={(e) => setEditingPlato({ ...editingPlato, name: e.target.value })} className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold outline-none focus:border-indigo-400" required />
                 </div>
                 
-                <div className="bg-rose-50 border border-rose-100 p-3 rounded-xl space-y-3">
+                <div className="bg-rose-50 border border-rose-100 p-2 rounded-lg space-y-2">
                   <div className="flex gap-2">
                     <div className="flex-1">
-                      <label className="text-[9px] font-bold text-rose-500 uppercase ml-1 block mb-1">Coste Bruto (€)</label>
-                      <input type="number" step="0.01" value={editingPlato.cost} onChange={(e) => setEditingPlato({ ...editingPlato, cost: Number(e.target.value) })} className="w-full p-2.5 bg-white rounded-lg text-sm font-bold text-rose-600 border border-rose-200 outline-none focus:border-rose-400" required />
+                      <label className="text-[8px] font-bold text-rose-500 uppercase ml-1 block mb-1">Coste Bruto (€)</label>
+                      <input type="number" step="0.01" value={editingPlato.cost} onChange={(e) => setEditingPlato({ ...editingPlato, cost: Number(e.target.value) })} className="w-full p-1.5 bg-white rounded text-[11px] font-bold text-rose-600 border border-rose-200 outline-none focus:border-rose-400" required />
                     </div>
-                    <div className="w-20">
-                      <label className="text-[9px] font-bold text-rose-500 uppercase ml-1 block mb-1">% Merma</label>
-                      <input type="number" step="1" max="99" min="0" value={editingPlato.merma || 0} onChange={(e) => setEditingPlato({ ...editingPlato, merma: Number(e.target.value) })} className="w-full p-2.5 bg-white rounded-lg text-sm font-bold text-rose-600 border border-rose-200 outline-none focus:border-rose-400" />
+                    <div className="w-16">
+                      <label className="text-[8px] font-bold text-rose-500 uppercase ml-1 block mb-1">% Merma</label>
+                      <input type="number" step="1" max="99" min="0" value={editingPlato.merma || 0} onChange={(e) => setEditingPlato({ ...editingPlato, merma: Number(e.target.value) })} className="w-full p-1.5 bg-white rounded text-[11px] font-bold text-rose-600 border border-rose-200 outline-none focus:border-rose-400" />
                     </div>
                   </div>
-                  <div className="flex justify-between items-center text-[10px] px-1 pt-1">
+                  <div className="flex justify-between items-center text-[9px] px-1 pt-1">
                     <span className="font-semibold text-rose-800">Coste Real Escandallo:</span>
-                    <span className="font-black text-rose-600 text-sm">
+                    <span className="font-black text-rose-600 text-xs">
                       {Num.fmt((Num.parse(editingPlato.cost) || 0) / (1 - ((Num.parse(editingPlato.merma) || 0) / 100)))}
                     </span>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase ml-1 block mb-1">PVP Bruto (€)</label>
-                    <input type="number" step="0.01" value={editingPlato.price} onChange={(e) => setEditingPlato({ ...editingPlato, price: Number(e.target.value) })} className="w-full p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-sm font-bold text-emerald-700 outline-none focus:border-emerald-400" required />
+                    <label className="text-[9px] font-bold text-slate-500 uppercase ml-1 block mb-1">PVP Bruto (€)</label>
+                    <input type="number" step="0.01" value={editingPlato.price} onChange={(e) => setEditingPlato({ ...editingPlato, price: Number(e.target.value) })} className="w-full p-2 bg-emerald-50 border border-emerald-100 rounded-lg text-xs font-bold text-emerald-700 outline-none focus:border-emerald-400" required />
                   </div>
                   <div>
-                    <label className="text-[10px] font-bold text-slate-500 uppercase ml-1 block mb-1">Familia</label>
-                    <select value={editingPlato.category} onChange={(e) => setEditingPlato({ ...editingPlato, category: e.target.value as any })} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:border-indigo-400">
+                    <label className="text-[9px] font-bold text-slate-500 uppercase ml-1 block mb-1">Familia</label>
+                    <select value={editingPlato.category} onChange={(e) => setEditingPlato({ ...editingPlato, category: e.target.value as any })} className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-semibold outline-none focus:border-indigo-400">
                       {['Entrantes', 'Principal', 'Postre', 'Bebidas', 'Alcohol', 'General'].map(c => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </div>
@@ -717,11 +722,11 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
                 
                 <div className="pt-2 flex gap-2">
                   {db.platos?.some(p => p.id === editingPlato.id) && (
-                    <button type="button" onClick={() => handleDeletePlato(editingPlato.id)} className="p-3 text-rose-500 bg-rose-50 border border-rose-100 font-bold rounded-xl hover:bg-rose-100 transition" title="Eliminar Plato">
-                      <Trash2 className="w-5 h-5" />
+                    <button type="button" onClick={() => handleDeletePlato(editingPlato.id)} className="p-2 text-rose-500 bg-rose-50 border border-rose-100 font-bold rounded-lg hover:bg-rose-100 transition" title="Eliminar Plato">
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   )}
-                  <button type="submit" className="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold uppercase tracking-widest hover:bg-indigo-700 transition">Guardar</button>
+                  <button type="submit" className="flex-1 bg-indigo-600 text-white py-2 rounded-lg font-bold text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition">Guardar</button>
                 </div>
               </form>
             </motion.div>
