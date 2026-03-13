@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { FileText, CheckCircle2, Clock, Trash2, Link as LinkIcon, AlertCircle, Sparkles, ArrowUpDown } from 'lucide-react';
+import { FileText, CheckCircle2, Clock, Trash2, Link as LinkIcon, AlertCircle, Sparkles } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 // 🛡️ Tipados importados del padre
 import { FacturaExtended, BusinessUnit } from './InvoicesView'; 
@@ -125,7 +125,7 @@ export const InvoicesList = React.memo(({
     }
   };
 
-  // CÁLCULO DE TOTALES
+  // CÁLCULO DE TOTALES (Base, IVA y Total)
   const totales = useMemo(() => {
     return historyList.reduce((acc, f) => {
       const t = Math.abs(Num.parse(f.total || 0));
@@ -134,6 +134,11 @@ export const InvoicesList = React.memo(({
       return { base: acc.base + b, iva: acc.iva + i, total: acc.total + t };
     }, { base: 0, iva: 0, total: 0 });
   }, [historyList]);
+
+  const getSortIcon = (field: SortField) => {
+    if (sortField !== field) return '↕';
+    return sortOrder === 'asc' ? '↑' : '↓';
+  };
 
   if (historyList.length === 0) {
     return (
@@ -148,25 +153,25 @@ export const InvoicesList = React.memo(({
   }
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col max-h-[75vh]">
+    <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col max-h-[75vh]">
       <div className="overflow-x-auto custom-scrollbar flex-1">
         <table className="w-full text-left border-collapse whitespace-nowrap min-w-[900px]">
           
           {/* CABECERA FIJA */}
           <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 z-10 shadow-sm">
-            <tr className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+            <tr className="text-[10px] font-bold text-slate-500 uppercase tracking-widest select-none">
               <th className="p-3 cursor-pointer hover:bg-slate-100 transition" onClick={() => handleSort('date')}>
-                <div className="flex items-center gap-1">Fecha <ArrowUpDown className="w-3 h-3 opacity-50"/></div>
+                Fecha <span className="opacity-50 ml-1">{getSortIcon('date')}</span>
               </th>
               <th className="p-3">Ref</th>
               <th className="p-3 cursor-pointer hover:bg-slate-100 transition" onClick={() => handleSort('prov')}>
-                <div className="flex items-center gap-1">Titular <ArrowUpDown className="w-3 h-3 opacity-50"/></div>
+                Titular <span className="opacity-50 ml-1">{getSortIcon('prov')}</span>
               </th>
               <th className="p-3 text-center">Unidad</th>
               <th className="p-3 text-right">Base</th>
               <th className="p-3 text-right">IVA</th>
               <th className="p-3 text-right cursor-pointer hover:bg-slate-100 transition text-slate-800" onClick={() => handleSort('total')}>
-                <div className="flex items-center justify-end gap-1">Total <ArrowUpDown className="w-3 h-3 opacity-50"/></div>
+                Total <span className="opacity-50 ml-1">{getSortIcon('total')}</span>
               </th>
               <th className="p-3 text-center">Estado</th>
               <th className="p-3 text-center">Acciones</th>
@@ -205,7 +210,7 @@ export const InvoicesList = React.memo(({
                     </td>
                     <td className="p-3 text-right text-slate-500">{Num.fmt(fBase)}</td>
                     <td className="p-3 text-right text-slate-500">{Num.fmt(fTax)}</td>
-                    <td className="p-3 text-right font-bold text-slate-900">{Num.fmt(fTotal)}</td>
+                    <td className="p-3 text-right font-black text-slate-900">{Num.fmt(fTotal)}</td>
                     
                     <td className="p-3 text-center">
                       {f.reconciled ? (
