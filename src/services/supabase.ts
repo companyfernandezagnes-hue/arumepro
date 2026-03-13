@@ -1,11 +1,14 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { AppData } from '../types';
+import { AppData, EmailDraft } from '../types';
 
-// 1. NUEVA CONEXIÓN: Apuntando a la nueva base de datos limpia de Supabase
-const SUPABASE_URL = "https://bgtelulbiaugawyrhvwt.supabase.co";
-const SUPABASE_KEY = "sb_publishable_jagYegyG8gGMijzpLEY9BQ_iWfL1MU4";
+// 1. NUEVA CONEXIÓN: Apuntando a las variables de entorno (.env)
+// ⚠️ Asegúrate de tener estas variables en tu archivo .env:
+// VITE_SUPABASE_URL=https://bgtelulbiaugawyrhvwt.supabase.co
+// VITE_SUPABASE_ANON_KEY=sb_publishable_jagYegyG8gGMijzpLEY9BQ_iWfL1MU4
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://bgtelulbiaugawyrhvwt.supabase.co";
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_jagYegyG8gGMijzpLEY9BQ_iWfL1MU4";
 
-// 🛡️ FIX: PATRÓN SINGLETON PARA EVITAR MULTIPLES INSTANCIAS (Evita pantallazos azules)
+// 🛡️ FIX: PATRÓN SINGLETON PARA EVITAR MÚLTIPLES INSTANCIAS (Evita pantallazos azules)
 let supabaseInstance: SupabaseClient | null = null;
 
 export const supabase = (() => {
@@ -61,7 +64,8 @@ async function withTimeout<T>(p: Promise<T>, ms = 15000): Promise<T> {
   }
 }
 
-// ================== Lectura de Datos ============================
+// ================== Funciones Core: Arume Data ============================
+
 export async function fetchArumeData(retries = 3): Promise<{ data: AppData | null; meta?: { updated_at?: string; version?: number } }> {
   try {
     const exec = async () => {
@@ -94,7 +98,6 @@ export async function fetchArumeData(retries = 3): Promise<{ data: AppData | nul
   }
 }
 
-// ================ Escritura de Datos ===========================
 export async function saveArumeData(
   data: AppData,
   opts?: { lastKnownUpdatedAt?: string; lastKnownVersion?: number; silent?: boolean; retries?: number }
@@ -123,6 +126,7 @@ export async function saveArumeData(
 
     const meta = await withRetries(() => withTimeout(readMeta()), { retries });
 
+    // Control de concurrencia optimista
     if (lastKnownUpdatedAt && meta?.updated_at && meta.updated_at !== lastKnownUpdatedAt) {
       if (!silent) alert('⚠️ Se detectaron cambios de otro usuario. Recarga la página para no sobreescribir datos.');
       return { ok: false, conflict: true };
@@ -145,5 +149,63 @@ export async function saveArumeData(
   } catch (error: any) {
     if (!silent) alert("⚠️ Problema de conexión. No se ha podido guardar en la nube.");
     return { ok: false, error: error.message };
+  }
+}
+
+// ================== Funciones Secundarias: IMAP / Gmail =====================
+
+/**
+ * Recupera los correos nuevos con adjuntos de la tabla inbox_gmail
+ */
+export async function fetchNewEmails(): Promise<EmailDraft[]> {
+  try {
+    const exec = async () => {
+      const { data, error } = await supabase
+        .from('inbox_gmail')
+        .select('*')
+        .eq('status', 'new');
+      
+      if (error) throw error;
+      
+      if (!data) return [];
+
+      return data.map((fila: any) => ({
+        id: fila.id, 
+        from: fila.remitente, 
+        subject: fila.asunto, 
+        date: fila.fecha ? fila.fecha.slice(0, 10) : new Date().toISOString().split('T')[0],
+        hasAttachment: true, 
+        status: 'new' as const, 
+        fileBase64: fila.archivo_base64, 
+        fileName: fila.archivo_nombre
+      }));
+    };
+
+    return await withRetries(() => withTimeout(exec(), 10000));
+  } catch (error: any) {
+    console.error("❌ Error leyendo correos de Supabase:", error);
+    throw error;
+  }
+}
+
+/**
+ * Marca un correo como procesado para que no vuelva a aparecer
+ */
+export async function markEmailAsParsed(emailId: string): Promise<boolean> {
+  try {
+    const exec = async () => {
+      const { error } = await supabase
+        .from('inbox_gmail')
+        .update({ status: 'parsed' })
+        .eq('id', emailId);
+      
+      if (error) throw error;
+      return true;
+    };
+
+    return await withRetries(() => withTimeout(exec(), 5000));
+  } catch (error: any) {
+    console.error(`❌ Error marcando correo ${emailId} como parsed:`, error);
+    return false;
   }
 }
