@@ -98,7 +98,7 @@ const matchAlbaranesToFactura = (factura: FacturaExtended, albaranes: Albaran[],
   const fDate = factura?.date || DateUtil.today();
   const fTotal = Num.parse(factura?.total) || 0;
   
-  let candidatos = [];
+  let candidatos: Albaran[] = [];
   if (factura.albaranIdsArr && factura.albaranIdsArr.length > 0) {
      candidatos = albaranes.filter(a => !a.invoiced && factura.albaranIdsArr!.includes(a.num));
   }
@@ -117,6 +117,79 @@ const matchAlbaranesToFactura = (factura: FacturaExtended, albaranes: Albaran[],
   const cuadraPerfecto = diff <= toleranciaPermitida && candidatos.length > 0;
 
   return { candidatos, sumaAlbaranes, diferencia: diff, cuadraPerfecto };
+};
+
+/* =======================================================
+ * 🎨 COMPONENTE: Flechas de Conexión Inteligentes
+ * ======================================================= */
+const ConnectionLine = ({ sourceId, targetId, status = 'default' }: { sourceId: string; targetId: string; status?: 'perfect' | 'warning' | 'default' }) => {
+  const [coords, setCoords] = useState<{x1: number, y1: number, x2: number, y2: number} | null>(null);
+
+  // Definimos los colores según el estado (verde si cuadra, naranja si hay diferencia)
+  const colors = {
+    perfect: { line: '#10b981', dot: '#059669', glow: '#34d399' }, // Emerald
+    warning: { line: '#f59e0b', dot: '#d97706', glow: '#fbbf24' }, // Amber
+    default: { line: '#6366f1', dot: '#4f46e5', glow: '#818cf8' }  // Indigo
+  };
+  const theme = colors[status];
+
+  useEffect(() => {
+    const updateCoords = () => {
+      const sourceEl = document.getElementById(sourceId);
+      const targetEl = document.getElementById(targetId);
+      
+      if (sourceEl && targetEl) {
+        const sRect = sourceEl.getBoundingClientRect();
+        const tRect = targetEl.getBoundingClientRect();
+        
+        setCoords({
+          x1: sRect.right,
+          y1: sRect.top + (sRect.height / 2),
+          x2: tRect.left,
+          y2: tRect.top + (tRect.height / 2)
+        });
+      }
+    };
+
+    const timer = setTimeout(updateCoords, 150);
+    window.addEventListener('resize', updateCoords);
+    window.addEventListener('scroll', updateCoords, true);
+    
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', updateCoords);
+      window.removeEventListener('scroll', updateCoords, true);
+    };
+  }, [sourceId, targetId]);
+
+  if (!coords) return null;
+
+  const path = `M ${coords.x1} ${coords.y1} C ${coords.x1 + 60} ${coords.y1}, ${coords.x2 - 60} ${coords.y2}, ${coords.x2} ${coords.y2}`;
+
+  return (
+    <svg className="fixed inset-0 pointer-events-none z-[60] w-full h-full" style={{ left: 0, top: 0 }}>
+      {/* Línea principal */}
+      <motion.path
+        initial={{ pathLength: 0, opacity: 0 }}
+        animate={{ pathLength: 1, opacity: 0.5 }}
+        transition={{ duration: 0.8, ease: "easeOut" }}
+        d={path}
+        stroke={theme.line}
+        strokeWidth="2.5"
+        fill="none"
+        strokeDasharray="5 5"
+      />
+      
+      {/* 🌟 Bolita de energía (Flujo de datos) */}
+      <circle r="4" fill={theme.glow} style={{ filter: `drop-shadow(0 0 6px ${theme.glow})` }}>
+        <animateMotion dur="2.5s" repeatCount="indefinite" path={path} />
+      </circle>
+
+      {/* Puntos de conexión fijos */}
+      <circle cx={coords.x1} cy={coords.y1} r="3" fill={theme.dot} />
+      <circle cx={coords.x2} cy={coords.y2} r="4" fill={theme.dot} />
+    </svg>
+  );
 };
 
 /* =======================================================
@@ -518,8 +591,15 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
           {Object.values(dataGroup.groups || {}).map((g: any) => {
             const unitConfig = BUSINESS_UNITS.find(u => u.id === g.unitId);
+            const groupId = `source-group-${superNorm(g.label)}-${g.unitId}`; // 💡 ID AÑADIDO PARA LA FLECHA
+            
             return (
-              <div key={g.label + g.unitId} onClick={() => { setSelectedGroup({ label: g.label, ids: g.ids, unitId: g.unitId }); setModalForm({ num: '', date: DateUtil.today(), selectedAlbs: [...g.ids], unitId: g.unitId }); }} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-200 hover:border-indigo-400 hover:bg-white transition cursor-pointer group">
+              <div 
+                key={g.label + g.unitId} 
+                id={groupId} 
+                onClick={() => { setSelectedGroup({ label: g.label, ids: g.ids, unitId: g.unitId }); setModalForm({ num: '', date: DateUtil.today(), selectedAlbs: [...g.ids], unitId: g.unitId }); }} 
+                className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-200 hover:border-indigo-400 hover:bg-white hover:shadow-md transition-all cursor-pointer group relative z-10"
+              >
                 <div className="min-w-0 pr-3">
                   <p className="font-bold text-slate-800 text-xs group-hover:text-indigo-600 transition truncate">{g.label}</p>
                   <div className="flex items-center gap-2 mt-1">
@@ -672,33 +752,56 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
               {draftsIA.length > 0 ? (
                 <div className="space-y-2 max-h-[50vh] overflow-y-auto custom-scrollbar pr-1">
-                  {draftsIA.map(d => (
-                    <div key={d.id} className="bg-slate-800 p-3 rounded-lg border border-slate-700">
-                      <div className="flex justify-between items-start mb-2">
-                        <div className="min-w-0 pr-2">
-                          <span className="font-bold text-white text-[11px] truncate block">{d.prov || 'Desconocido'}</span>
-                          <span className="text-[9px] text-slate-400 mt-0.5 block">{d.date} · {d.num}</span>
+                  {draftsIA.map(d => {
+                    const destId = `dest-draft-${d.id}`; // 💡 ID AÑADIDO PARA LA FLECHA
+                    
+                    // Extraemos y deduplicamos los grupos de origen necesarios
+                    const activeConnections = d.candidatos && d.candidatos.length > 0 
+                      ? Array.from(new Set(d.candidatos.map((c: any) => `source-group-${superNorm(d.prov)}-${c.unitId || 'REST'}`)))
+                      : [];
+
+                    // Calculamos el estado de la conexión visual
+                    const connectionStatus = d.cuadraPerfecto ? 'perfect' : 'warning';
+
+                    return (
+                      <div key={d.id} id={destId} className="bg-slate-800 p-3 rounded-lg border border-slate-700 hover:border-indigo-500 hover:scale-[1.02] transition-all duration-300 relative z-10 cursor-default">
+                        
+                        {/* 💡 AQUI RENDERIZAMOS LAS FLECHAS INTELIGENTES */}
+                        {activeConnections.map(sourceId => (
+                          <ConnectionLine 
+                            key={`${sourceId}-${destId}`} 
+                            sourceId={sourceId as string} 
+                            targetId={destId} 
+                            status={connectionStatus}
+                          />
+                        ))}
+
+                        <div className="flex justify-between items-start mb-2">
+                          <div className="min-w-0 pr-2">
+                            <span className="font-bold text-white text-[11px] truncate block">{d.prov || 'Desconocido'}</span>
+                            <span className="text-[9px] text-slate-400 mt-0.5 block">{d.date} · {d.num}</span>
+                          </div>
+                          <button onClick={() => handleDiscardDraftIA(d.id)} className="text-slate-500 hover:text-rose-400 transition-colors"><Trash2 className="w-3.5 h-3.5"/></button>
                         </div>
-                        <button onClick={() => handleDiscardDraftIA(d.id)} className="text-slate-500 hover:text-rose-400"><Trash2 className="w-3.5 h-3.5"/></button>
-                      </div>
-                      
-                      <div className="flex justify-between items-end bg-slate-900 p-2 rounded border border-slate-700">
-                        <div>
-                          <p className="text-[8px] text-slate-500 uppercase">Total</p>
-                          <span className="text-sm font-bold text-white">{Num.fmt(d.total)}</span>
+                        
+                        <div className="flex justify-between items-end bg-slate-900 p-2 rounded border border-slate-700">
+                          <div>
+                            <p className="text-[8px] text-slate-500 uppercase">Total</p>
+                            <span className="text-sm font-bold text-white">{Num.fmt(d.total)}</span>
+                          </div>
+                          {d.cuadraPerfecto ? (
+                             <span className="text-[8px] font-bold uppercase text-emerald-400 flex items-center gap-0.5"><Check className="w-3 h-3"/> Cuadra</span>
+                          ) : (
+                             <span className="text-[8px] font-bold uppercase text-amber-400">Diff: {Num.fmt(d.diferencia)}</span>
+                          )}
                         </div>
-                        {d.cuadraPerfecto ? (
-                           <span className="text-[8px] font-bold uppercase text-emerald-400 flex items-center gap-0.5"><Check className="w-3 h-3"/> Cuadra</span>
-                        ) : (
-                           <span className="text-[8px] font-bold uppercase text-amber-400">Diff: {Num.fmt(d.diferencia)}</span>
-                        )}
+                        
+                        <button onClick={() => handleConfirmAuditoriaIA(d.id)} disabled={isProcessing} className="w-full mt-2 py-2 bg-indigo-500 text-white rounded text-[9px] font-bold uppercase hover:bg-indigo-400 transition-colors flex justify-center gap-1.5">
+                          {isProcessing ? <Loader2 className="w-3 h-3 animate-spin"/> : <CheckCircle2 className="w-3 h-3"/>} Confirmar
+                        </button>
                       </div>
-                      
-                      <button onClick={() => handleConfirmAuditoriaIA(d.id)} disabled={isProcessing} className="w-full mt-2 py-2 bg-indigo-500 text-white rounded text-[9px] font-bold uppercase hover:bg-indigo-400 flex justify-center gap-1.5">
-                        {isProcessing ? <Loader2 className="w-3 h-3 animate-spin"/> : <CheckCircle2 className="w-3 h-3"/>} Confirmar
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="text-center opacity-50 py-4"><FileText className="w-6 h-6 mx-auto text-slate-400 mb-2" /><p className="text-[10px] font-bold text-slate-500">Vacío</p></div>
