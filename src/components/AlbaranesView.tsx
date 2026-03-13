@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import { GoogleGenAI } from "@google/genai";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend } from 'recharts';
+import { createClient } from '@supabase/supabase-js'; // 🚀 IMPORTAMOS SUPABASE
 
 // 🚀 IMPORTAMOS DEL CEREBRO CENTRAL
 import { basicNorm, TOLERANCIA as CENTRAL_TOLERANCIA } from '../services/invoicing';
@@ -33,11 +34,15 @@ const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string
   { id: 'CORP', name: 'Socios / Corp', icon: Users, color: 'text-slate-600', bg: 'bg-slate-100' },
 ];
 
+// 🔑 CREDENCIALES SUPABASE (Las mismas del Dashboard y el Bot)
+const SUPABASE_URL = "https://bgtelulbiaugawyrhvwt.supabase.co"; 
+const SUPABASE_KEY = "sb_publishable_jagYegyG8gGMijzpLEY9BQ_iWfL1MU4";
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
 /* =======================================================
  * 🛡️ 1. UTILIDADES Y CONSTANTES INTEGRADAS
  * ======================================================= */
 export const TOLERANCIA = CENTRAL_TOLERANCIA; 
-// 💡 ALIAS DE RESCATE: Para que Vercel no falle si otro archivo importa superNorm desde aquí
 export const superNorm = basicNorm; 
 
 const safeJSON = (str: string) => { try { const match = str.match(/\{[\s\S]*\}/); return match ? JSON.parse(match[0]) : {}; } catch { return {}; } };
@@ -92,7 +97,6 @@ const findFacturaIdx = (data: AppData, alb: Albaran) => {
 
 const facturaHasAlb = (f: any, albId: string) => Array.isArray(f?.albaranIdsArr) && f.albaranIdsArr.includes(albId);
 
-// Si cambian proveedor/mes al editar, desvincula de la factura previa
 function detachFromPreviousFacturaIfMoved(data: AppData, before: Albaran, after: Albaran) {
   if (groupKey(before) === groupKey(after)) return;
 
@@ -116,7 +120,6 @@ function detachFromPreviousFacturaIfMoved(data: AppData, before: Albaran, after:
   }
 }
 
-// Inserta/suma el albarán en la factura de su grupo (prov+mes) e idempotencia
 function upsertFacturaFromAlbaran(data: AppData, alb: Albaran) {
   if (!Array.isArray(data.facturas)) data.facturas = [];
   const idx = findFacturaIdx(data, alb);
@@ -387,12 +390,55 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
   const { analyzedItems, liveTotals } = useAlbaranEnginePRO(form.text);
 
+  // 🤖 NUEVA SINCRONIZACIÓN CON TELEGRAM -> EDITAR EN FORMULARIO
   const handleTelegramSync = async () => {
     setIsSyncingTelegram(true);
-    setTimeout(() => {
-      alert("📲 Sincronización con Telegram completada.\nNo se han encontrado nuevos albaranes enviados al Bot hoy.");
+    try {
+      // 1. Buscamos el último albarán en Supabase que envió el Bot de Telegram (Empieza por 📸)
+      const { data: correos, error } = await supabase
+        .from('inbox_general')
+        .select('*')
+        .ilike('remitente', '📸%')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (error) throw error;
+
+      if (correos && correos.length > 0) {
+        const doc = correos[0];
+        
+        // 2. Extraemos los datos que guardó el bot en el asunto y remitente
+        const provMatch = doc.remitente.match(/📸\s*(.*?)\s*\(/);
+        const prov = provMatch ? provMatch[1].trim() : "Desconocido";
+
+        const dateMatch = doc.asunto.match(/Fecha:\s*([\d-]+)/);
+        const dateStr = dateMatch ? dateMatch[1] : DateUtil.today();
+
+        const totalMatch = doc.asunto.match(/Importe:\s*([\d.]+)/);
+        const totalNum = totalMatch ? totalMatch[1] : "0";
+
+        // 3. Lo metemos en el formulario de la izquierda para que lo edites antes de guardarlo
+        setForm(prev => ({
+          ...prev,
+          prov: prov.toUpperCase(),
+          date: dateStr,
+          num: `TG-${Date.now().toString().slice(-4)}`, // Número temporal
+          text: `1x GASTOS VARIOS ${prov} 10% ${totalNum}` // Línea genérica para que el total cuadre
+        }));
+
+        // 4. (Opcional) Borramos ese registro de Supabase para no volver a importarlo mañana
+        await supabase.from('inbox_general').delete().eq('id', doc.id);
+
+        alert("✅ Ticket importado desde Telegram. Revisa los datos en el formulario de la izquierda y dale a GUARDAR ALBARÁN.");
+      } else {
+        alert("ℹ️ No hay nuevos tickets pendientes enviados desde Telegram.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("⚠️ Error al conectar con la base de datos de Telegram.");
+    } finally {
       setIsSyncingTelegram(false);
-    }, 2000);
+    }
   };
 
   const inRange = (iso: string, from?: string, to?: string) => {
