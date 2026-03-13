@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Save, Key, Eye, EyeOff, Bot, Link as LinkIcon, 
   Building2, Users, Sparkles, CheckCircle2, X, RefreshCw,
-  Mail, MessageCircle, Send, ShieldAlert
+  Mail, MessageCircle, Send, ShieldAlert, DownloadCloud, Trash2
 } from 'lucide-react';
 import { AppData } from '../types';
 import { cn } from '../lib/utils';
@@ -50,7 +50,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
   const handleSaveAll = () => {
     if (!db) return;
 
-    // 1. Claves de IA al navegador (Seguridad local)
+    // 1. Claves de IA al navegador (Limpiando espacios en blanco por si se pegan mal)
     if (geminiKey.trim()) localStorage.setItem('gemini_api_key', geminiKey.trim());
     else localStorage.removeItem('gemini_api_key');
 
@@ -76,6 +76,31 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
     const tempDb = { ...db, config: { ...db.config, telegramToken: config.telegramToken, telegramChatId: config.telegramChatId } };
     await NotificationService.sendAlert(tempDb, "🚀 *TEST DE CONEXIÓN EXITOSO*\n\nSi recibes esto, el ERP Arume está correctamente vinculado con tu Telegram. ¡Listo para recibir comandos!", "INFO");
     alert("Mensaje de prueba enviado. Revisa tu Telegram.");
+  };
+
+  // 🗄️ BÓVEDA DE SEGURIDAD (Descargar todo)
+  const handleGlobalBackup = () => {
+    if (!db) return;
+    const dataStr = JSON.stringify(db, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Arume_Backup_Total_${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // 🧹 LIMPIEZA DE CACHÉ DE EMERGENCIA
+  const handleHardReset = () => {
+    const confirm = window.confirm("¿Seguro que quieres borrar la caché local? (Esto NO borra tus datos en la nube, solo resetea tu navegador si la app va lenta o se cuelga).");
+    if (confirm) {
+      localStorage.removeItem('arume_backup_last');
+      sessionStorage.clear();
+      window.location.reload();
+    }
   };
 
   return (
@@ -151,7 +176,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
               </div>
             </div>
 
-            {/* 3. CORREOS IMAP (NUEVO) */}
+            {/* 3. CORREOS IMAP */}
             <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200">
               <div className="flex justify-between items-start mb-4">
                 <h3 className="text-lg font-black text-slate-800 flex items-center gap-2"><Mail className="w-5 h-5 text-rose-500" /> Correos IMAP</h3>
@@ -161,7 +186,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
                 <input type="email" name="imapUser" value={config.imapUser || ''} onChange={handleChange} placeholder="Tu correo (ej: facturas@gmail.com)" className="w-full p-3 bg-slate-50 rounded-xl text-xs font-bold outline-none border border-slate-200 focus:border-rose-400 text-slate-700" />
                 <input type="password" name="imapPass" value={config.imapPass || ''} onChange={handleChange} placeholder="Contraseña de Aplicación (16 letras)" className="w-full p-3 bg-slate-50 rounded-xl text-xs font-mono outline-none border border-slate-200 focus:border-rose-400 text-slate-700" />
                 <p className="text-[9px] text-slate-400 font-bold leading-tight px-1">
-                  Usa una "Contraseña de aplicación" generada en tu cuenta de Google. No uses tu contraseña habitual.
+                  Uusa una "Contraseña de aplicación" generada en tu cuenta de Google. No uses tu contraseña habitual.
                 </p>
               </div>
             </div>
@@ -175,7 +200,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
               </div>
             </div>
 
-            {/* 5. EMPRESA Y REPARTOS (Combinado) */}
+            {/* 5. EMPRESA Y REPARTOS */}
             <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200 lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <h3 className="text-sm font-black text-slate-800 mb-3 flex items-center gap-2"><Building2 className="w-4 h-4 text-slate-400" /> Datos Comerciales</h3>
@@ -209,35 +234,55 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
               </div>
             </div>
 
-            {/* 6. STATUS Y BACKUPS */}
-            <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200 lg:col-span-2 flex flex-col md:flex-row items-center justify-between gap-6">
-              <div className="flex flex-wrap justify-center md:justify-start gap-3 w-full md:w-auto">
-                <div className={cn("px-3 py-2 rounded-xl border flex items-center gap-2", config.n8nUrlBanco ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700')}>
-                  <div className={cn("w-2 h-2 rounded-full", config.n8nUrlBanco ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500')}></div>
-                  <span className="text-[9px] font-black uppercase tracking-widest">n8n Banco</span>
-                </div>
-                <div className={cn("px-3 py-2 rounded-xl border flex items-center gap-2", config.telegramToken && config.telegramChatId ? 'bg-blue-50 border-blue-100 text-blue-700' : 'bg-slate-50 border-slate-200 text-slate-400')}>
-                  <div className={cn("w-2 h-2 rounded-full", config.telegramToken && config.telegramChatId ? 'bg-blue-500 animate-pulse' : 'bg-slate-300')}></div>
-                  <span className="text-[9px] font-black uppercase tracking-widest">Telegram</span>
-                </div>
-              </div>
+            {/* 6. ZONA DE SEGURIDAD (BACKUP Y RESET) */}
+            <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200 lg:col-span-2">
+               <h3 className="text-sm font-black text-slate-800 mb-4 flex items-center gap-2"><DownloadCloud className="w-5 h-5 text-emerald-500" /> Bóveda de Seguridad & Mantenimiento</h3>
+               
+               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* Botón Backup */}
+                  <button onClick={handleGlobalBackup} className="flex flex-col items-start p-4 bg-emerald-50 border border-emerald-200 hover:border-emerald-400 hover:shadow-md transition-all rounded-2xl text-left group">
+                    <div className="flex items-center gap-2 mb-1">
+                      <DownloadCloud className="w-4 h-4 text-emerald-600" />
+                      <span className="font-black text-sm text-emerald-900">Backup Físico Total</span>
+                    </div>
+                    <p className="text-[10px] text-emerald-700/80 font-bold leading-tight">Descarga un archivo JSON con toda tu base de datos actual para tener copias de seguridad locales.</p>
+                  </button>
 
-              <div className="flex items-center gap-3 w-full md:w-auto">
-                <ExportTools db={db} onSave={setDb} />
-                <button onClick={() => window.location.reload()} className="p-3 bg-slate-100 rounded-xl hover:bg-slate-200 transition group border border-slate-200" title="Recargar App">
-                  <RefreshCw className="w-4 h-4 text-slate-600 group-hover:rotate-180 transition-transform duration-500" />
-                </button>
-              </div>
+                  {/* ExportTools Antiguas (Excel) */}
+                  <div className="flex flex-col justify-center h-full">
+                     <ExportTools db={db} onSave={setDb} />
+                  </div>
+
+                  {/* Botón Hard Reset de Emergencia */}
+                  <button onClick={handleHardReset} className="flex flex-col items-start p-4 bg-rose-50 border border-rose-200 hover:border-rose-400 hover:shadow-md transition-all rounded-2xl text-left group">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Trash2 className="w-4 h-4 text-rose-500" />
+                      <span className="font-black text-sm text-rose-900">Limpiar Caché Web</span>
+                    </div>
+                    <p className="text-[10px] text-rose-700/80 font-bold leading-tight">Usa esto si la app va lenta o no se actualiza. NO borra tus datos de Supabase, solo limpia el navegador.</p>
+                  </button>
+               </div>
             </div>
 
           </div>
         </div>
 
         {/* FOOTER - GUARDAR */}
-        <div className="p-6 bg-slate-50 border-t border-slate-200 shrink-0">
-          <button onClick={handleSaveAll} className={cn("w-full py-5 rounded-[2rem] font-black text-sm uppercase tracking-widest transition-all flex justify-center items-center gap-2 shadow-xl", isSaved ? "bg-emerald-500 text-white" : "bg-indigo-600 hover:bg-indigo-500 text-white active:scale-95")}>
+        <div className="p-6 bg-slate-50 border-t border-slate-200 shrink-0 flex items-center justify-between gap-4">
+          <div className="hidden sm:flex gap-3">
+             <div className={cn("px-3 py-1.5 rounded-lg border flex items-center gap-2", config.n8nUrlBanco ? 'bg-emerald-100/50 border-emerald-200 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700')}>
+                <div className={cn("w-1.5 h-1.5 rounded-full", config.n8nUrlBanco ? 'bg-emerald-500' : 'bg-rose-500')}></div>
+                <span className="text-[8px] font-black uppercase tracking-widest">n8n</span>
+             </div>
+             <div className={cn("px-3 py-1.5 rounded-lg border flex items-center gap-2", config.telegramToken && config.telegramChatId ? 'bg-blue-100/50 border-blue-200 text-blue-700' : 'bg-slate-100 border-slate-200 text-slate-500')}>
+                <div className={cn("w-1.5 h-1.5 rounded-full", config.telegramToken && config.telegramChatId ? 'bg-blue-500' : 'bg-slate-400')}></div>
+                <span className="text-[8px] font-black uppercase tracking-widest">Telegram</span>
+             </div>
+          </div>
+          
+          <button onClick={handleSaveAll} className={cn("flex-1 sm:flex-none sm:w-1/2 py-4 rounded-[2rem] font-black text-sm uppercase tracking-widest transition-all flex justify-center items-center gap-2 shadow-xl", isSaved ? "bg-emerald-500 text-white" : "bg-indigo-600 hover:bg-indigo-500 text-white active:scale-95")}>
             {isSaved ? <CheckCircle2 className="w-5 h-5" /> : <Save className="w-5 h-5" />}
-            {isSaved ? "¡CONFIGURACIÓN GUARDADA!" : "GUARDAR Y APLICAR CAMBIOS"}
+            {isSaved ? "¡GUARDADO!" : "APLICAR CAMBIOS"}
           </button>
         </div>
       </motion.div>
