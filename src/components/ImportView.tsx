@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Upload, FileText, CheckCircle2, Database, Building2,
-  ArrowRight, Sparkles, Loader2, Camera, Receipt, Mic, Square, AlertTriangle, FileDown, X, Edit3, Grid, ListPlus, Trash2, ClipboardPaste
+  Sparkles, Loader2, Receipt, Mic, Square, AlertTriangle, X, Edit3, Grid, ListPlus, Trash2, ClipboardPaste
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
@@ -11,21 +11,26 @@ import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
 import { useColumnDetector } from '../hooks/useColumnDetector';
 
-const n8nWebhookURL = "https://n8n.permatunnelopen.org/webhook/albaranes-ai";
-
 interface ImportViewProps {
   data: AppData;
   onSave: (newData: AppData) => Promise<void>;
   onNavigate: (tab: string) => void;
 }
 
-export type ImportMode = 'tpv' | 'albaranes_excel' | 'ia_factura' | 'ia_albaran' | 'banco_excel';
+export type ImportMode = 'tpv' | 'albaranes_excel' | 'ia_auto' | 'banco_excel' | 'voz_albaran';
 
 /* =======================================================
  * 🛡️ MOTOR DE RECONCILIACIÓN MATEMÁTICA
  * ======================================================= */
 type LineaIA = { qty: number; name: string; unit: string; unit_price: number; tax_rate: 4 | 10 | 21; total: number; };
 type AlbaranIA = { proveedor: string; fecha: string; num: string; unidad?: 'REST' | 'SHOP'; lineas: LineaIA[]; sum_base?: number; sum_tax?: number; sum_total?: number; };
+type DocumentoIA = { 
+  tipo_documento: 'factura' | 'albaran';
+  proveedor: string; nif?: string; fecha: string; num: string; 
+  total: number; base: number; iva: number;
+  referencias_albaranes?: string[];
+  lineas?: LineaIA[]; 
+};
 
 const TOL = 0.01;
 const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
@@ -38,8 +43,8 @@ const normalizeDate = (s?: string) => {
   return m ? `${m[3]}-${m[2]}-${m[1]}` : new Date().toLocaleDateString('sv-SE');
 };
 
-function reconcileAlbaran(ai: AlbaranIA) {
-  const lines = ai.lineas.map(l => {
+function reconcileAlbaran(ai: DocumentoIA) {
+  const lines = (ai.lineas || []).map(l => {
     const rate = (l.tax_rate ?? 10) as 4|10|21;
     const total = round2(Number(l.total) || 0);
     const base  = round2(total / (1 + rate / 100));
@@ -58,7 +63,7 @@ function reconcileAlbaran(ai: AlbaranIA) {
   const sum_tax  = round2(tax4 + tax10 + tax21);
   const sum_total_calc = round2(lines.reduce((a, l) => a + l.total, 0));
 
-  const declared_total = Number(ai.sum_total ?? sum_total_calc);
+  const declared_total = Number(ai.total ?? sum_total_calc);
   const diff = round2(sum_total_calc - declared_total);
   const cuadra = Math.abs(diff) <= TOL;
 
@@ -75,6 +80,12 @@ const extractJSON = (rawText: string) => {
   } catch { return {}; }
 };
 
+const cleanMime = (t: string) => {
+  const base = (t || '').split(';')[0].trim().toLowerCase();
+  const ok = ['audio/webm','audio/ogg','audio/mpeg','audio/mp3','audio/wav','audio/mp4'];
+  return ok.includes(base) ? base : 'audio/webm';
+};
+
 const compressImage = async (file: File | Blob): Promise<string> => {
   const MAX_BYTES = 4 * 1024 * 1024; const MAX_W = 1600, MAX_H = 1600;
   const bitmap = await createImageBitmap(file); let { width, height } = bitmap;
@@ -88,36 +99,105 @@ const compressImage = async (file: File | Blob): Promise<string> => {
   return `data:image/jpeg;base64,${b64}`;
 };
 
-const callGemini = async (apiKey: string, mimeType: string, base64Data: string, prompt: string) => {
-  const genAI = new GoogleGenAI({ apiKey });
-  const response = await genAI.models.generateContent({
-    model: "gemini-2.5-flash", contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: base64Data, mimeType } }] }],
-    config: { responseMimeType: "application/json", temperature: 0.1 }
-  });
-  const raw = response.text || "";
-  return raw.includes('{') ? JSON.parse(raw) : extractJSON(raw);
+/* =======================================================
+ * 🤖 MOTOR IA REDUNDANTE (GEMINI + GROQ FALLBACK)
+ * ======================================================= */
+const analyzeDocumentWithAI = async (mimeType: string, base64Data: string, prompt: string): Promise<DocumentoIA> => {
+  const geminiKey = sessionStorage.getItem('gemini_api_key') || localStorage.getItem('gemini_api_key');
+  const groqKey = sessionStorage.getItem('groq_api_key') || localStorage.getItem('groq_api_key'); 
+
+  let lastError;
+
+  // 1️⃣ INTENTO 1: GOOGLE GEMINI (Prioridad por precisión multimodal)
+  if (geminiKey) {
+    try {
+      const genAI = new GoogleGenAI({ apiKey: geminiKey });
+      const response = await genAI.models.generateContent({
+        model: "gemini-2.5-flash", 
+        contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: base64Data, mimeType } }] }],
+        config: { responseMimeType: "application/json", temperature: 0.1 }
+      });
+      const raw = response.text || "";
+      return raw.includes('{') ? JSON.parse(raw) : extractJSON(raw);
+    } catch (e: any) {
+      console.warn("⚠️ Gemini falló o se agotaron los tokens:", e.message);
+      lastError = e;
+      // Si no tenemos GroqKey o es un PDF (Groq no lee PDF en este endpoint aún), lanzamos el error de Gemini.
+      if (!groqKey || mimeType === 'application/pdf') throw e; 
+    }
+  }
+
+  // 2️⃣ INTENTO 2: GROQ (Llama-3.2-Vision) SALVAVIDAS
+  if (groqKey && mimeType.startsWith('image/')) {
+    console.log("🔄 Activando Fallback a GROQ (Llama 3.2 Vision)...");
+    try {
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${groqKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: "llama-3.2-90b-vision-preview",
+          messages: [{
+            role: "user",
+            content: [
+              { type: "text", text: prompt + "\nRESPONDE SOLO CON UN JSON VÁLIDO. NADA MÁS." },
+              { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Data}` } }
+            ]
+          }],
+          temperature: 0.1
+        })
+      });
+      if (!res.ok) throw new Error(`Groq API Error: ${res.status}`);
+      const data = await res.json();
+      const raw = data.choices[0].message.content;
+      return extractJSON(raw);
+    } catch (e: any) {
+      console.error("❌ Groq también falló.");
+      throw e;
+    }
+  }
+
+  if (lastError) throw lastError;
+  throw new Error("No hay APIs de IA configuradas. Añade una clave en Ajustes.");
 };
 
 /* =======================================================
- * PROMPTS MAESTROS
+ * 🧠 PROMPT OMNIVERSAL (Detecta todo solo)
  * ======================================================= */
-const PROMPT_FACTURA = `Extrae de esta factura y devuelve SOLO JSON (application/json) con:
-{ "proveedor": "string", "fecha": "YYYY-MM-DD", "num_factura": "string", "base": 0, "iva": 0, "total": 0, "referencias_albaranes": ["strings"] }
-REGLAS: Números como number (decimal con punto). Fecha en YYYY-MM-DD.`;
-
-const PROMPT_ALBARAN = `Analiza este albarán y devuelve SOLO JSON con EXACTAMENTE:
-{ "proveedor": "string", "fecha": "YYYY-MM-DD", "num": "string", "unidad": "REST" | "SHOP",
-  "lineas": [ {"qty": 1, "name": "string", "unit": "ud|kg|l", "unit_price": 0, "tax_rate": 4|10|21, "total": 0} ], "sum_total": 0 }
-REGLAS: "lineas[].total" es el total de la línea CON IVA. tax_rate solo 4, 10 o 21. sum_total = suma de líneas.`;
+const PROMPT_OMNI_IA = `Eres un Auditor Contable de IA para Hostelería.
+Analiza la imagen adjunta y determina automáticamente si es una FACTURA (incluye tickets con NIF/IVA) o un ALBARÁN (nota de entrega).
+Devuelve SOLO un JSON estricto sin comentarios usando esta estructura exacta:
+{
+  "tipo_documento": "factura",
+  "proveedor": "Nombre de la empresa",
+  "nif": "NIF o CIF",
+  "num": "Número de factura o albaran (S/N si no hay)",
+  "fecha": "YYYY-MM-DD",
+  "total": 0,
+  "base": 0,
+  "iva": 0,
+  "referencias_albaranes": [],
+  "lineas": [
+    {"qty": 1, "name": "Producto", "unit": "ud", "unit_price": 0, "tax_rate": 10, "total": 0}
+  ]
+}
+Importante: "tipo_documento" debe ser "factura" o "albaran". "total" es un número con punto decimal.`;
 
 /* =======================================================
  * COMPONENTE PRINCIPAL
  * ======================================================= */
 export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
-  const [importMode, setImportMode] = useState<ImportMode>('ia_factura');
+  const safeData = data || {};
+  const safeFacturas = Array.isArray(safeData.facturas) ? safeData.facturas : [];
+  const safeAlbaranes = Array.isArray(safeData.albaranes) ? safeData.albaranes : [];
+  const safePlatos = Array.isArray(safeData.platos) ? safeData.platos : [];
+  const safeVentas = Array.isArray(safeData.ventas_menu) ? safeData.ventas_menu : [];
+
+  const [importMode, setImportMode] = useState<ImportMode>('ia_auto');
   const [isScanning, setIsScanning] = useState(false);
   
-  // 💡 ESTADO DE PROGRESO AVANZADO (Con chivato de errores)
   const [batchProgress, setBatchProgress] = useState<{ 
     current: number, total: number, success: number, fails: number, 
     currentThumb: string | null, isCoolingDown?: boolean, failedNames: string[] 
@@ -131,25 +211,24 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { analyzeColumns, saveProfile } = useColumnDetector();
 
-  // 💣 PANEL DE RESETEO SEGURO (Protegiendo Cajas)
+  // 💣 PANEL DE RESETEO SEGURO
   const handleNukeData = async (type: 'docs' | 'ops' | 'bank') => {
     let msg = "";
     if (type === 'docs') msg = "Vas a borrar TODAS las facturas y albaranes.";
-    if (type === 'ops') msg = "Vas a borrar TODOS los Platos de la carta. 🛡️ TUS CIERRES DE CAJA Y VENTAS DIARIAS ESTÁN A SALVO Y NO SE BORRARÁN.";
+    if (type === 'ops') msg = "Vas a borrar TODOS los Platos de la carta. 🛡️ TUS CIERRES DE CAJA Y VENTAS DIARIAS ESTÁN A SALVO.";
     if (type === 'bank') msg = "Vas a borrar TODOS los movimientos bancarios.";
     
     const confirmation = window.prompt(`⚠️ PELIGRO CRÍTICO ⚠️\n\n${msg}\n\nEscribe "BORRAR" en mayúsculas para confirmar:`);
     
     if (confirmation === 'BORRAR') {
       setIsScanning(true);
-      const newData = JSON.parse(JSON.stringify(data));
+      const newData = JSON.parse(JSON.stringify(safeData));
       
       if (type === 'docs') {
         newData.facturas = [];
         newData.albaranes = [];
       } else if (type === 'ops') {
         newData.platos = [];
-        // NO TOCAMOS newData.cierres NI newData.ventas_menu
       } else if (type === 'bank') {
         newData.banco = [];
       }
@@ -161,18 +240,16 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
   };
 
   const categorizeItem = (name: string) => {
-    const n = name.toLowerCase();
-    if (n.includes('vino') || n.includes('agua') || n.includes('cerveza') || n.includes('copa') || n.includes('refresco')) return 'Bebidas';
-    if (n.includes('postre') || n.includes('tarta') || n.includes('helado') || n.includes('cafe')) return 'Postre';
-    if (n.includes('pan') || n.includes('ensalada') || n.includes('croqueta')) return 'Entrantes';
+    const n = (name || '').toLowerCase();
+    if (n.match(/vino|agua|cerveza|copa|refresco|zumo|coca|fanta|mahou/)) return 'Bebidas';
+    if (n.match(/postre|tarta|helado|cafe|carajillo|chupito/)) return 'Postres';
+    if (n.match(/pan|ensalada|croqueta|patata|nacho|tabla|queso/)) return 'Entrantes';
+    if (n.match(/carne|pescado|merluza|entrecot|chuleta|menu|menú|combo/)) return 'Principal';
     return 'General';
   };
 
-  // 🚀 LÓGICA ANTI-COLAPSO Y REINTENTOS PARA WHATSAPP
-  const procesarLoteIA = async (files: File[], mode: ImportMode) => {
-    const apiKey = sessionStorage.getItem('gemini_api_key') || localStorage.getItem('gemini_api_key');
-    if (!apiKey) return alert("⚠️ Por favor, configura tu clave de Gemini API en los ajustes primero.");
-
+  // 🚀 LÓGICA OMNI-IA (MOTOR REDUNDANTE Y ANTI-COLAPSO)
+  const procesarLoteIA = async (files: File[]) => {
     setIsScanning(true);
     setBatchProgress({ current: 0, total: files.length, success: 0, fails: 0, currentThumb: null, failedNames: [] });
     
@@ -191,125 +268,107 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       
       setBatchProgress(p => p ? { ...p, current: i + 1, currentThumb: thumbUrl } : null);
 
-      let attempts = 0;
-      let success = false;
+      try {
+        let base64Data = ""; let mimeType = file.type;
 
-      while (attempts < 2 && !success) {
-        try {
-          let base64Data = ""; let mimeType = file.type;
-
-          if (file.type.startsWith('image/')) {
-            const compressed = await compressImage(file);
-            base64Data = compressed.split(',')[1]; mimeType = "image/jpeg";
-          } else {
-            const buffer = await file.arrayBuffer();
-            base64Data = btoa(new Uint8Array(buffer).reduce((d, byte) => d + String.fromCharCode(byte), ''));
-          }
-
-          const prompt = mode === 'ia_factura' ? PROMPT_FACTURA : PROMPT_ALBARAN;
-          const datosIA = await callGemini(apiKey, mimeType, base64Data, prompt);
-
-          if (mode === 'ia_factura') {
-            const prov = datosIA.proveedor || "Desconocido"; const numF = datosIA.num_factura || `S/N-${Date.now()}`; const fecha = normalizeDate(datosIA.fecha);
-            const totalPdf = asNum(datosIA.total) || 0; const baseNum = asNum(datosIA.base) || Number((totalPdf / 1.10).toFixed(2)); const ivaNum = asNum(datosIA.iva) || Number((totalPdf - baseNum).toFixed(2));
-
-            nuevasFacturas.push({
-              id: `fac-ia-${Date.now()}-${i}`, 
-              tipo: 'compra',
-              proveedor: prov, prov: prov, num: numF, num_factura: numF, date: fecha, base: String(baseNum), tax: String(ivaNum), total: String(totalPdf),
-              albaranIdsArr: datosIA.referencias_albaranes || [],
-              paid: false, reconciled: false, source: 'dropzone', status: 'draft', unidad_negocio: 'REST'
-            });
-          } else {
-            const al: AlbaranIA = {
-              proveedor: datosIA.proveedor || "Desconocido", fecha: normalizeDate(datosIA.fecha), num: datosIA.num || "S/N",
-              unidad: (datosIA.unidad === 'SHOP' ? 'SHOP' : 'REST'), lineas: Array.isArray(datosIA.lineas) ? datosIA.lineas : [], sum_total: asNum(datosIA.sum_total),
-            };
-            const rec = reconcileAlbaran(al);
-            nuevosAlbaranes.push({
-              id: `alb-ia-${Date.now()}-${i}`, prov: rec.proveedor, date: rec.fecha, num: rec.num, socio: "Arume",
-              notes: rec.cuadra ? "IA OK" : `IA WARNING (diff=${rec.diff})`,
-              items: rec.lineas.map(l => ({ q: l.qty, n: l.name, unit: l.unit, t: l.total, rate: l.tax_rate, base: l.base, tax: l.tax, unitPrice: l.unit_price ?? (l.qty ? round2(l.total / l.qty) : l.total) })),
-              total: String(rec.sum_total), base: String(rec.sum_base), taxes: String(rec.sum_tax), invoiced: false, paid: false, reconciled: false,
-              status: rec.cuadra ? 'ok' : 'warning', unitId: rec.unidad || 'REST', by_rate: rec.by_rate,
-            });
-          }
-          
-          success = true;
-          successCount++;
-          setBatchProgress(p => p ? { ...p, success: successCount } : null);
-
-        } catch (e: any) {
-          attempts++;
-          console.warn(`Fallo procesando ${fileName} (Intento ${attempts}/2)`, e);
-          
-          if (attempts < 2) {
-            // Si falló (ej. error 429 Too Many Requests), esperamos 15 segundos antes de reintentar la misma foto
-            setBatchProgress(p => p ? { ...p, isCoolingDown: true } : null);
-            await new Promise(r => setTimeout(r, 15000));
-            setBatchProgress(p => p ? { ...p, isCoolingDown: false } : null);
-          } else {
-            // Si falla 2 veces, lo anotamos en el chivato
-            failCount++;
-            failedNamesArr.push(fileName);
-            setBatchProgress(p => p ? { ...p, fails: failCount, failedNames: failedNamesArr } : null);
-          }
+        if (file.type.startsWith('image/')) {
+          const compressed = await compressImage(file);
+          base64Data = compressed.split(',')[1]; mimeType = "image/jpeg";
+        } else {
+          const buffer = await file.arrayBuffer();
+          base64Data = btoa(new Uint8Array(buffer).reduce((d, byte) => d + String.fromCharCode(byte), ''));
         }
+
+        // 🤖 Llamamos al Nuevo Motor Redundante
+        const datosIA = await analyzeDocumentWithAI(mimeType, base64Data, PROMPT_OMNI_IA);
+
+        if (datosIA.tipo_documento === 'factura') {
+          const prov = datosIA.proveedor || "Desconocido"; 
+          const numF = datosIA.num || `S/N-${Date.now()}`; 
+          const fecha = normalizeDate(datosIA.fecha);
+          const totalPdf = asNum(datosIA.total) || 0; 
+          const baseNum = asNum(datosIA.base) || Number((totalPdf / 1.10).toFixed(2)); 
+          const ivaNum = asNum(datosIA.iva) || Number((totalPdf - baseNum).toFixed(2));
+
+          nuevasFacturas.push({
+            id: `fac-ia-${Date.now()}-${i}`, 
+            tipo: 'compra',
+            proveedor: prov, prov: prov, num: numF, num_factura: numF, date: fecha, 
+            base: String(baseNum), tax: String(ivaNum), total: String(totalPdf),
+            albaranIdsArr: datosIA.referencias_albaranes || [],
+            paid: false, reconciled: false, source: 'ia-auto', status: 'draft', unidad_negocio: 'REST'
+          });
+        } else {
+          const al: AlbaranIA = {
+            proveedor: datosIA.proveedor || "Desconocido", fecha: normalizeDate(datosIA.fecha), num: datosIA.num || "S/N",
+            unidad: 'REST', lineas: Array.isArray(datosIA.lineas) ? datosIA.lineas : [], sum_total: asNum(datosIA.total),
+          };
+          const rec = reconcileAlbaran(al);
+          nuevosAlbaranes.push({
+            id: `alb-ia-${Date.now()}-${i}`, prov: rec.proveedor, date: rec.fecha, num: rec.num, socio: "Arume",
+            notes: rec.cuadra ? "IA OK" : `IA WARNING (diff=${rec.diff})`,
+            items: rec.lineas.map(l => ({ q: l.qty, n: l.name, unit: l.unit, t: l.total, rate: l.tax_rate, base: l.base, tax: l.tax, unitPrice: l.unit_price ?? (l.qty ? round2(l.total / l.qty) : l.total) })),
+            total: String(rec.sum_total), base: String(rec.sum_base), taxes: String(rec.sum_tax), invoiced: false, paid: false, reconciled: false,
+            status: rec.cuadra ? 'ok' : 'warning', unitId: rec.unidad || 'REST', by_rate: rec.by_rate,
+          });
+        }
+        
+        successCount++;
+        setBatchProgress(p => p ? { ...p, success: successCount } : null);
+
+      } catch (e: any) {
+        console.warn(`Fallo procesando ${fileName}`, e);
+        failCount++;
+        failedNamesArr.push(fileName);
+        setBatchProgress(p => p ? { ...p, fails: failCount, failedNames: failedNamesArr } : null);
       }
 
-      // 🛡️ LÓGICA ANTI-COLAPSO: Descanso cada 8 fotos
-      if (i < files.length - 1 && success) {
+      if (i < files.length - 1) {
         if ((i + 1) % 8 === 0) {
           setBatchProgress(p => p ? { ...p, isCoolingDown: true } : null);
-          await new Promise(r => setTimeout(r, 10000)); // 10s de respiro para Google
+          await new Promise(r => setTimeout(r, 10000)); 
           setBatchProgress(p => p ? { ...p, isCoolingDown: false } : null);
         } else {
-          await new Promise(r => setTimeout(r, 1500)); // 1.5s entre fotos normales
+          await new Promise(r => setTimeout(r, 1500)); 
         }
       }
       
       if (thumbUrl) URL.revokeObjectURL(thumbUrl);
     }
 
-    // Guardado Masivo Final
     if (successCount > 0) {
-      const newData = JSON.parse(JSON.stringify(data));
-      if (mode === 'ia_factura') {
-        newData.facturas = [...nuevasFacturas, ...(newData.facturas || [])];
-        await onSave(newData);
-        if (failCount === 0) onNavigate('facturas');
-      } else {
-        newData.albaranes = [...nuevosAlbaranes, ...(newData.albaranes || [])];
-        await onSave(newData);
-        if (failCount === 0) onNavigate('albaranes');
-      }
+      const newData = JSON.parse(JSON.stringify(safeData));
+      newData.facturas = [...nuevasFacturas, ...safeFacturas];
+      newData.albaranes = [...nuevosAlbaranes, ...safeAlbaranes];
+      await onSave(newData);
+      
+      if (nuevasFacturas.length >= nuevosAlbaranes.length) onNavigate('facturas');
+      else onNavigate('albaranes');
     } 
 
     if (failCount > 0) {
       alert(`⚠️ Lote terminado.\n\n✅ Éxitos: ${successCount}\n❌ Fallos: ${failCount}\n\nArchivos que NO se han podido procesar:\n- ${failedNamesArr.join('\n- ')}\n\nPor favor, sube estos manualmente más tarde.`);
     } else if (successCount > 0) {
-      alert(`✅ Lote importado a la perfección: ${successCount} documentos enviados a la bandeja Borrador.`);
+      alert(`✅ Lote importado a la perfección: ${successCount} documentos auto-clasificados y enviados a la bandeja Borrador.`);
     } else {
-      alert("❌ No se pudo procesar ningún documento.");
+      alert("❌ No se pudo procesar ningún documento. Comprueba que tienes alguna API configurada (Gemini o Groq).");
     }
     
     setIsScanning(false);
     setBatchProgress(null);
   };
 
-  // 📝 PROCESADOR UNIVERSAL DE ARCHIVOS (Botón, Drag o Pegar)
   const processFilesArray = async (files: File[]) => {
     if (files.length === 0) return;
 
-    if (importMode.startsWith('ia_')) { 
+    if (importMode === 'ia_auto') { 
        const invalidFiles = files.filter(f => !f.type.includes('pdf') && !f.type.startsWith('image/'));
        if (invalidFiles.length > 0) return alert("⚠️ La IA solo admite PDF o Imágenes (JPG/PNG).");
        
-       await procesarLoteIA(files, importMode);
+       await procesarLoteIA(files);
        return; 
     } 
 
-    // MODO EXCEL (Solo coge el primer archivo)
     const file = files[0];
     if (!['.xls', '.xlsx', '.csv'].some(ext => file.name.toLowerCase().endsWith(ext))) {
       return alert("⚠️ Este modo es para archivos Excel (.xlsx) o CSV.");
@@ -352,34 +411,15 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
 
           if (movimientosBancarios.length === 0) return alert("⚠️ No se han podido extraer movimientos. Revisa el formato del Excel.");
           setProcessedData({ bancoExcel: movimientosBancarios });
-
-        } else {
-          // EXCEL ALBARANES
-          const agrupados: Record<string, AlbaranIA> = {};
-          rows.slice(1).forEach(fila => {
-            const prov = fila[0] || 'Desconocido'; const fecha = normalizeDate(fila[1]); const producto = fila[2] || 'Varios'; const cantidad = Num.parse(fila[3] || 1);
-            const total = Num.parse(String(fila[4] || "0").replace(',', '.'));
-            const key = `${prov}-${fecha}`;
-            if (!agrupados[key]) agrupados[key] = { proveedor: prov, fecha, num: 'S/N', lineas: [], unidad: 'REST' };
-            agrupados[key].lineas.push({ qty: cantidad, name: producto, unit: 'ud', unit_price: cantidad ? total/cantidad : total, tax_rate: 10, total });
-          });
-          const albsExcel = Object.values(agrupados).map(al => {
-            const rec = reconcileAlbaran(al);
-            return { id: `alb-xls-${Date.now()}-${Math.random().toString(36).substring(2,5)}`, prov: rec.proveedor, date: rec.fecha, num: rec.num, socio: 'Arume', items: rec.lineas.map(l => ({ q: l.qty, n: l.name, unit: l.unit, t: l.total, rate: l.tax_rate, base: l.base, tax: l.tax, unitPrice: l.unit_price })), total: String(rec.sum_total), base: String(rec.sum_base), taxes: String(rec.sum_tax), invoiced: false, paid: false, status: 'ok', unitId: 'REST' };
-          });
-          setProcessedData({ albaranesExcel: albsExcel });
         }
       } catch (err) { alert("Error al leer el archivo Excel."); }
     };
     reader.readAsBinaryString(file);
   };
 
-  /* =======================================================
-   * 🖱️ GESTIÓN DE EVENTOS (Input, Drop, Paste)
-   * ======================================================= */
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) processFilesArray(Array.from(e.target.files));
-    e.target.value = ''; // Reset
+    e.target.value = ''; 
   };
 
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); };
@@ -389,10 +429,9 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     if (e.dataTransfer.files) processFilesArray(Array.from(e.dataTransfer.files));
   };
 
-  // Escuchar Pegado (Ctrl+V) de WhatsApp
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
-      if (isScanning || recording) return;
+      if (isScanning) return;
       const items = e.clipboardData?.items;
       if (!items) return;
       
@@ -403,23 +442,24 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
           if (file) filesToPaste.push(file);
         }
       }
-      if (filesToPaste.length > 0 && importMode.startsWith('ia_')) {
+      if (filesToPaste.length > 0 && importMode === 'ia_auto') {
         processFilesArray(filesToPaste);
       }
     };
 
     window.addEventListener('paste', handlePaste as any);
     return () => window.removeEventListener('paste', handlePaste as any);
-  }, [importMode, isScanning, recording]);
+  }, [importMode, isScanning]);
 
 
   const handleConfirm = async () => {
     if (!processedData) return;
-    const newData = { ...data };
+    const newData = JSON.parse(JSON.stringify(safeData));
     
     if (importMode === 'tpv' && processedData.tpvPreview) {
       const { rows, mapping, date } = processedData.tpvPreview;
-      const newPlatos = [...(data.platos || [])]; const newVentas = [...(data.ventas_menu || [])];
+      const newPlatos = [...safePlatos]; 
+      const newVentas = [...safeVentas];
       let totalVentaDelDia = 0;
       
       rows.slice(1).forEach((row: any[]) => {
@@ -437,7 +477,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       if (!newData.cierres) newData.cierres = [];
       newData.cierres.push({ id: `cierre-imp-${Date.now()}`, date, totalVenta: totalVentaDelDia, origen: 'Importación TPV Madis', efectivo: 0, tarjeta: totalVentaDelDia, apps: 0, notas: "Importado desde Excel", descuadre: 0, unitId: 'REST' });
       saveProfile(rows, mapping);
-      await onSave({ ...data, platos: newPlatos, ventas_menu: newVentas, cierres: newData.cierres });
+      await onSave({ ...newData, platos: newPlatos, ventas_menu: newVentas });
       onNavigate('menus');
     } 
     else if (importMode === 'banco_excel' && processedData.bancoExcel) {
@@ -456,7 +496,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
           <Database className="w-6 h-6 text-white" />
         </div>
         <div>
-          <h2 className="text-2xl font-black text-slate-800 tracking-tight">Data Hub Universal</h2>
+          <h2 className="text-2xl font-black text-slate-800 tracking-tight">ARUME Input System 2.0</h2>
           <p className="text-slate-500 font-bold text-xs uppercase tracking-widest mt-1">Arrastra, sube o pulsa Ctrl+V (Pegar imagen)</p>
         </div>
       </div>
@@ -464,14 +504,10 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden p-6 md:p-8">
         
         {/* SELECTOR GRID TIPO DASHBOARD */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-8">
           <ModuleButton 
-            active={importMode === 'ia_factura'} onClick={() => { setImportMode('ia_factura'); setProcessedData(null); }}
-            icon={Receipt} title="Facturas IA" subtitle="PDF / Ctrl+V" color="indigo"
-          />
-          <ModuleButton 
-            active={importMode === 'ia_albaran'} onClick={() => { setImportMode('ia_albaran'); setProcessedData(null); }}
-            icon={FileText} title="Albaranes IA" subtitle="Foto / Ctrl+V" color="emerald"
+            active={importMode === 'ia_auto'} onClick={() => { setImportMode('ia_auto'); setProcessedData(null); }}
+            icon={Sparkles} title="Magia IA (Auto)" subtitle="Facturas y Albaranes" color="indigo"
           />
           <ModuleButton 
             active={importMode === 'banco_excel'} onClick={() => { setImportMode('banco_excel'); setProcessedData(null); }}
@@ -489,7 +525,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
             className={cn(
               "border-2 border-dashed rounded-[2rem] p-12 flex flex-col items-center justify-center transition-all cursor-pointer relative overflow-hidden",
               isDragging ? "border-indigo-500 bg-indigo-50/50 scale-[1.02]" : "border-slate-200 bg-slate-50 hover:bg-slate-100",
-              (isScanning || recording) && "opacity-50 pointer-events-none"
+              isScanning && "opacity-50 pointer-events-none"
             )}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -498,15 +534,15 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
           >
             <input 
               type="file" 
-              multiple={importMode.startsWith('ia_')} 
+              multiple={importMode === 'ia_auto'} 
               ref={fileInputRef} 
-              disabled={isScanning || recording} 
+              disabled={isScanning} 
               onChange={handleFileUpload} 
-              accept={importMode.startsWith('ia_') ? ".pdf, image/jpeg, image/png" : ".xlsx, .csv"} 
+              accept={importMode === 'ia_auto' ? ".pdf, image/jpeg, image/png" : ".xlsx, .csv"} 
               className="hidden" 
             />
             
-            {/* PROGRESO DEL LOTE IA CON VISOR */}
+            {/* PROGRESO DEL LOTE IA CON VISOR BLINDADO */}
             {batchProgress ? (
               <div className="flex flex-col items-center w-full max-w-sm z-10 text-center">
                 {batchProgress.currentThumb ? (
@@ -522,7 +558,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
                   <Loader2 className="w-12 h-12 text-indigo-500 animate-spin mb-4" />
                 )}
                 <h3 className="text-xl font-black text-slate-800">
-                  {batchProgress.isCoolingDown ? 'Pausa de Seguridad...' : 'Leyendo con IA'}
+                  {batchProgress.isCoolingDown ? 'Pausa de Seguridad...' : 'Analizando e Infiriendo...'}
                 </h3>
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1 mb-4">
                   Documento {batchProgress.current} de {batchProgress.total}
@@ -532,7 +568,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
                 </div>
                 <div className="flex justify-between w-full text-[10px] font-bold px-1">
                    <span className="text-emerald-600">{batchProgress.success} OK</span>
-                   {batchProgress.fails > 0 && <span className="text-rose-500">{batchProgress.fails} Error</span>}
+                   {batchProgress.fails > 0 && <span className="text-rose-500">{batchProgress.fails} Fallos</span>}
                 </div>
               </div>
             ) : (
@@ -541,23 +577,28 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
                   {isScanning ? <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" /> : 
                    importMode === 'banco_excel' ? <Building2 className="w-8 h-8 text-blue-500" /> :
                    importMode === 'tpv' ? <Grid className="w-8 h-8 text-amber-500" /> :
-                   <Upload className="w-8 h-8 text-slate-400" />}
+                   <Sparkles className="w-8 h-8 text-indigo-500" />}
                 </div>
                 
                 <h3 className="text-xl font-black text-slate-700 text-center">
-                  {isScanning ? "Procesando..." : importMode.startsWith('ia_') ? "Selecciona fotos o pulsa Ctrl+V para pegar" : "Sube el Excel de Madis o Banco"}
+                  {isScanning ? "Procesando..." : importMode === 'ia_auto' ? "Auto-Detect: Tira fotos o PDFs mezclados" : "Sube el Excel de Madis o Banco"}
                 </h3>
                 
-                {importMode.startsWith('ia_') && (
-                  <div className="flex items-center gap-2 mt-4 bg-white px-4 py-2 rounded-full border border-slate-200 shadow-sm text-slate-500 text-xs font-bold uppercase tracking-widest">
-                    <ClipboardPaste className="w-4 h-4 text-indigo-500" /> Compatible con Ctrl+V (WhatsApp)
+                {importMode === 'ia_auto' && (
+                  <div className="flex flex-col items-center gap-2 mt-4">
+                    <div className="bg-indigo-50 px-4 py-2 rounded-full border border-indigo-100 shadow-sm text-indigo-600 text-xs font-bold uppercase tracking-widest">
+                      Clasifica Facturas y Albaranes Automáticamente
+                    </div>
+                    <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-full border border-slate-200 shadow-sm text-slate-500 text-[10px] font-bold uppercase tracking-widest">
+                      <ClipboardPaste className="w-3 h-3 text-slate-400" /> Compatible con Ctrl+V (WhatsApp)
+                    </div>
                   </div>
                 )}
               </>
             )}
           </div>
 
-          {/* TARJETA DE CONFIRMACIÓN PARA EXCEL (Madis / Banco) */}
+          {/* TARJETA DE CONFIRMACIÓN PARA EXCEL (Madis / Banco / Edición IA Simple) */}
           <AnimatePresence>
             {processedData && !batchProgress && (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }} className="mt-8">
@@ -582,7 +623,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
                       <div className="bg-amber-50 rounded-xl p-4 text-center border border-amber-100">
                         <Grid className="w-8 h-8 text-amber-500 mx-auto mb-2" />
                         <h3 className="font-black text-slate-800 text-lg">{processedData.tpvPreview.rows.length - 1} ventas el {processedData.tpvPreview.date}</h3>
-                        <p className="text-xs text-slate-500 font-bold mt-1">Generará un nuevo cierre de caja automático.</p>
+                        <p className="text-xs text-slate-500 font-bold mt-1">Se generará un nuevo cierre de caja automático.</p>
                       </div>
                     )}
                   </div>
@@ -621,7 +662,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
               <Receipt className="w-4 h-4 text-rose-500" />
               <span className="font-black text-sm text-slate-800">1. Purgar Documentos</span>
             </div>
-            <p className="text-[10px] text-slate-500 font-medium">Borra TODAS las Facturas y Albaranes. Usa esto para volver a importar tus fotos.</p>
+            <p className="text-[10px] text-slate-500 font-medium">Borra TODAS las Facturas y Albaranes. Usa esto para volver a importar tus fotos de WhatsApp.</p>
           </button>
 
           <button 
@@ -643,7 +684,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
               <Building2 className="w-4 h-4 text-blue-500" />
               <span className="font-black text-sm text-slate-800">3. Purgar Banco</span>
             </div>
-            <p className="text-[10px] text-slate-500 font-medium">Borra todo el extracto bancario si te has equivocado al importar el Excel.</p>
+            <p className="text-[10px] text-slate-500 font-medium">Borra todo el extracto bancario si te has equivocado al importar el Excel de la cuenta.</p>
           </button>
         </div>
       </div>
@@ -652,7 +693,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
   );
 };
 
-// Componentes secundarios (sin cambios)
 const ModuleButton = ({ active, onClick, icon: Icon, title, subtitle, color }: any) => {
   const colors = {
     indigo: active ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-200' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50',
@@ -671,18 +711,3 @@ const ModuleButton = ({ active, onClick, icon: Icon, title, subtitle, color }: a
     </button>
   );
 };
-
-const EditableRow = ({ label, val, onChange, highlight = false, type = "text" }: { label: string, val: string|number, onChange: (v:any)=>void, highlight?: boolean, type?: string }) => (
-  <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-100 hover:border-indigo-200 transition-colors group">
-    <span className="text-[11px] font-bold text-slate-500 uppercase">{label}</span>
-    <input 
-      type={type}
-      value={val}
-      onChange={(e) => onChange(type === 'number' ? Number(e.target.value) : e.target.value)}
-      className={cn(
-        "text-right bg-transparent outline-none border-b border-transparent focus:border-indigo-300 transition-colors px-1 w-1/2", 
-        highlight ? "font-black text-indigo-600 text-xl" : "font-bold text-slate-800 text-sm"
-      )}
-    />
-  </div>
-);
