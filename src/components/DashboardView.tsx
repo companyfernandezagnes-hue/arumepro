@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { 
   LayoutDashboard, Wallet, ArrowUpRight, ArrowDownRight, AlertCircle, 
   TrendingUp, Building2, Hotel, ShoppingBag, Users, SplitSquareHorizontal, 
-  ChevronLeft, ChevronRight, CheckCircle2, ShieldCheck, Mail, Loader2
+  ChevronLeft, ChevronRight, CheckCircle2, ShieldCheck, Mail, Loader2, MailOpen
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Num } from '../services/engine';
@@ -44,7 +44,7 @@ export const DashboardView = ({ data }: { data: AppData }) => {
   const gastosFijos = data?.gastos_fijos ?? [];
   const controlPagos = data?.control_pagos ?? {};
   const ingredientes = data?.ingredientes ?? [];
-  const emailConfigurado = data?.config?.emailGeneral || 'No configurado';
+  const emailConfigurado = data?.config?.emailGeneral || 'Buzón Central';
 
   // ==========================================
   // 📧 EFECTO: CARGAR CORREOS GENERALES
@@ -57,7 +57,7 @@ export const DashboardView = ({ data }: { data: AppData }) => {
           .from('inbox_general')
           .select('*')
           .order('created_at', { ascending: false })
-          .limit(10);
+          .limit(15); // Aumentamos el límite de correos visibles
           
         if (!error && correos) {
           setGeneralEmails(correos);
@@ -331,7 +331,7 @@ export const DashboardView = ({ data }: { data: AppData }) => {
         </div>
       </div>
 
-      {/* 📈 GRÁFICO DE VENTAS */}
+      {/* 📈 GRÁFICO DE VENTAS - Parcheado para evitar crashes visuales */}
       <div className="bg-white p-6 md:p-8 rounded-[3rem] border border-slate-100 shadow-sm min-w-0">
         <div className="flex justify-between items-center mb-8">
           <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
@@ -340,7 +340,8 @@ export const DashboardView = ({ data }: { data: AppData }) => {
           </h3>
         </div>
         <div className="h-[280px] w-full min-w-0">
-          <ResponsiveContainer width="100%" height="100%" key={`${viewMode}-${selectedMonth}-${selectedQuarter}-${selectedYear}`}>
+          {/* Añadido aspect={2} y minWidth={0} para que Recharts no muera si la pestaña está oculta */}
+          <ResponsiveContainer width="100%" aspect={2} minWidth={0} key={`${viewMode}-${selectedMonth}-${selectedQuarter}-${selectedYear}`}>
             <AreaChart data={chartData}>
               <defs>
                 <linearGradient id="colorVenta" x1="0" y1="0" x2="0" y2="1">
@@ -434,28 +435,38 @@ export const DashboardView = ({ data }: { data: AppData }) => {
         {/* COLUMNA 3: Correos Generales + Alertas */}
         <div className="lg:col-span-4 flex flex-col gap-6">
           
-          <div className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 shadow-xl flex-1 flex flex-col relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-4 opacity-5"><Mail className="w-32 h-32" /></div>
-            <h3 className="text-sm font-black text-white uppercase tracking-widest mb-1 flex items-center gap-2 relative z-10"><Mail className="w-4 h-4 text-blue-400" /> Buzón de Empresa</h3>
-            <p className="text-[9px] text-slate-400 font-black uppercase tracking-widest mb-4 relative z-10">{emailConfigurado}</p>
+          <div className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 shadow-xl flex-1 flex flex-col relative overflow-hidden group">
+            <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity"><Mail className="w-32 h-32" /></div>
+            
+            <div className="flex justify-between items-start mb-4 relative z-10">
+              <div>
+                <h3 className="text-sm font-black text-white uppercase tracking-widest mb-1 flex items-center gap-2"><MailOpen className="w-4 h-4 text-blue-400" /> Buzón Central</h3>
+                <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">{emailConfigurado}</p>
+              </div>
+              <span className="bg-blue-500/20 text-blue-300 text-[10px] font-black px-2.5 py-1 rounded-lg border border-blue-500/30">
+                {generalEmails.length} Correos
+              </span>
+            </div>
             
             <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 max-h-[180px] relative z-10 pr-2">
               {loadingEmails ? (
                 <div className="flex flex-col items-center justify-center h-full opacity-50 py-4">
                   <Loader2 className="w-6 h-6 text-blue-400 animate-spin mb-2" />
-                  <p className="text-[10px] font-bold text-slate-400 uppercase">Sincronizando IMAP...</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Sincronizando IMAP...</p>
                 </div>
               ) : generalEmails.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full opacity-50 py-4 text-center">
                   <CheckCircle2 className="w-8 h-8 text-slate-500 mb-2" />
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Bandeja vacía</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Bandeja al día</p>
                 </div>
               ) : (
                 generalEmails.map((email) => (
-                  <div key={email.id} className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700 hover:border-blue-500/50 transition cursor-default">
-                    <p className="text-xs font-bold text-white truncate">{email.remitente}</p>
-                    <p className="text-[10px] text-slate-400 truncate mt-0.5">{email.asunto}</p>
-                    <p className="text-[8px] font-black text-blue-400 mt-2 text-right">{new Date(email.created_at).toLocaleDateString()}</p>
+                  <div key={email.id} className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700 hover:border-blue-500/50 hover:bg-slate-800 transition cursor-default">
+                    <div className="flex justify-between items-start">
+                      <p className="text-xs font-bold text-white truncate max-w-[70%]">{email.remitente}</p>
+                      <p className="text-[8px] font-black text-blue-400 mt-0.5 shrink-0 bg-blue-900/50 px-1.5 py-0.5 rounded">{new Date(email.created_at).toLocaleDateString()}</p>
+                    </div>
+                    <p className="text-[10px] text-slate-400 truncate mt-1 leading-tight">{email.asunto}</p>
                   </div>
                 ))
               )}
