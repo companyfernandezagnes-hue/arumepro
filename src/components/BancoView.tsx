@@ -9,7 +9,7 @@ import {
   Loader2, Landmark, ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AppData, Albaran, Factura, BankMovement } from '../types';
+import { AppData, Albaran, FacturaExtended, BankMovement } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
 import { proxyFetch } from '../services/api';
@@ -30,7 +30,7 @@ function fingerprint(date: string, amount: number, desc: string) {
 
 function daysBetween(a: string, b: string) {
   const A = new Date(a).getTime(), B = new Date(b).getTime();
-  return Math.abs(A - B) / 86400000;
+  return (B - A) / 86400000; // Devuelve días positivos si B es posterior a A
 }
 
 const SUSP_PATTERNS = ['COMISION', 'FEE', 'INTERES', 'INTERESES', 'CARGO', 'GASTO BANCO', 'RETENCION', 'ANULACION', 'AJUSTE'];
@@ -40,27 +40,33 @@ function isSuspicious(desc: string) {
   return SUSP_PATTERNS.some(p => d.includes(p));
 }
 
+// 🛡️ BÚSQUEDA MEJORADA: Ahora cruza fechas para evitar falsos positivos
 function findMatches(item: BankMovement, data: AppData) {
   if (!item) return [];
   const amt = Math.abs(Num.parse(item.amount));
   const descNorm = normalizeDesc(item.desc);
+  const bankDate = item.date; // Fecha del cargo/ingreso en banco
   const results: any[] = [];
   
   const TOLERANCIA_FIJA = 1.00; 
   const TOLERANCIA_NOMBRE = 10.00; 
   const MAX_COMISION_TPV = 0.035; 
+  const MAX_DAYS_OLD = 90; // Solo busca facturas/albaranes de los últimos 90 días respecto al cargo
 
   if (Num.parse(item.amount) > 0) {
+    // INGRESOS EN BANCO (Cierres TPV o Facturas a Clientes)
     data.cierres?.forEach((c: any) => {
       if (!c.conciliado_banco) {
         const tpvDeclarado = Num.parse(c.tarjeta);
         const diferencia = tpvDeclarado - amt; 
         const porcentajeDiferencia = tpvDeclarado > 0 ? diferencia / tpvDeclarado : 0;
+        const daysPassed = daysBetween(c.date, bankDate);
 
-        if (diferencia >= -0.5 && porcentajeDiferencia <= MAX_COMISION_TPV) {
+        // El cierre debe ser del mismo día o anterior (hasta 7 días por si pilla puente de finde)
+        if (daysPassed >= 0 && daysPassed <= 7 && diferencia >= -0.5 && porcentajeDiferencia <= MAX_COMISION_TPV) {
           results.push({ 
             type: 'TPV CAJA', id: c.id, date: c.date, 
-            title: `Cierre ${c.date} (Comisión: ${Num.fmt(diferencia)})`, 
+            title: `Cierre ${c.date} (Comisión TPV: ${Num.fmt(diferencia)})`, 
             amount: tpvDeclarado, realAmount: amt, comision: diferencia, color: 'emerald' 
           });
         }
@@ -69,59 +75,84 @@ function findMatches(item: BankMovement, data: AppData) {
 
     data.facturas?.forEach((f: any) => {
       if (f.cliente !== "Z DIARIO" && !f.reconciled && Num.parse(f.total) > 0) {
-        const matchImporte = Math.abs(Num.parse(f.total) - amt) <= TOLERANCIA_FIJA;
-        const matchNombre = descNorm.includes(normalizeDesc(f.cliente));
-        if (matchImporte || (matchNombre && Math.abs(Num.parse(f.total) - amt) <= TOLERANCIA_NOMBRE)) {
-          results.push({ type: 'FACTURA CLIENTE', id: f.id, date: f.date, title: `Fac ${f.num} (${f.cliente})`, amount: Num.parse(f.total), color: 'teal' });
+        const daysPassed = daysBetween(f.date, bankDate);
+        if (daysPassed >= -2 && daysPassed <= MAX_DAYS_OLD) { // Permite -2 por si la factura la emitiste un día tarde
+          const matchImporte = Math.abs(Num.parse(f.total) - amt) <= TOLERANCIA_FIJA;
+          const matchNombre = descNorm.includes(normalizeDesc(f.cliente));
+          if (matchImporte || (matchNombre && Math.abs(Num.parse(f.total) - amt) <= TOLERANCIA_NOMBRE)) {
+            results.push({ type: 'FACTURA CLIENTE', id: f.id, date: f.date, title: `Fac ${f.num} (${f.cliente})`, amount: Num.parse(f.total), color: 'teal' });
+          }
         }
       }
     });
   } else {
+    // GASTOS EN BANCO (Facturas de Prov, Albaranes sueltos o Gastos Fijos)
     data.albaranes?.forEach((a: any) => {
       if (!a.reconciled && Num.parse(a.total) > 0) {
-        const matchImporte = Math.abs(Num.parse(a.total) - amt) <= TOLERANCIA_FIJA;
-        const matchNombre = descNorm.includes(normalizeDesc(a.prov));
-        if (matchImporte || (matchNombre && Math.abs(Num.parse(a.total) - amt) <= TOLERANCIA_NOMBRE)) {
-          results.push({ type: 'ALBARÁN SUELTO', id: a.id, date: a.date, title: `${a.prov} (${a.num})`, amount: Num.parse(a.total), color: 'indigo' });
+        const daysPassed = daysBetween(a.date, bankDate);
+        if (daysPassed >= 0 && daysPassed <= MAX_DAYS_OLD) {
+          const matchImporte = Math.abs(Num.parse(a.total) - amt) <= TOLERANCIA_FIJA;
+          const matchNombre = descNorm.includes(normalizeDesc(a.prov));
+          if (matchImporte || (matchNombre && Math.abs(Num.parse(a.total) - amt) <= TOLERANCIA_NOMBRE)) {
+            results.push({ type: 'ALBARÁN SUELTO', id: a.id, date: a.date, title: `${a.prov} (Ref: ${a.num || 'S/N'})`, amount: Num.parse(a.total), color: 'indigo' });
+          }
         }
       }
     });
 
     data.facturas?.forEach((f: any) => {
       if (Num.parse(f.total) > 0 && !f.reconciled) {
-        const matchImporte = Math.abs(Num.parse(f.total) - amt) <= TOLERANCIA_FIJA;
-        const matchNombre = descNorm.includes(normalizeDesc(f.prov));
-        if (matchImporte || (matchNombre && Math.abs(Num.parse(f.total) - amt) <= TOLERANCIA_NOMBRE)) {
-          results.push({ type: 'FACTURA PROV', id: f.id, date: f.date, title: `Fac ${f.num} (${f.prov})`, amount: Num.parse(f.total), color: 'rose' });
+        const daysPassed = daysBetween(f.date, bankDate);
+        if (daysPassed >= 0 && daysPassed <= MAX_DAYS_OLD) {
+          const matchImporte = Math.abs(Num.parse(f.total) - amt) <= TOLERANCIA_FIJA;
+          const matchNombre = descNorm.includes(normalizeDesc(f.prov));
+          if (matchImporte || (matchNombre && Math.abs(Num.parse(f.total) - amt) <= TOLERANCIA_NOMBRE)) {
+            results.push({ type: 'FACTURA PROV', id: f.id, date: f.date, title: `Fac ${f.num} (${f.prov})`, amount: Num.parse(f.total), color: 'rose' });
+          }
         }
       }
     });
 
     data.gastos_fijos?.forEach((g: any) => {
       if (g.active !== false && Math.abs(Num.parse(g.amount) - amt) <= TOLERANCIA_FIJA) {
-        results.push({ type: 'GASTO FIJO/NÓMINA', id: g.id, date: item.date, title: g.name, amount: Num.parse(g.amount), color: 'amber' });
+        // No filtramos gastos fijos por fecha exacta porque suelen ser cargos recurrentes que varían de día
+        results.push({ type: 'GASTO FIJO', id: g.id, date: item.date, title: g.name, amount: Num.parse(g.amount), color: 'amber' });
       }
     });
   }
 
+  // Ordenamos por la diferencia de importe (los más exactos primero)
   return results.sort((a, b) => Math.abs(a.amount - amt) - Math.abs(b.amount - amt));
 }
 
+// 🛡️ ENLACE SEGURO (Cascada de pagos)
 function executeLink(newData: AppData, bankId: string, matchType: string, docId: string, comision: number = 0) {
   const bItem: any = newData.banco?.find((b: any) => b.id === bankId);
   if (!bItem) return;
 
   if (matchType.includes('ALBARÁN')) {
     const alb = newData.albaranes?.find((a: any) => a.id === docId);
-    if (alb) { alb.reconciled = true; alb.paid = true; alb.status = 'paid'; }
+    if (alb) { 
+      alb.reconciled = true; 
+      alb.paid = true; 
+      alb.status = 'paid'; 
+    }
     bItem.link = { type: 'ALBARAN', id: docId }; 
   } else if (matchType.includes('FACTURA')) {
     const fac = newData.facturas?.find((f: any) => f.id === docId);
     if (fac) { 
-      fac.reconciled = true; fac.paid = true; fac.status = 'reconciled';
-      if (fac.albaranIdsArr?.length) {
+      fac.reconciled = true; 
+      fac.paid = true; 
+      fac.status = 'reconciled';
+      
+      // 💡 FIX: Cascada de pagos. Si pagamos la factura, pagamos sus albaranes.
+      if (fac.albaranIdsArr && fac.albaranIdsArr.length > 0) {
         newData.albaranes?.forEach((a: any) => {
-          if (fac.albaranIdsArr.includes(a.id)) { a.reconciled = true; a.paid = true; }
+          if (fac.albaranIdsArr!.includes(a.id)) { 
+            a.reconciled = true; 
+            a.paid = true;
+            a.status = 'paid';
+          }
         });
       }
     }
@@ -141,7 +172,7 @@ function executeLink(newData: AppData, bankId: string, matchType: string, docId:
         if (!newData.gastos_fijos) newData.gastos_fijos = [];
         const comisionId = 'gf-comision-' + Date.now();
         newData.gastos_fijos.push({
-          id: comisionId, name: `Comisión TPV/Plataforma (${cierre.date})`, amount: Num.round2(comision), 
+          id: comisionId, name: `Comisión TPV (${cierre.date})`, amount: Num.round2(comision), 
           freq: 'puntual', dia_pago: new Date(bItem.date).getDate(), cat: 'varios', active: false
         });
         const d = new Date(bItem.date);
@@ -159,6 +190,56 @@ function executeLink(newData: AppData, bankId: string, matchType: string, docId:
 
   bItem.status = 'matched';
 }
+
+/* =======================================================
+ * 🎨 COMPONENTE: Rayo de Energía (Para SwipeReconciler)
+ * ======================================================= */
+const EnergyBeam = ({ sourceId, targetId, isActive }: { sourceId: string, targetId: string, isActive: boolean }) => {
+  const [coords, setCoords] = useState<{x1: number, y1: number, x2: number, y2: number} | null>(null);
+
+  useEffect(() => {
+    const update = () => {
+      const el1 = document.getElementById(sourceId);
+      const el2 = document.getElementById(targetId);
+      if (el1 && el2) {
+        const r1 = el1.getBoundingClientRect();
+        const r2 = el2.getBoundingClientRect();
+        setCoords({
+          x1: r1.left + r1.width / 2,
+          y1: r1.bottom,
+          x2: r2.left + r2.width / 2,
+          y2: r2.top
+        });
+      }
+    };
+    const t = setTimeout(update, 200);
+    window.addEventListener('resize', update);
+    return () => { clearTimeout(t); window.removeEventListener('resize', update); };
+  }, [sourceId, targetId]);
+
+  if (!coords) return null;
+
+  return (
+    <svg className="absolute inset-0 pointer-events-none z-0 w-full h-full" style={{ overflow: 'visible' }}>
+      <motion.path
+        initial={{ pathLength: 0, opacity: 0 }}
+        animate={{ pathLength: 1, opacity: isActive ? 1 : 0.3 }}
+        d={`M ${coords.x1} ${coords.y1} C ${coords.x1} ${coords.y1 + 50}, ${coords.x2} ${coords.y2 - 50}, ${coords.x2} ${coords.y2}`}
+        stroke={isActive ? "#10b981" : "#818cf8"} // Emerald en hover, Indigo por defecto
+        strokeWidth={isActive ? "4" : "2"}
+        fill="none"
+        strokeDasharray={isActive ? "none" : "4 4"}
+        className="transition-all duration-300"
+        style={{ filter: isActive ? "drop-shadow(0 0 8px #34d399)" : "none" }}
+      />
+      {isActive && (
+        <circle r="6" fill="#34d399" style={{ filter: "drop-shadow(0 0 10px #10b981)" }}>
+          <animateMotion dur="0.8s" repeatCount="1" path={`M ${coords.x1} ${coords.y1} C ${coords.x1} ${coords.y1 + 50}, ${coords.x2} ${coords.y2 - 50}, ${coords.x2} ${coords.y2}`} />
+        </circle>
+      )}
+    </svg>
+  );
+};
 
 
 // ============================================================================
@@ -268,7 +349,6 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
 
         result.movements.forEach((m: any) => {
           const fp = fingerprint(m.date, Num.parse(m.amount), m.desc);
-          // Evitamos duplicados usando el fingerprint
           if (!newData.banco.some((b: any) => b.hash === fp)) {
             newData.banco.push({ 
               id: 'march-' + Date.now() + Math.random().toString(36).slice(2, 7), 
@@ -567,12 +647,14 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
             <AnimatePresence mode="wait">
               {selectedItem ? (
                 <motion.div key={selectedItem.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="flex-1 flex flex-col">
-                  <div className="border-b border-slate-100 pb-8 mb-8">
+                  <div className="border-b border-slate-100 pb-8 mb-8 relative">
                     <span className={cn("text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest", Num.parse(selectedItem.amount) > 0 ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700")}>
                       {Num.parse(selectedItem.amount) > 0 ? 'INGRESO DETECTADO' : 'GASTO DETECTADO'}
                     </span>
                     <h3 className="font-black text-3xl mt-5 leading-tight text-slate-800 tracking-tighter">{selectedItem.desc}</h3>
-                    <p className={cn("text-5xl font-black mt-3 tracking-tighter", Num.parse(selectedItem.amount) > 0 ? "text-emerald-500" : "text-slate-900")}>{Num.fmt(selectedItem.amount)}</p>
+                    <p id={`bank-preview-${selectedItem.id}`} className={cn("text-5xl font-black mt-3 tracking-tighter inline-block", Num.parse(selectedItem.amount) > 0 ? "text-emerald-500" : "text-slate-900")}>
+                      {Num.fmt(selectedItem.amount)}
+                    </p>
                   </div>
 
                   <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 mb-6">
@@ -582,7 +664,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
                           <Sparkles className="w-4 h-4 text-indigo-500" /> Sugerencias Inteligentes
                         </p>
                         {matches.map((m: any, idx: number) => (
-                          <div key={idx} className={cn("flex justify-between items-center p-5 rounded-[2rem] border-2 hover:shadow-lg transition-all", m.color === 'emerald' ? "bg-emerald-50 border-emerald-100" : m.color === 'amber' ? "bg-amber-50 border-amber-100" : "bg-indigo-50 border-indigo-100")}>
+                          <div key={idx} id={`match-preview-${m.id}`} className={cn("flex justify-between items-center p-5 rounded-[2rem] border-2 hover:shadow-lg transition-all", m.color === 'emerald' ? "bg-emerald-50 border-emerald-100" : m.color === 'amber' ? "bg-amber-50 border-amber-100" : "bg-indigo-50 border-indigo-100")}>
                             <div className="text-left">
                               <span className="text-[9px] font-black uppercase tracking-widest opacity-70">{m.type}</span>
                               <p className="text-sm font-black text-slate-800 mt-1">{m.title}</p>
@@ -657,27 +739,23 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
 // 👆 BLOQUE 3: SWIPE RECONCILER (El "Tinder" Bancario integrado)
 // ============================================================================
 
-interface SwipeReconcilerProps {
-  data: AppData;
-  onSave: (newData: AppData) => Promise<void>;
-  onClose: () => void;
-}
-
 const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, onClose }) => {
   const pendingMovements = useMemo(() => {
     return (data.banco || []).filter((b: any) => b.status === 'pending');
   }, [data.banco]);
 
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [hoveredMatch, setHoveredMatch] = useState<string | null>(null);
+  const [isLinking, setIsLinking] = useState(false);
   
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') next();
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'ArrowLeft' && !isLinking) next();
+      if (e.key === 'Escape' && !isLinking) onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentIndex, pendingMovements.length]);
+  }, [currentIndex, pendingMovements.length, isLinking]);
 
   const next = () => setCurrentIndex(prev => prev + 1);
 
@@ -706,16 +784,31 @@ const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, onClose
   }, [currentItem, data]);
 
   const handleLinkLocal = async (matchType: string, docId: string, comision: number = 0) => {
-    const newData = JSON.parse(JSON.stringify(data));
-    executeLink(newData, currentItem.id, matchType, docId, comision); 
-    await onSave(newData);
+    if (isLinking) return;
+    setIsLinking(true);
+    setHoveredMatch(docId);
+
+    // Damos tiempo a ver la animación del rayo verde
+    await new Promise(r => setTimeout(r, 600));
+
+    try {
+      const newData = JSON.parse(JSON.stringify(data));
+      executeLink(newData, currentItem.id, matchType, docId, comision); 
+      await onSave(newData);
+      next();
+    } catch (e) {
+      alert("Error al enlazar");
+    } finally {
+      setIsLinking(false);
+      setHoveredMatch(null);
+    }
   };
 
   const progressPercent = Math.round((currentIndex / pendingMovements.length) * 100);
 
   return (
     <div className="fixed inset-0 z-[1000] flex justify-center items-center p-4 overflow-hidden">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-slate-900/95 backdrop-blur-xl" />
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => !isLinking && onClose()} className="absolute inset-0 bg-slate-900/95 backdrop-blur-xl" />
       
       <div className="relative z-10 w-full max-w-lg flex flex-col items-center">
         <div className="w-full flex justify-between items-center mb-6 px-4">
@@ -726,66 +819,84 @@ const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, onClose
               <p className="text-indigo-400 text-[11px] font-black uppercase tracking-widest mt-1">{pendingMovements.length - currentIndex} RESTANTES</p>
             </div>
           </div>
-          <button onClick={onClose} className="text-white/40 hover:text-white hover:rotate-90 transition-all"><CloseIcon className="w-8 h-8" /></button>
+          <button onClick={onClose} disabled={isLinking} className="text-white/40 hover:text-white hover:rotate-90 transition-all disabled:opacity-0"><CloseIcon className="w-8 h-8" /></button>
         </div>
 
         <AnimatePresence mode="popLayout">
           <motion.div 
             key={currentItem.id}
-            initial={{ scale: 0.9, opacity: 0, y: 50 }} animate={{ scale: 1, opacity: 1, y: 0, x: 0, rotate: 0 }} exit={{ scale: 0.9, opacity: 0, x: -200, rotate: -10 }} 
+            initial={{ scale: 0.9, opacity: 0, y: 50 }} 
+            animate={{ scale: isLinking ? 1.05 : 1, opacity: isLinking ? 0 : 1, y: isLinking ? -100 : 0, x: 0, rotate: 0 }} 
+            exit={{ scale: 0.9, opacity: 0, x: -200, rotate: -10 }} 
             transition={{ type: "spring", stiffness: 300, damping: 25 }}
-            drag="x" dragConstraints={{ left: 0, right: 0 }} dragElastic={0.7}
+            drag={!isLinking ? "x" : false} dragConstraints={{ left: 0, right: 0 }} dragElastic={0.7}
             onDragEnd={(e, { offset, velocity }) => { if (offset.x < -50 || velocity.x < -500) next(); }}
-            className="w-full bg-white rounded-[3rem] p-10 shadow-2xl flex flex-col min-h-[550px] cursor-grab active:cursor-grabbing"
+            className={cn("w-full rounded-[3rem] p-10 shadow-2xl flex flex-col min-h-[550px] relative overflow-hidden", isLinking ? "bg-emerald-50 border-4 border-emerald-400" : "bg-white cursor-grab active:cursor-grabbing")}
           >
-            <div className="text-center mb-8 pointer-events-none">
-              <span className={cn("text-[11px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest mb-5 inline-block", Num.parse(currentItem.amount) > 0 ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700")}>
-                {Num.parse(currentItem.amount) > 0 ? 'Ingreso detectado' : 'Gasto detectado'}
+            {isLinking && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.2 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-emerald-400 z-0 pointer-events-none" />
+            )}
+
+            <div className="text-center mb-8 pointer-events-none relative z-10">
+              <span className={cn("text-[11px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest mb-5 inline-flex items-center gap-1", Num.parse(currentItem.amount) > 0 ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700")}>
+                {isLinking && <Zap className="w-3 h-3 animate-pulse" />}
+                {Num.parse(currentItem.amount) > 0 ? 'Ingreso en Banco' : 'Cargo en Banco'}
               </span>
               <h2 className="text-3xl font-black text-slate-800 leading-tight mb-3 line-clamp-2 tracking-tighter">{currentItem.desc}</h2>
-              <p className="text-6xl font-black text-slate-900 tracking-tighter">{Num.fmt(currentItem.amount)}</p>
+              <p id={`bank-amount-${currentItem.id}`} className="text-6xl font-black text-slate-900 tracking-tighter inline-block relative">
+                {Num.fmt(currentItem.amount)}
+              </p>
               <p className="text-[11px] text-slate-400 font-bold mt-4 uppercase tracking-widest bg-slate-50 inline-block px-4 py-1.5 rounded-full">Fecha: {currentItem.date}</p>
             </div>
 
-            <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 mb-6">
+            <div className="flex-1 overflow-visible relative z-10">
               {matches.length > 0 ? (
-                <div className="space-y-4">
+                <div className="space-y-4 relative">
                   <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-4 text-center">Coincidencias (Tap para enlazar)</p>
-                  {matches.map((m: any, idx: number) => (
-                    <motion.div 
-                      key={idx} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-                      onClick={() => handleLinkLocal(m.type, m.id, m.comision || 0)}
-                      className={cn("flex justify-between items-center p-5 rounded-[2rem] border-2 cursor-pointer transition-all shadow-sm hover:shadow-md",
-                        m.color === 'emerald' ? "bg-emerald-50 border-emerald-100 hover:border-emerald-300" : 
-                        m.color === 'teal' ? "bg-teal-50 border-teal-100 hover:border-teal-300" :
-                        m.color === 'amber' ? "bg-amber-50 border-amber-100 hover:border-amber-300" :
-                        m.color === 'indigo' ? "bg-indigo-50 border-indigo-100 hover:border-indigo-300" : "bg-rose-50 border-rose-100 hover:border-rose-300"
-                      )}
-                    >
-                      <div className="text-left">
-                        <span className={cn("text-[9px] font-black uppercase tracking-widest",
-                          m.color === 'emerald' ? "text-emerald-700" : m.color === 'teal' ? "text-teal-700" :
-                          m.color === 'amber' ? "text-amber-700" : m.color === 'indigo' ? "text-indigo-700" : "text-rose-700"
-                        )}>{m.type}</span>
-                        <p className="text-sm font-black text-slate-800 mt-1">{m.title}</p>
+                  {matches.map((m: any, idx: number) => {
+                    const matchIdStr = `match-card-${m.id}`;
+                    const isHovered = hoveredMatch === m.id;
+                    
+                    return (
+                      <div key={idx} className="relative">
+                        <EnergyBeam sourceId={`bank-amount-${currentItem.id}`} targetId={matchIdStr} isActive={isHovered} />
+                        <motion.div 
+                          id={matchIdStr}
+                          onHoverStart={() => !isLinking && setHoveredMatch(m.id)}
+                          onHoverEnd={() => !isLinking && setHoveredMatch(null)}
+                          whileHover={!isLinking ? { scale: 1.03, y: -2 } : {}} 
+                          whileTap={!isLinking ? { scale: 0.98 } : {}}
+                          onClick={() => handleLinkLocal(m.type, m.id, m.comision || 0)}
+                          className={cn("flex justify-between items-center p-5 rounded-[2rem] border-2 cursor-pointer transition-all shadow-sm relative z-20 bg-white",
+                            isHovered ? "border-emerald-400 shadow-emerald-200/50 shadow-lg" : "border-slate-200 hover:border-indigo-300"
+                          )}
+                        >
+                          <div className="text-left">
+                            <span className={cn("text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded",
+                              m.color === 'emerald' ? "bg-emerald-50 text-emerald-700" : m.color === 'teal' ? "bg-teal-50 text-teal-700" :
+                              m.color === 'amber' ? "bg-amber-50 text-amber-700" : m.color === 'indigo' ? "bg-indigo-50 text-indigo-700" : "bg-rose-50 text-rose-700"
+                            )}>{m.type}</span>
+                            <p className="text-sm font-black text-slate-800 mt-2">{m.title}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className={cn("font-black text-lg", isHovered ? "text-emerald-600" : "text-slate-800")}>{Num.fmt(m.amount)}</p>
+                          </div>
+                        </motion.div>
                       </div>
-                      <div className="text-right">
-                        <p className="font-black text-lg text-slate-900 tracking-tighter">{Num.fmt(m.amount)}</p>
-                      </div>
-                    </motion.div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-center opacity-40 py-10 pointer-events-none">
                   <Search className="w-14 h-14 mb-4" />
-                  <p className="text-xs font-black uppercase tracking-widest">No hay coincidencias claras</p>
-                  <p className="text-[11px] font-bold mt-2">Sáltalo o usa la lista manual</p>
+                  <p className="text-xs font-black uppercase tracking-widest">Sin coincidencias</p>
+                  <p className="text-[11px] font-bold mt-2">Sáltalo deslizando</p>
                 </div>
               )}
             </div>
 
-            <div className="flex gap-4 mt-auto">
-              <button onClick={next} className="flex-1 bg-slate-100 text-slate-500 py-6 rounded-[2.5rem] font-black text-xs uppercase tracking-widest hover:bg-slate-200 hover:text-slate-800 transition flex items-center justify-center gap-2">
+            <div className="flex gap-4 mt-auto pt-6 relative z-10">
+              <button disabled={isLinking} onClick={next} className="flex-1 bg-slate-100 text-slate-500 py-6 rounded-[2.5rem] font-black text-xs uppercase tracking-widest hover:bg-slate-200 hover:text-slate-800 transition flex items-center justify-center gap-2 disabled:opacity-50">
                 <ArrowDownLeft className="w-5 h-5 rotate-45" /> SALTAR MOVIMIENTO
               </button>
             </div>
@@ -794,7 +905,7 @@ const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, onClose
 
         <div className="mt-8 w-full px-8">
           <div className="h-2 w-full bg-white/10 rounded-full overflow-hidden">
-            <motion.div initial={{ width: 0 }} animate={{ width: `${progressPercent}%` }} className="h-full bg-indigo-500 rounded-full" />
+            <motion.div initial={{ width: 0 }} animate={{ width: `${progressPercent}%` }} className="h-full bg-indigo-500 rounded-full shadow-[0_0_10px_rgba(99,102,241,0.8)]" />
           </div>
         </div>
       </div>
