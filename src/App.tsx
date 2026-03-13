@@ -267,13 +267,11 @@ export default function App() {
   const REQUIRED: (keyof AppData)[] = ['banco','platos','recetas','ingredientes','ventas_menu','cierres','facturas','albaranes','gastos_fijos'];
   
   useEffect(() => {
-    // 🛡️ EL ESCUDO: Si la base de datos está cargando o es nula, NO TOCAMOS NADA para no borrar tus datos.
     if (loading || !db) return; 
     
     let changed = false;
     const next = { ...db };
     
-    // Solo rellenamos arrays si realmente no existen en tu base de datos actual.
     for (const k of REQUIRED) { 
       if (!next[k] || !Array.isArray(next[k])) { 
         (next as any)[k] = []; 
@@ -282,7 +280,7 @@ export default function App() {
     }
     
     if (!next.config) { 
-      next.config = { objetivoMensual: 45000, n8nUrlBanco: "", n8nUrlIA: "" }; 
+      next.config = { objetivoMensual: 45000, n8nUrlBanco: "", n8nUrlIA: "", emailGeneral: "" }; 
       changed = true; 
     }
     
