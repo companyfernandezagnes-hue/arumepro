@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Upload, FileText, CheckCircle2, Database, Building2,
-  Sparkles, Loader2, Receipt, Mic, Square, AlertTriangle, X, Edit3, Grid, ListPlus, Trash2, ClipboardPaste
+  Sparkles, Loader2, Receipt, Mic, Square, AlertTriangle, X, Edit3, Grid, ListPlus, Trash2, ClipboardPaste, CalendarClock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
@@ -80,12 +80,6 @@ const extractJSON = (rawText: string) => {
   } catch { return {}; }
 };
 
-const cleanMime = (t: string) => {
-  const base = (t || '').split(';')[0].trim().toLowerCase();
-  const ok = ['audio/webm','audio/ogg','audio/mpeg','audio/mp3','audio/wav','audio/mp4'];
-  return ok.includes(base) ? base : 'audio/webm';
-};
-
 const compressImage = async (file: File | Blob): Promise<string> => {
   const MAX_BYTES = 4 * 1024 * 1024; const MAX_W = 1600, MAX_H = 1600;
   const bitmap = await createImageBitmap(file); let { width, height } = bitmap;
@@ -122,14 +116,13 @@ const analyzeDocumentWithAI = async (mimeType: string, base64Data: string, promp
     } catch (e: any) {
       console.warn("⚠️ Gemini falló o se agotaron los tokens:", e.message);
       lastError = e;
-      // Si no tenemos GroqKey o es un PDF (Groq no lee PDF en este endpoint aún), lanzamos el error de Gemini.
       if (!groqKey || mimeType === 'application/pdf') throw e; 
     }
   }
 
   // 2️⃣ INTENTO 2: GROQ (Llama-3.2-Vision) SALVAVIDAS
   if (groqKey && mimeType.startsWith('image/')) {
-    console.log("🔄 Activando Fallback a GROQ (Llama 3.2 Vision)...");
+    console.log("🔄 Activando Fallback a GROQ...");
     try {
       const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
@@ -211,33 +204,58 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { analyzeColumns, saveProfile } = useColumnDetector();
 
-  // 💣 PANEL DE RESETEO SEGURO
-  const handleNukeData = async (type: 'docs' | 'ops' | 'bank') => {
-    let msg = "";
-    if (type === 'docs') msg = "Vas a borrar TODAS las facturas y albaranes.";
-    if (type === 'ops') msg = "Vas a borrar TODOS los Platos de la carta. 🛡️ TUS CIERRES DE CAJA Y VENTAS DIARIAS ESTÁN A SALVO.";
-    if (type === 'bank') msg = "Vas a borrar TODOS los movimientos bancarios.";
+  // 💣 PANEL DE RESETEO QUIRÚRGICO (Meses Específicos)
+  const [deleteMonth, setDeleteMonth] = useState(String(new Date().getMonth() + 1).padStart(2, '0'));
+  const [deleteYear, setDeleteYear] = useState(String(new Date().getFullYear()));
+
+  const handleNukeQuirurgico = async (type: 'docs' | 'bank') => {
+    const mesNombre = new Date(Number(deleteYear), Number(deleteMonth) - 1).toLocaleString('es', { month: 'long', year: 'numeric' });
+    const tipoStr = type === 'docs' ? 'FACTURAS y ALBARANES' : 'MOVIMIENTOS BANCARIOS';
     
-    const confirmation = window.prompt(`⚠️ PELIGRO CRÍTICO ⚠️\n\n${msg}\n\nEscribe "BORRAR" en mayúsculas para confirmar:`);
+    const confirmation = window.prompt(`⚠️ BORRADO LÁSER ACTIVADO ⚠️\n\nVas a borrar TODOS los ${tipoStr} del mes de:\n👉 ${mesNombre.toUpperCase()}\n\nEl resto de la base de datos estará a salvo.\n\nEscribe "${mesNombre.split(' ')[0].toUpperCase()}" para confirmar:`);
     
-    if (confirmation === 'BORRAR') {
+    if (confirmation === mesNombre.split(' ')[0].toUpperCase()) {
       setIsScanning(true);
       const newData = JSON.parse(JSON.stringify(safeData));
       
+      const isTargetMonth = (dateStr: string) => {
+        if (!dateStr) return false;
+        try {
+          // Extraemos YYYY-MM seguro
+          const d = new Date(dateStr);
+          if (Number.isNaN(d.getTime())) return false;
+          return d.getFullYear() === Number(deleteYear) && (d.getMonth() + 1) === Number(deleteMonth);
+        } catch { return false; }
+      };
+
       if (type === 'docs') {
-        newData.facturas = [];
-        newData.albaranes = [];
-      } else if (type === 'ops') {
-        newData.platos = [];
+        newData.facturas = safeFacturas.filter(f => !isTargetMonth(f.date));
+        newData.albaranes = safeAlbaranes.filter(a => !isTargetMonth(a.date));
       } else if (type === 'bank') {
-        newData.banco = [];
+        const safeBanco = Array.isArray(newData.banco) ? newData.banco : [];
+        newData.banco = safeBanco.filter((b:any) => !isTargetMonth(b.date));
       }
 
       await onSave(newData);
       setIsScanning(false);
-      alert(`✅ Limpieza completada con éxito.`);
+      alert(`✅ Limpieza de ${mesNombre.toUpperCase()} completada con éxito.`);
+    } else if (confirmation !== null) {
+      alert("❌ Código de seguridad incorrecto. Operación cancelada.");
     }
   };
+
+  const handleNukeDataOps = async () => {
+    const confirmation = window.prompt(`⚠️ PELIGRO ⚠️\n\nVas a borrar TODOS los Platos de la carta. \nTUS CIERRES DE CAJA Y VENTAS ESTÁN A SALVO.\n\nEscribe "BORRAR" en mayúsculas para confirmar:`);
+    if (confirmation === 'BORRAR') {
+      setIsScanning(true);
+      const newData = JSON.parse(JSON.stringify(safeData));
+      newData.platos = [];
+      await onSave(newData);
+      setIsScanning(false);
+      alert(`✅ Diccionario de platos purgado.`);
+    }
+  };
+
 
   const categorizeItem = (name: string) => {
     const n = (name || '').toLowerCase();
@@ -248,7 +266,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     return 'General';
   };
 
-  // 🚀 LÓGICA OMNI-IA (MOTOR REDUNDANTE Y ANTI-COLAPSO)
+  // 🚀 LÓGICA OMNI-IA (MOTOR BLINDADO ANTI-BAN)
   const procesarLoteIA = async (files: File[]) => {
     setIsScanning(true);
     setBatchProgress({ current: 0, total: files.length, success: 0, fails: 0, currentThumb: null, failedNames: [] });
@@ -279,7 +297,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
           base64Data = btoa(new Uint8Array(buffer).reduce((d, byte) => d + String.fromCharCode(byte), ''));
         }
 
-        // 🤖 Llamamos al Nuevo Motor Redundante
         const datosIA = await analyzeDocumentWithAI(mimeType, base64Data, PROMPT_OMNI_IA);
 
         if (datosIA.tipo_documento === 'factura') {
@@ -323,19 +340,23 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         setBatchProgress(p => p ? { ...p, fails: failCount, failedNames: failedNamesArr } : null);
       }
 
+      // 🛡️ SISTEMA DE ENFRIAMIENTO ANTI-BAN (Batch Extremo de 3 Meses)
       if (i < files.length - 1) {
-        if ((i + 1) % 8 === 0) {
+        if ((i + 1) % 10 === 0) {
+          // Cada 10 imágenes, paramos 15 segundos para no saturar a Google
           setBatchProgress(p => p ? { ...p, isCoolingDown: true } : null);
-          await new Promise(r => setTimeout(r, 10000)); 
+          await new Promise(r => setTimeout(r, 15000)); 
           setBatchProgress(p => p ? { ...p, isCoolingDown: false } : null);
         } else {
-          await new Promise(r => setTimeout(r, 1500)); 
+          // Pausa normal entre fotos para que respire
+          await new Promise(r => setTimeout(r, 2000)); 
         }
       }
       
       if (thumbUrl) URL.revokeObjectURL(thumbUrl);
     }
 
+    // 💾 GUARDADO MASIVO DE GOLPE (Mucho más rápido que de uno en uno)
     if (successCount > 0) {
       const newData = JSON.parse(JSON.stringify(safeData));
       newData.facturas = [...nuevasFacturas, ...safeFacturas];
@@ -347,11 +368,11 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     } 
 
     if (failCount > 0) {
-      alert(`⚠️ Lote terminado.\n\n✅ Éxitos: ${successCount}\n❌ Fallos: ${failCount}\n\nArchivos que NO se han podido procesar:\n- ${failedNamesArr.join('\n- ')}\n\nPor favor, sube estos manualmente más tarde.`);
+      alert(`⚠️ Lote terminado.\n\n✅ Éxitos: ${successCount}\n❌ Fallos: ${failCount}\n\nArchivos que NO se han podido procesar:\n- ${failedNamesArr.join('\n- ')}\n\nPor favor, súbelos en otro lote o revisa la calidad de la foto.`);
     } else if (successCount > 0) {
-      alert(`✅ Lote importado a la perfección: ${successCount} documentos auto-clasificados y enviados a la bandeja Borrador.`);
+      alert(`✅ Lote Extremo Importado: ${successCount} documentos procesados y clasificados.`);
     } else {
-      alert("❌ No se pudo procesar ningún documento. Comprueba que tienes alguna API configurada (Gemini o Groq).");
+      alert("❌ No se pudo procesar ningún documento. La API puede estar bloqueada, inténtalo en unos minutos.");
     }
     
     setIsScanning(false);
@@ -489,15 +510,15 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
   };
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-24 animate-fade-in relative">
+    <div className="max-w-5xl mx-auto space-y-6 pb-24 animate-fade-in relative px-2 sm:px-0">
       
       <div className="flex items-center gap-4 mb-4 px-2">
         <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg">
           <Database className="w-6 h-6 text-white" />
         </div>
         <div>
-          <h2 className="text-2xl font-black text-slate-800 tracking-tight">ARUME Input System 2.0</h2>
-          <p className="text-slate-500 font-bold text-xs uppercase tracking-widest mt-1">Arrastra, sube o pulsa Ctrl+V (Pegar imagen)</p>
+          <h2 className="text-2xl font-black text-slate-800 tracking-tight">Data Input 2.0</h2>
+          <p className="text-slate-500 font-bold text-xs uppercase tracking-widest mt-1">Sube 50 albaranes de golpe sin miedo</p>
         </div>
       </div>
 
@@ -507,7 +528,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-8">
           <ModuleButton 
             active={importMode === 'ia_auto'} onClick={() => { setImportMode('ia_auto'); setProcessedData(null); }}
-            icon={Sparkles} title="Magia IA (Auto)" subtitle="Facturas y Albaranes" color="indigo"
+            icon={Sparkles} title="IA Batch (Lotes)" subtitle="Facturas y Albaranes" color="indigo"
           />
           <ModuleButton 
             active={importMode === 'banco_excel'} onClick={() => { setImportMode('banco_excel'); setProcessedData(null); }}
@@ -520,7 +541,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         </div>
 
         <div>
-          {/* DROPZONE */}
+          {/* DROPZONE BLINDADA */}
           <div 
             className={cn(
               "border-2 border-dashed rounded-[2rem] p-12 flex flex-col items-center justify-center transition-all cursor-pointer relative overflow-hidden",
@@ -549,8 +570,8 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
                   <div className="w-24 h-24 rounded-xl overflow-hidden shadow-lg border-4 border-white mb-4 relative">
                      <img src={batchProgress.currentThumb} className="w-full h-full object-cover" alt="Procesando" />
                      {batchProgress.isCoolingDown && (
-                       <div className="absolute inset-0 bg-slate-900/60 flex items-center justify-center backdrop-blur-sm">
-                         <span className="text-[8px] font-black text-white uppercase text-center leading-tight">Enfriando<br/>API</span>
+                       <div className="absolute inset-0 bg-slate-900/80 flex items-center justify-center backdrop-blur-sm">
+                         <span className="text-[9px] font-black text-white uppercase text-center leading-tight">Enfriando<br/>Google AI...</span>
                        </div>
                      )}
                   </div>
@@ -558,16 +579,16 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
                   <Loader2 className="w-12 h-12 text-indigo-500 animate-spin mb-4" />
                 )}
                 <h3 className="text-xl font-black text-slate-800">
-                  {batchProgress.isCoolingDown ? 'Pausa de Seguridad...' : 'Analizando e Infiriendo...'}
+                  {batchProgress.isCoolingDown ? 'Pausa Anti-Saturación...' : 'Extrayendo Datos...'}
                 </h3>
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mt-1 mb-4">
                   Documento {batchProgress.current} de {batchProgress.total}
                 </p>
-                <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden mb-2">
+                <div className="w-full bg-slate-200 h-3 rounded-full overflow-hidden mb-2 shadow-inner">
                   <div className={cn("h-full transition-all duration-500", batchProgress.isCoolingDown ? "bg-amber-400" : "bg-indigo-500")} style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }}></div>
                 </div>
-                <div className="flex justify-between w-full text-[10px] font-bold px-1">
-                   <span className="text-emerald-600">{batchProgress.success} OK</span>
+                <div className="flex justify-between w-full text-[11px] font-black px-1 uppercase tracking-widest">
+                   <span className="text-emerald-600">{batchProgress.success} Éxitos</span>
                    {batchProgress.fails > 0 && <span className="text-rose-500">{batchProgress.fails} Fallos</span>}
                 </div>
               </div>
@@ -581,16 +602,16 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
                 </div>
                 
                 <h3 className="text-xl font-black text-slate-700 text-center">
-                  {isScanning ? "Procesando..." : importMode === 'ia_auto' ? "Auto-Detect: Tira fotos o PDFs mezclados" : "Sube el Excel de Madis o Banco"}
+                  {isScanning ? "Procesando..." : importMode === 'ia_auto' ? "Sube hasta 100 fotos/PDFs de golpe" : "Sube el Excel de Madis o Banco"}
                 </h3>
                 
                 {importMode === 'ia_auto' && (
                   <div className="flex flex-col items-center gap-2 mt-4">
-                    <div className="bg-indigo-50 px-4 py-2 rounded-full border border-indigo-100 shadow-sm text-indigo-600 text-xs font-bold uppercase tracking-widest">
-                      Clasifica Facturas y Albaranes Automáticamente
+                    <div className="bg-emerald-50 px-4 py-2 rounded-full border border-emerald-200 shadow-sm text-emerald-700 text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4"/> IA Blindada Anti-Bloqueos
                     </div>
                     <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-full border border-slate-200 shadow-sm text-slate-500 text-[10px] font-bold uppercase tracking-widest">
-                      <ClipboardPaste className="w-3 h-3 text-slate-400" /> Compatible con Ctrl+V (WhatsApp)
+                      <ClipboardPaste className="w-3 h-3 text-slate-400" /> Compatible con Ctrl+V (Pegar de WhatsApp)
                     </div>
                   </div>
                 )}
@@ -598,7 +619,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
             )}
           </div>
 
-          {/* TARJETA DE CONFIRMACIÓN PARA EXCEL (Madis / Banco / Edición IA Simple) */}
+          {/* TARJETA DE CONFIRMACIÓN PARA EXCEL (Madis / Banco) */}
           <AnimatePresence>
             {processedData && !batchProgress && (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }} className="mt-8">
@@ -639,52 +660,75 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         </div>
       </div>
 
-      {/* 💣 PANEL DE RESETEO QUIRÚRGICO: ZONA DE PELIGRO */}
-      <div className="mt-8 border-2 border-rose-100 bg-rose-50/30 rounded-[2rem] p-6 md:p-8 shadow-sm">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 bg-rose-100 rounded-xl flex items-center justify-center">
-            <AlertTriangle className="w-5 h-5 text-rose-600" />
+      {/* 💣 PANEL DE RESETEO QUIRÚRGICO (Máquina del Tiempo) */}
+      <div className="mt-8 border border-slate-200 bg-white rounded-[2.5rem] p-6 md:p-8 shadow-sm">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 mb-6">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center border border-rose-100">
+              <CalendarClock className="w-6 h-6 text-rose-500" />
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-slate-800 tracking-tight">Borrador Quirúrgico por Meses</h3>
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">
+                Ideal para limpiar errores de importación masiva de un mes concreto.
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-lg font-black text-rose-900 tracking-tight">Panel de Limpieza (Danger Zone)</h3>
-            <p className="text-[10px] text-rose-600/80 font-bold uppercase tracking-widest mt-0.5">
-              Borra secciones de la base de datos sin afectar al resto.
-            </p>
+
+          <div className="flex gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-200">
+            <select 
+              value={deleteMonth} 
+              onChange={(e) => setDeleteMonth(e.target.value)}
+              className="bg-white border border-slate-200 text-slate-800 text-sm font-bold rounded-xl focus:ring-rose-500 focus:border-rose-500 p-2 outline-none"
+            >
+              {MONTHS_FULL.map((m, i) => (
+                <option key={i} value={String(i + 1).padStart(2, '0')}>{m.toUpperCase()}</option>
+              ))}
+            </select>
+            <input 
+              type="number" 
+              value={deleteYear} 
+              onChange={(e) => setDeleteYear(e.target.value)}
+              className="bg-white border border-slate-200 text-slate-800 text-sm font-bold rounded-xl focus:ring-rose-500 focus:border-rose-500 p-2 w-24 outline-none text-center"
+            />
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-4 border-t border-slate-100">
           <button 
-            onClick={() => handleNukeData('docs')}
-            className="flex flex-col items-start p-4 bg-white border border-rose-200 hover:border-rose-400 hover:shadow-md transition-all rounded-xl text-left group"
+            onClick={() => handleNukeQuirurgico('docs')}
+            disabled={isScanning}
+            className="flex items-center justify-between p-4 bg-white border border-rose-200 hover:bg-rose-50 hover:border-rose-400 transition-all rounded-2xl text-left group disabled:opacity-50"
           >
-            <div className="flex items-center gap-2 mb-2">
-              <Receipt className="w-4 h-4 text-rose-500" />
-              <span className="font-black text-sm text-slate-800">1. Purgar Documentos</span>
+            <div>
+              <span className="font-black text-sm text-slate-800 flex items-center gap-2"><Receipt className="w-4 h-4 text-rose-500" /> Facturas y Albaranes</span>
+              <p className="text-[10px] text-slate-400 font-medium mt-1">Borra todo lo de {MONTHS_FULL[Number(deleteMonth)-1]} {deleteYear}</p>
             </div>
-            <p className="text-[10px] text-slate-500 font-medium">Borra TODAS las Facturas y Albaranes. Usa esto para volver a importar tus fotos de WhatsApp.</p>
+            <Trash2 className="w-5 h-5 text-rose-300 group-hover:text-rose-600 transition-colors" />
           </button>
 
           <button 
-            onClick={() => handleNukeData('ops')}
-            className="flex flex-col items-start p-4 bg-white border border-amber-200 hover:border-amber-400 hover:shadow-md transition-all rounded-xl text-left group"
+            onClick={() => handleNukeQuirurgico('bank')}
+            disabled={isScanning}
+            className="flex items-center justify-between p-4 bg-white border border-blue-200 hover:bg-blue-50 hover:border-blue-400 transition-all rounded-2xl text-left group disabled:opacity-50"
           >
-            <div className="flex items-center gap-2 mb-2">
-              <Grid className="w-4 h-4 text-amber-500" />
-              <span className="font-black text-sm text-slate-800">2. Purgar Platos/Carta</span>
+            <div>
+              <span className="font-black text-sm text-slate-800 flex items-center gap-2"><Building2 className="w-4 h-4 text-blue-500" /> Banco y Conciliación</span>
+              <p className="text-[10px] text-slate-400 font-medium mt-1">Borra todo lo de {MONTHS_FULL[Number(deleteMonth)-1]} {deleteYear}</p>
             </div>
-            <p className="text-[10px] text-slate-500 font-medium font-bold text-amber-700">¡Seguro! NO borra tus cierres ni ventas. Solo limpia el diccionario de platos.</p>
+            <Trash2 className="w-5 h-5 text-blue-300 group-hover:text-blue-600 transition-colors" />
           </button>
 
           <button 
-            onClick={() => handleNukeData('bank')}
-            className="flex flex-col items-start p-4 bg-white border border-blue-200 hover:border-blue-400 hover:shadow-md transition-all rounded-xl text-left group"
+            onClick={handleNukeDataOps}
+            disabled={isScanning}
+            className="flex items-center justify-between p-4 bg-white border border-amber-200 hover:bg-amber-50 hover:border-amber-400 transition-all rounded-2xl text-left group disabled:opacity-50"
           >
-            <div className="flex items-center gap-2 mb-2">
-              <Building2 className="w-4 h-4 text-blue-500" />
-              <span className="font-black text-sm text-slate-800">3. Purgar Banco</span>
+            <div>
+              <span className="font-black text-sm text-slate-800 flex items-center gap-2"><Grid className="w-4 h-4 text-amber-500" /> Purgar Platos Carta</span>
+              <p className="text-[10px] text-slate-400 font-medium mt-1">Resetea el menú (No afecta a las ventas)</p>
             </div>
-            <p className="text-[10px] text-slate-500 font-medium">Borra todo el extracto bancario si te has equivocado al importar el Excel de la cuenta.</p>
+            <Trash2 className="w-5 h-5 text-amber-300 group-hover:text-amber-600 transition-colors" />
           </button>
         </div>
       </div>
