@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   ChefHat, TrendingUp, PieChart, ChevronLeft, ChevronRight, 
   Zap, Plus, Search, AlertTriangle, CheckCircle2, TableProperties, 
-  Scale, Target, Calculator, Receipt, Camera, Loader2, FileText, X
+  Scale, Target, Calculator, Receipt, Camera, Loader2, FileText, X, Trash2
 } from 'lucide-react';
 import { AppData, Plato } from '../types';
 import { Num, DateUtil } from '../services/engine';
