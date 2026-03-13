@@ -12,6 +12,9 @@ import * as XLSX from 'xlsx';
 import { GoogleGenAI } from "@google/genai";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend } from 'recharts';
 
+// 🚀 IMPORTAMOS DEL CEREBRO CENTRAL
+import { basicNorm, TOLERANCIA as CENTRAL_TOLERANCIA } from '../services/invoicing';
+
 // 🚀 HIJOS VISUALES (Debes tenerlos en tu carpeta components)
 import { AlbaranesList } from './AlbaranesList';
 import { AlbaranEditModal } from './AlbaranEditModal';
@@ -33,27 +36,24 @@ const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string
 /* =======================================================
  * 🛡️ 1. UTILIDADES Y CONSTANTES INTEGRADAS
  * ======================================================= */
-export const TOLERANCIA = 0.50; // Tolerancia de 50 céntimos por redondeos
-
-export const superNorm = (s: string | undefined | null) => {
-  if (!s || typeof s !== 'string') return 'desconocido';
-  try { return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\b(s\.?l\.?|s\.?a\.?|s\.?l\.?u\.?|s\.?c\.?p\.?)\b/gi, '').replace(/[^a-z0-9]/g, '').trim(); } catch (e) { return 'desconocido'; }
-};
+export const TOLERANCIA = CENTRAL_TOLERANCIA; 
+// 💡 ALIAS DE RESCATE: Para que Vercel no falle si otro archivo importa superNorm desde aquí
+export const superNorm = basicNorm; 
 
 const safeJSON = (str: string) => { try { const match = str.match(/\{[\s\S]*\}/); return match ? JSON.parse(match[0]) : {}; } catch { return {}; } };
 
 const filterByQuery = (a: Albaran, q: string) => {
   if (!q) return true;
-  const n = superNorm(q);
-  const prov = superNorm(a.prov);
+  const n = basicNorm(q);
+  const prov = basicNorm(a.prov);
   const num  = (a.num||'').toLowerCase();
   const notes= (a.notes||'').toLowerCase();
-  const lines= (a.items||[]).some((it:any)=> superNorm(it.n).includes(n));
+  const lines= (a.items||[]).some((it:any)=> basicNorm(it.n).includes(n));
   return prov.includes(n) || num.includes(n) || notes.includes(n) || lines;
 };
 
 const looksLikeDuplicate = (prov: string, num: string, date: string, albaranes: Albaran[]) => 
-  albaranes.some(a => superNorm(a.prov) === superNorm(prov) && (a.num||'S/N') === (num||'S/N') && (a.date||'').slice(0,10) === (date||'').slice(0,10));
+  albaranes.some(a => basicNorm(a.prov) === basicNorm(prov) && (a.num||'S/N') === (num||'S/N') && (a.date||'').slice(0,10) === (date||'').slice(0,10));
 
 // 🧠 CEREBRO DE FLUCTUACIÓN DINÁMICA
 const getDynamicThreshold = (itemName: string) => {
@@ -77,23 +77,14 @@ const normalizeUnitPrice = (q: number, u: string | undefined, unitPrice: number)
 /* =======================================================
  * 🚀 CEREBRO FACTURACIÓN: PROMOCIÓN AUTOMÁTICA A FACTURAS
  * ======================================================= */
-const normProv = (s?: string) => {
-  if (!s) return 'desconocido';
-  return s.toLowerCase()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/\b(s\.?l\.?|s\.?a\.?|s\.?l\.?u\.?|s\.?c\.?p\.?)\b/gi, '')
-    .replace(/[^a-z0-9]/g, '')
-    .trim();
-};
-
-const groupKey = (alb: Albaran) => `${normProv(alb.prov)}__${(alb.date || DateUtil.today()).slice(0, 7)}`;
+const groupKey = (alb: Albaran) => `${basicNorm(alb.prov)}__${(alb.date || DateUtil.today()).slice(0, 7)}`;
 
 const findFacturaIdx = (data: AppData, alb: Albaran) => {
-  const key = normProv(alb.prov);
+  const key = basicNorm(alb.prov);
   const yymm = (alb.date || DateUtil.today()).slice(0, 7);
   return (data.facturas || []).findIndex((f: any) =>
     f?.tipo === 'compra' &&
-    normProv(f?.prov) === key &&
+    basicNorm(f?.prov) === key &&
     (f?.date || '').startsWith(yymm) &&
     !f?.reconciled
   );
@@ -115,7 +106,6 @@ function detachFromPreviousFacturaIfMoved(data: AppData, before: Albaran, after:
   const bb = Num.parse(before.base)  || Num.round2(tb / 1.10);
   const ib = Num.parse(before.taxes) || Num.round2(tb - bb);
 
-  // CORRECCIÓN: Guardar como números, no como strings
   F.total = Num.round2((Num.parse(F.total) || 0) - tb);
   F.base  = Num.round2((Num.parse(F.base)  || 0) - bb);
   F.tax   = Num.round2((Num.parse(F.tax)   || 0) - ib);
@@ -138,7 +128,6 @@ function upsertFacturaFromAlbaran(data: AppData, alb: Albaran) {
   if (idx >= 0) {
     const F = data.facturas[idx] as any;
     if (!facturaHasAlb(F, alb.id)) {
-      // CORRECCIÓN: Guardar como números, no como strings
       F.total = Num.round2((Num.parse(F.total) || 0) + t);
       F.base  = Num.round2((Num.parse(F.base)  || 0) + b);
       F.tax   = Num.round2((Num.parse(F.tax)   || 0) + i);
@@ -151,7 +140,6 @@ function upsertFacturaFromAlbaran(data: AppData, alb: Albaran) {
       num: `AUTO-${alb.num || 'SN'}`,
       date: alb.date || DateUtil.today(),
       prov: alb.prov,
-      // CORRECCIÓN: Guardar como números, no como strings
       total: t, base: b, tax: i,
       paid: false,
       reconciled: false,
@@ -331,14 +319,11 @@ function PriceInspector({ priceHistory, albaranesLite, proveedores, suggestionsB
   const [prov, setProv] = useState((defaultProv||'').toUpperCase());
   const [item, setItem] = useState((defaultItem||'').toUpperCase());
   
-  // SOLUCIÓN AL BLOQUEO: useDeferredValue retrasa el recálculo pesado hasta que dejas de teclear
   const deferredProv = useDeferredValue(prov);
   const deferredItem = useDeferredValue(item);
 
-  // Usamos los valores diferidos para el cálculo pesado
   const { series, avgAll } = usePriceSeries({ history: priceHistory, albaranes: albaranesLite, prov: deferredProv, item: deferredItem });
   
-  // Sugerencias basadas en lo que el usuario está tecleando (rápido)
   const topItems = (suggestionsByProv?.[prov] || []).slice(0, 10);
 
   return (
@@ -541,7 +526,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
        if (!window.confirm("⚠️ Posible duplicado (mismo proveedor, nº y fecha). ¿Guardar igualmente?")) return;
     }
 
-    // 🚀 Usamos JSON.parse para hacer Deep Clone de toda la DB
     const newData = JSON.parse(JSON.stringify(data)) as AppData;
     if (!newData.facturas) newData.facturas = [];
     if (!newData.priceHistory) newData.priceHistory = [];
@@ -611,14 +595,13 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     if (!window.confirm("¿Eliminar este albarán permanentemente?")) return;
     
     const newData = JSON.parse(JSON.stringify(data)) as AppData;
-    const albaranToDelete = newData.albaranes.find(a => a.id === id);
+    const albaranToDelete = newData.albaranes?.find(a => a.id === id);
     
-    // Si estaba en una factura, lo quitamos antes de borrar
     if (albaranToDelete) {
        detachFromPreviousFacturaIfMoved(newData, albaranToDelete, { ...albaranToDelete, prov: 'DELETED_MOCK', date: '1970-01-01' } as any);
     }
     
-    newData.albaranes = newData.albaranes.filter(a => a.id !== id);
+    newData.albaranes = (newData.albaranes || []).filter(a => a.id !== id);
     await onSave(newData);
     setEditForm(null);
   };
@@ -672,16 +655,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, wsDetail, "Detalle"); XLSX.utils.book_append_sheet(wb, wsProv, "Resumen Prov"); XLSX.utils.book_append_sheet(wb, wsIva, "Totales IVA");
     XLSX.writeFile(wb, `Albaranes_${dateFrom || 'ALL'}.xlsx`);
   };
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const active = document.activeElement as HTMLElement;
-      const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
-      if (!isTyping && e.key === '/') { e.preventDefault(); document.querySelector<HTMLInputElement>('input[placeholder^="Buscar"]')?.focus(); }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
 
   return (
     <div className="space-y-6 pb-24 max-w-[1600px] mx-auto animate-fade-in relative">
