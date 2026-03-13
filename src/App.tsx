@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { 
   LayoutDashboard, Package, Wallet, ChefHat, Users, Settings, Search,
   TrendingUp, X, RefreshCw, FileText, Truck, Scale, Zap, Building2, 
-  PieChart, Lock, Import, Sparkles, WifiOff, AlertTriangle
+  PieChart, Lock, Import, Sparkles, WifiOff, AlertTriangle, Camera, Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -10,7 +10,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from './services/supabase';
 import { useArumeData } from './hooks/useArumeData';
 import { cn } from './lib/utils';
-import { AppData } from './types';
+import { AppData, FacturaExtended } from './types';
+import { GoogleGenAI } from "@google/genai";
+import { DateUtil } from './services/engine';
 
 // 📄 COMPONENTES (Vistas)
 import { CashView } from './components/CashView';
@@ -194,7 +196,7 @@ function AutoHideDock<T extends string>({ items, activeKey, onChange }: { items:
             className="fixed bottom-0 left-0 right-0 z-[120] px-4 pb-3 pt-6 flex justify-center"
             onMouseEnter={() => setHoveringDock(true)} onMouseLeave={() => { setHoveringDock(false); handleShow(); }}
           >
-            <div className="bg-white/95 backdrop-blur-md border border-slate-200 shadow-xl rounded-xl p-2 max-w-full overflow-x-auto">
+            <div className="bg-white/95 backdrop-blur-md border border-slate-200 shadow-xl rounded-xl p-2 max-w-full overflow-x-auto relative">
               <div className="flex items-center gap-1 no-scrollbar" style={{ WebkitOverflowScrolling: 'touch' }}>
                 {groups.main.map(it => <DockButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
                 <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
@@ -231,6 +233,10 @@ export default function App() {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   
   const [isCmdOpen, setIsCmdOpen] = useState(false);
+
+  // 💡 ESTADO PARA LA CÁMARA RÁPIDA
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
 
   // 🛡️ Detección de conexión
   useEffect(() => {
@@ -289,6 +295,103 @@ export default function App() {
     } catch (error) { console.error("Error crítico al guardar:", error); } 
     finally { isSyncingRef.current = false; setIsSyncing(false); }
   }, [saveData, setData, isOffline]);
+
+
+  /* =======================================================
+   * 📸 PROCESADOR DE CÁMARA GLOBAL (INTEGRACIÓN IA)
+   * ======================================================= */
+  const handlePhotoCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !db) return;
+    
+    // Reseteamos el input
+    e.target.value = '';
+    setIsProcessingPhoto(true);
+
+    try {
+      const apiKey = localStorage.getItem('gemini_api_key');
+      if (!apiKey) throw new Error("NO_API_KEY");
+
+      // 1. Convertir imagen a Base64
+      const fileBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader(); 
+        reader.onload = () => resolve(reader.result as string); 
+        reader.onerror = reject; 
+        reader.readAsDataURL(file);
+      });
+      const soloBase64 = fileBase64.split(',')[1];
+
+      // 2. Llamada a Gemini (Mismo prompt que en InvoicesView para asegurar consistencia)
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = `Actúa como un Auditor Contable. Lee esta imagen de un ticket o factura. Extrae TODO lo posible. Devuelve SOLO un JSON estricto sin comentarios: 
+      { 
+        "proveedor": "Nombre de la empresa", 
+        "nif": "NIF o CIF si aparece",
+        "num": "Número de factura oficial", 
+        "fecha": "YYYY-MM-DD", 
+        "total": 0, 
+        "base": 0, 
+        "iva": 0,
+        "referencias_albaranes": ["Array de strings con números de albarán o pedido si los hay"]
+      }`;
+      
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: soloBase64, mimeType: file.type } }] }],
+        config: { responseMimeType: "application/json", temperature: 0.1 }
+      });
+
+      const cleanText = (response.text || "").replace(/(?:json)?/gi, '').replace(/```/g, '').trim();
+      let rawJson;
+      try {
+        rawJson = JSON.parse(cleanText);
+      } catch {
+        throw new Error("Gemini no devolvió un JSON válido.");
+      }
+
+      // 3. Crear la nueva Factura Borrador
+      const nuevaFacturaIA: FacturaExtended = {
+        id: 'draft-camera-' + Date.now(), 
+        tipo: 'compra', 
+        num: rawJson.num || 'S/N', 
+        date: rawJson.fecha || DateUtil.today(), 
+        prov: rawJson.proveedor || 'Proveedor Desconocido',
+        total: String(rawJson.total || 0), 
+        base: String(rawJson.base || 0), 
+        tax: String(rawJson.iva || 0),
+        albaranIdsArr: rawJson.referencias_albaranes || [], 
+        paid: false, 
+        reconciled: false, 
+        source: 'dropzone', // Usamos dropzone para que aparezca en la bandeja IA de Facturas
+        status: 'draft', 
+        unidad_negocio: 'REST', 
+        file_base64: fileBase64 
+      };
+
+      // 4. Guardar
+      const newData = JSON.parse(JSON.stringify(db));
+      newData.facturas = [nuevaFacturaIA, ...(newData.facturas || [])];
+      await handleSave(newData);
+      
+      alert("✅ Ticket escaneado y enviado a la Bandeja de Facturas para su revisión.");
+      
+      // Si no estamos en facturas, navegamos allí para que lo vea
+      if (activeTab !== 'facturas') {
+        setActiveTab('facturas');
+      }
+
+    } catch (e: any) {
+      if (e.message === "NO_API_KEY") {
+        alert("⚠️ Por favor, configura tu clave de Gemini API en los ajustes primero.");
+        setIsConfigOpen(true);
+      } else {
+        alert("❌ Error al procesar la imagen: " + (e.message || "Imagen ilegible"));
+      }
+    } finally {
+      setIsProcessingPhoto(false);
+    }
+  };
+
 
   // ⌨️ ATAJOS GLOBALES (Cmd+K y Cmd+1...5 para módulos rápidos)
   useEffect(() => {
@@ -369,10 +472,19 @@ export default function App() {
     );
   }
 
-  // 🚀 APLICAMOS LA BASE DENSIDAD (text-xs / 12px) PARA TODA LA APP EN EL CONTENEDOR RAIZ
   return (
     <div id="app-root-container" className="min-h-screen bg-slate-50 flex flex-col font-sans text-xs text-slate-800 relative overflow-x-hidden">
       
+      {/* 📸 INPUT INVISIBLE PARA CÁMARA */}
+      <input 
+        type="file" 
+        accept="image/*" 
+        capture="environment" // Esto fuerza a que se abra la cámara trasera en el móvil
+        ref={fileInputRef} 
+        onChange={handlePhotoCapture} 
+        className="hidden" 
+      />
+
       {/* HEADER CONTABLE (ULTRA COMPACTO) */}
       <header className="sticky top-0 z-[110] bg-white border-b border-slate-200 px-4 py-2 flex justify-between items-center shadow-sm">
         <div className="flex items-center gap-3">
@@ -418,6 +530,33 @@ export default function App() {
       </main>
 
       {/* 🚀 COMPONENTES FLOTANTES */}
+
+      {/* 📸 BOTÓN FLOTANTE CÁMARA (FAB) */}
+      <button 
+        onClick={() => fileInputRef.current?.click()}
+        disabled={isProcessingPhoto}
+        className={cn(
+          "fixed bottom-24 right-4 z-[90] w-14 h-14 rounded-full flex items-center justify-center text-white shadow-xl transition-all duration-300 md:hidden",
+          isProcessingPhoto ? "bg-indigo-400 cursor-not-allowed scale-95" : "bg-indigo-600 hover:bg-indigo-700 hover:scale-105 active:scale-95"
+        )}
+        aria-label="Escanear ticket con cámara"
+      >
+        {isProcessingPhoto ? <Loader2 className="w-6 h-6 animate-spin" /> : <Camera className="w-6 h-6" />}
+      </button>
+
+      {/* Overlay procesando para que no toquen nada más */}
+      <AnimatePresence>
+        {isProcessingPhoto && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+            <div className="bg-white p-6 rounded-2xl shadow-2xl flex flex-col items-center">
+              <Sparkles className="w-8 h-8 text-indigo-500 animate-pulse mb-3" />
+              <p className="text-sm font-bold text-slate-800">Leyendo ticket...</p>
+              <p className="text-[10px] text-slate-500 uppercase mt-1">La IA está extrayendo los datos</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <TelegramWidget currentModule={TAB_LABELS[activeTab]} telegramToken={db?.config?.telegramToken} chatId={db?.config?.telegramChatId} />
       
       <AutoHideDock items={navItems} activeKey={activeTab} onChange={(k) => setActiveTab(k)} />
