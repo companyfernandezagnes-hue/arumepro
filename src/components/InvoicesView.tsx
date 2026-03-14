@@ -6,7 +6,7 @@ import {
   UploadCloud, FileDown, Smartphone, Camera, Loader2, Mail, 
   CheckCircle2, Link as LinkIcon, Inbox, ArrowRight, CheckSquare, 
   Sparkles, ChevronLeft, ChevronRight, Zap, FileArchive, AlertCircle, ShieldCheck,
-  Bot, Calendar // 🛡️ ICONOS FALTANTES RESTAURADOS
+  Bot, Calendar, ArrowUpRight, ArrowDownRight, Wand2, PieChart // Nuevos iconos añadidos
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
@@ -171,6 +171,19 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [emailInbox, setEmailInbox] = useState<EmailDraft[]>([]);
+
+  // MEJORA 1: Cierre con Tecla ESCAPE
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelectedGroup(null);
+        setIsExportModalOpen(false);
+        setSelectedInvoice(null);
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, []);
 
   // DRAG & DROP SEGURO
   useEffect(() => {
@@ -456,6 +469,18 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     }
   };
 
+  const handleToggleAlbaran = (id: string) => {
+    setModalForm(prev => {
+      const isSelected = prev.selectedAlbs.includes(id);
+      return {
+        ...prev,
+        selectedAlbs: isSelected 
+          ? prev.selectedAlbs.filter(alId => alId !== id)
+          : [...prev.selectedAlbs, id]
+      };
+    });
+  };
+
   const handleTogglePago = async (id: string) => {
     const newData = { ...safeData, facturas: [...facturasSeguras] };
     const idx = newData.facturas.findIndex(f => f && f.id === id);
@@ -519,6 +544,11 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     } catch(e) { alert("Error al descargar el archivo"); }
   };
 
+  // Cálculos para la Mejora 2 (Barra de Progreso Financiero)
+  const totalFacturadoCalc = facturasSeguras.filter(f => f && typeof f === 'object' && f.status !== 'draft' && f.tipo === 'compra').reduce((acc, f) => acc + Math.abs(Num.parse(f.total)||0), 0);
+  const totalPagadoCalc = facturasSeguras.filter(f => f && typeof f === 'object' && f.status !== 'draft' && f.tipo === 'compra' && f.paid).reduce((acc, f) => acc + Math.abs(Num.parse(f.total)||0), 0);
+  const progressPercent = totalFacturadoCalc > 0 ? (totalPagadoCalc / totalFacturadoCalc) * 100 : 0;
+
   return (
     <div className="animate-fade-in space-y-4 pb-24 relative max-w-[1600px] mx-auto text-xs">
       
@@ -537,23 +567,47 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       {/* 🛡️ BLINDAJE 1: Píldoras de Resumen Financiero Seguras */}
       <AnimatePresence mode="wait">
         {activeTab === 'hist' && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.1 }} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center">
-               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Facturado</p>
-               <p className="text-xl font-black text-slate-800">{Num.fmt(facturasSeguras.filter(f => f && typeof f === 'object' && f.status !== 'draft' && f.tipo === 'compra').reduce((acc, f) => acc + Math.abs(Num.parse(f.total)||0), 0))}</p>
-             </motion.div>
-             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.2 }} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center">
-               <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest mb-1">Pendiente Pago</p>
-               <p className="text-xl font-black text-rose-600">{Num.fmt(facturasSeguras.filter(f => f && typeof f === 'object' && f.status !== 'draft' && f.tipo === 'compra' && !f.paid).reduce((acc, f) => acc + Math.abs(Num.parse(f.total)||0), 0))}</p>
-             </motion.div>
-             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.3 }} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center">
-               <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mb-1">Total Pagado</p>
-               <p className="text-xl font-black text-emerald-600">{Num.fmt(facturasSeguras.filter(f => f && typeof f === 'object' && f.status !== 'draft' && f.tipo === 'compra' && f.paid).reduce((acc, f) => acc + Math.abs(Num.parse(f.total)||0), 0))}</p>
-             </motion.div>
-             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.4 }} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center bg-gradient-to-br from-indigo-50 to-white">
-               <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">Docs. en IA</p>
-               <p className="text-xl font-black text-indigo-700">{draftsIA.length} Borradores</p>
-             </motion.div>
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="mb-4">
+             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+               <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.1 }} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center relative overflow-hidden">
+                 <div className="flex items-center justify-between mb-1">
+                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total Facturado</p>
+                   {/* Flecha visual añadida a petición */}
+                   <span className="flex items-center gap-0.5 text-[8px] font-bold text-slate-500 bg-slate-100 px-1 rounded"><ArrowUpRight className="w-2.5 h-2.5"/></span>
+                 </div>
+                 <p className="text-xl font-black text-slate-800">{Num.fmt(totalFacturadoCalc)}</p>
+               </motion.div>
+
+               <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.2 }} className="bg-white p-4 rounded-2xl border border-rose-100 shadow-sm flex flex-col justify-center relative">
+                 <div className="flex items-center justify-between mb-1">
+                   <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest">Pendiente Pago</p>
+                   <span className="flex items-center gap-0.5 text-[8px] font-bold text-rose-500 bg-rose-50 px-1 rounded"><ArrowDownRight className="w-2.5 h-2.5"/></span>
+                 </div>
+                 <p className="text-xl font-black text-rose-600">{Num.fmt(totalFacturadoCalc - totalPagadoCalc)}</p>
+               </motion.div>
+
+               <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.3 }} className="bg-white p-4 rounded-2xl border border-emerald-100 shadow-sm flex flex-col justify-center relative">
+                 <div className="flex items-center justify-between mb-1">
+                   <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Total Pagado</p>
+                   <span className="flex items-center gap-0.5 text-[8px] font-bold text-emerald-500 bg-emerald-50 px-1 rounded"><CheckCircle2 className="w-2.5 h-2.5"/></span>
+                 </div>
+                 <p className="text-xl font-black text-emerald-600">{Num.fmt(totalPagadoCalc)}</p>
+               </motion.div>
+
+               <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.4 }} className="bg-white p-4 rounded-2xl border border-indigo-100 shadow-sm flex flex-col justify-center bg-gradient-to-br from-indigo-50 to-white">
+                 <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1 flex items-center gap-1"><Bot className="w-3 h-3"/> Docs. en IA</p>
+                 <p className="text-xl font-black text-indigo-700">{draftsIA.length} Borradores</p>
+               </motion.div>
+             </div>
+
+             {/* Mejora 2: Barra de Progreso Financiero */}
+             <div className="mt-3 bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex items-center gap-4">
+               <PieChart className="w-4 h-4 text-slate-400" />
+               <div className="flex-1 h-2 bg-rose-100 rounded-full overflow-hidden flex">
+                 <div className="h-full bg-emerald-500 transition-all duration-1000" style={{ width: `${progressPercent}%` }} />
+               </div>
+               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{progressPercent.toFixed(0)}% Pagado</span>
+             </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -795,14 +849,31 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
               
               <div className="flex justify-between items-center mb-3 px-1">
                 <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{modalForm.selectedAlbs.length} seleccionados</span>
-                <button onClick={() => { const allIds = selectedGroup.ids; setModalForm(p => ({...p, selectedAlbs: p.selectedAlbs.length === allIds.length ? [] : allIds })) }} className="text-[10px] font-black uppercase text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition">
-                  {modalForm.selectedAlbs.length === selectedGroup.ids.length ? 'Desmarcar' : 'Marcar Todos'}
-                </button>
+                
+                <div className="flex items-center gap-2">
+                  {/* INNOVACIÓN 1: Selección Mágica (Auto-Match) */}
+                  <button onClick={() => {
+                     // Lógica sencilla: marca todos los que tengan un total > 0 para evitar albaranes vacíos por error
+                     const validIds = albaranesSeguros.filter(a => selectedGroup.ids.includes(a.id) && Math.abs(Num.parse(a.total)) > 0).map(a => a.id);
+                     setModalForm(p => ({...p, selectedAlbs: validIds}));
+                  }} className="text-[10px] font-black uppercase text-amber-600 bg-amber-50 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition flex items-center gap-1 border border-amber-200">
+                    <Wand2 className="w-3 h-3"/> Selección Mágica
+                  </button>
+
+                  <button onClick={() => { const allIds = selectedGroup.ids; setModalForm(p => ({...p, selectedAlbs: p.selectedAlbs.length === allIds.length ? [] : allIds })) }} className="text-[10px] font-black uppercase text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition border border-indigo-100">
+                    {modalForm.selectedAlbs.length === selectedGroup.ids.length ? 'Desmarcar Todos' : 'Marcar Todos'}
+                  </button>
+                </div>
               </div>
 
+              {/* CORRECCIÓN VITAL: Clicks en los checkboxes restaurados */}
               <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-50 rounded-2xl p-3 border border-slate-200 space-y-2">
                 {(albaranesSeguros).filter(a => a && selectedGroup.ids.includes(a.id)).map(a => (
-                  <label key={a.id} className={cn("flex justify-between items-center p-3 rounded-xl cursor-pointer border transition-all", modalForm.selectedAlbs.includes(a.id) ? "bg-white border-indigo-400 shadow-sm" : "border-transparent hover:bg-white hover:border-slate-300")}>
+                  <label 
+                    key={a.id} 
+                    onClick={(e) => { e.preventDefault(); handleToggleAlbaran(a.id); }} // AQUI ESTÁ LA MAGIA REPARADA
+                    className={cn("flex justify-between items-center p-3 rounded-xl cursor-pointer border transition-all", modalForm.selectedAlbs.includes(a.id) ? "bg-white border-indigo-400 shadow-sm" : "border-transparent hover:bg-white hover:border-slate-300")}
+                  >
                     <div className="flex items-center gap-3">
                       <div className={cn("w-5 h-5 rounded flex items-center justify-center border", modalForm.selectedAlbs.includes(a.id) ? "bg-indigo-600 border-indigo-600 text-white" : "bg-white border-slate-300")}>
                         {modalForm.selectedAlbs.includes(a.id) && <Check className="w-3.5 h-3.5"/>}
@@ -831,8 +902,15 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                   )}
                   <div><label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1.5 ml-1">Fecha Emisión</label><input type="date" value={modalForm.date} onChange={(e) => setModalForm({ ...modalForm, date: e.target.value })} className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-indigo-500 focus:bg-white transition" /></div>
                 </div>
+
+                {/* INNOVACIÓN 2: Alerta Temprana Predictiva */}
+                {modalForm.selectedAlbs.length > 0 && !modalForm.num.trim() && (
+                   <p className="text-[10px] font-bold text-amber-600 bg-amber-50 p-2 rounded-lg border border-amber-200 flex items-center gap-1.5">
+                     <AlertCircle className="w-3.5 h-3.5" /> No olvides añadir el número de factura para evitar errores en Bilki.
+                   </p>
+                )}
                 
-                <button onClick={handleConfirmManualInvoice} disabled={modalForm.selectedAlbs.length === 0 || isProcessing} className="w-full bg-indigo-600 text-white py-4 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-50 flex justify-center items-center gap-2 shadow-lg shadow-indigo-600/20 active:scale-95 transition-all">
+                <button onClick={handleConfirmManualInvoice} disabled={modalForm.selectedAlbs.length === 0 || isProcessing || !modalForm.num.trim()} className="w-full bg-indigo-600 text-white py-4 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2 shadow-lg shadow-indigo-600/20 active:scale-95 transition-all">
                   {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5"/>} Emitir Factura
                 </button>
               </div>
