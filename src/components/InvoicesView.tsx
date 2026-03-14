@@ -1,16 +1,16 @@
 import React, { useState, useMemo, useEffect, useRef, useDeferredValue } from 'react';
 import { 
-  Search, Plus, Download, Package, Check, Clock, Trash2, 
-  Building2, ShoppingBag, Users, Hotel, Layers, X, 
-  FileText, UploadCloud, Loader2, Link as LinkIcon, Inbox, 
-  Sparkles, ChevronLeft, ChevronRight, AlertCircle, Calendar, Wand2, PieChart,
-  ShieldCheck, Eye, Save, MailCheck, Webhook // 🚀 Nuevo icono n8n
+  Building2, Search, Trash2, UploadCloud, Zap, 
+  CheckCircle2, Clock, Check, Download, Package, 
+  X, Layers, ShieldCheck, List, Sparkles, ArrowDownLeft,
+  Calendar, Wand2, PieChart, ArrowUpRight, ArrowDownRight,
+  Eye, Save, MailCheck, Webhook, FileText, Inbox, AlertCircle, Bot
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import { GoogleGenAI } from "@google/genai";
 
-// 🛡️ TIPOS Y SERVICIOS
+// 🛡️ TIPOS Y SERVICIOS CORRECTOS (Solo Facturación, Nada de Banco)
 import { AppData, FacturaExtended, BusinessUnit, EmailDraft } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
@@ -23,15 +23,31 @@ import { InvoiceDetailModal } from './InvoiceDetailModal';
 
 const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string; bg: string }[] = [
   { id: 'REST', name: 'Restaurante', icon: Building2, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-  { id: 'DLV', name: 'Catering Hoteles', icon: Hotel, color: 'text-amber-600', bg: 'bg-amber-50' },
-  { id: 'SHOP', name: 'Tienda Sake', icon: ShoppingBag, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+  { id: 'DLV', name: 'Catering', icon: Zap, color: 'text-amber-600', bg: 'bg-amber-50' },
+  { id: 'SHOP', name: 'Tienda Sake', icon: Package, color: 'text-emerald-600', bg: 'bg-emerald-50' },
   { id: 'CORP', name: 'Socios / Corp', icon: Users, color: 'text-slate-600', bg: 'bg-slate-100' },
 ];
+
+function Users(props: { className?: string; }) {
+  return (
+      <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+  );
+}
 
 export interface InvoicesViewProps {
   data: AppData;
   onSave: (newData: AppData) => Promise<void>;
 }
+
+const safeJSON = (str: string) => { 
+  try { const match = str.match(/\{[\s\S]*\}/); return match ? JSON.parse(match[0]) : {}; } 
+  catch { return {}; } 
+};
 
 export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const safeData = data || {};
@@ -42,18 +58,15 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const sociosRealesObj = sociosSeguros.length > 0 ? sociosSeguros.filter(s => s && s.active) : [{ id: "s1", n: "ARUME" }];
   const SOCIOS_REALES_NAMES = sociosRealesObj.map(s => String(s?.n || 'Desconocido'));
 
-  // ============================================================================
-  // 🛡️ CORTAFUEGOS CONTABLE: ELIMINAR CAJAS Z DE LA BÓVEDA
-  // ============================================================================
+  // 🛡️ CORTAFUEGOS: Eliminar Cajas Z de la Bóveda de Facturas B2B
   const facturasBoveda = useMemo(() => {
     return facturasSeguras.filter(f => {
       if (!f) return false;
-      // Excluimos explícitamente todo lo que huela a Cierre de Caja Diario
       if (f.tipo === 'caja') return false;
       if (f.cliente === 'Z DIARIO') return false;
       if (String(f.num || '').toUpperCase().startsWith('Z')) return false;
       if (String(f.num || '').toUpperCase().startsWith('CAJA')) return false;
-      return true; // Solo pasan facturas B2B reales
+      return true; 
     });
   }, [facturasSeguras]);
 
@@ -261,7 +274,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
   const handleExportGestoria = () => {
     const q = exportQuarter; const y = year; const startMonth = (q - 1) * 3 + 1; const endMonth = q * 3;
-    // Exportamos SOLO las facturas de la bóveda, nada de Cajas Z
     const filtered = facturasBoveda.filter(f => {
       if (!f || typeof f !== 'object') return false;
       const fDate = String(f.date || '');
@@ -330,7 +342,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       const provDetectado = rawJson.proveedor || '';
       const totalDetectado = Num.parse(rawJson.total);
 
-      // Usar facturasBoveda (No buscamos PDFs de Cajas Z)
       const match = facturasBoveda.find(f => 
         !f.file_base64 && 
         Math.abs(Num.parse(f.total) - totalDetectado) <= 1.00
@@ -358,33 +369,22 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     }
   };
 
-  // ============================================================================
-  // 🚀 INNOVACIÓN 3: DISPARADOR WEBHOOK N8N
-  // ============================================================================
   const handleTriggerN8N = async () => {
     const webhookUrl = safeData.config?.n8nUrlAlbaranes || safeData.config?.n8nUrlIA;
-    
-    if (!webhookUrl) {
-      return alert("⚠️ Falta configurar la URL del Webhook de n8n en los Ajustes (Settings).");
-    }
-
+    if (!webhookUrl) return alert("⚠️ Falta configurar la URL del Webhook de n8n en los Ajustes (Settings).");
     setIsProcessing(true);
     try {
-      // Lanzamos la petición al webhook de n8n en segundo plano
       await fetch(webhookUrl, { 
-        method: 'POST', 
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: "sync_invoices", timestamp: new Date().toISOString() })
       });
       alert("🚀 ¡Señal enviada a n8n con éxito! La automatización está corriendo en segundo plano.");
     } catch (e) {
       alert("❌ Error al contactar con n8n. Revisa la URL o si el webhook está activo.");
-    } finally {
-      setIsProcessing(false);
-    }
+    } finally { setIsProcessing(false); }
   };
 
-  // Cálculos para la Barra de Progreso Financiero (Excluyendo Cajas Z)
+  // Cálculos para la Barra de Progreso Financiero
   const totalFacturadoCalc = facturasBoveda.filter(f => f.tipo === 'compra').reduce((acc, f) => acc + Math.abs(Num.parse(f.total)||0), 0);
   const totalPagadoCalc = facturasBoveda.filter(f => f.tipo === 'compra' && f.paid).reduce((acc, f) => acc + Math.abs(Num.parse(f.total)||0), 0);
   const progressPercent = totalFacturadoCalc > 0 ? (totalPagadoCalc / totalFacturadoCalc) * 100 : 0;
@@ -392,7 +392,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   return (
     <div className="animate-fade-in space-y-4 pb-32 relative max-w-[1600px] mx-auto text-xs">
       
-      {/* 🛡️ Píldoras de Resumen Financiero */}
+      {/* 🛡️ PÍLDORAS DE RESUMEN FINANCIERO */}
       <AnimatePresence mode="wait">
         {activeTab === 'hist' && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="mb-4">
@@ -449,9 +449,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
         <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
           <div className="flex items-center bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-full md:w-auto">
-            {/* 📦 PESTAÑA DE ESPERA (LAS TARJETAS) */}
             <button onClick={() => setActiveTab('pend')} className={cn("flex-1 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all", activeTab === 'pend' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50")}>📦 Agrupar Albaranes</button>
-            {/* 💰 PESTAÑA EXCEL (LA BÓVEDA) */}
             <button onClick={() => setActiveTab('hist')} className={cn("flex-1 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all", activeTab === 'hist' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50")}>💰 Bóveda (Excel)</button>
           </div>
 
@@ -494,7 +492,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
       {/* CUERPO PRINCIPAL */}
       <div className="grid grid-cols-1 xl:grid-cols-1 gap-6 relative z-10">
-        
         <section className="space-y-4">
           <AnimatePresence mode="wait">
             {activeTab === 'pend' ? (
@@ -602,7 +599,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
               </motion.div>
             ) : (
               <motion.div key="hist" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{type: 'spring', damping: 25}}>
-                {/* 💰 AQUÍ ESTÁ LA TABLA EXCEL (BÓVEDA) (Pasamos facturasBoveda, sin Cajas Z) */}
+                {/* 💰 AQUÍ ESTÁ LA TABLA EXCEL (BÓVEDA) */}
                 <InvoicesList 
                   facturas={facturasBoveda} searchQ={deferredSearch} selectedUnit={selectedUnit} mode={mode} filterStatus={filterStatus} year={year} businessUnits={BUSINESS_UNITS} sociosReales={SOCIOS_REALES_NAMES} superNorm={basicNorm} onOpenDetail={setSelectedInvoice as any} onTogglePago={handleTogglePago} onDelete={handleDeleteFactura} albaranesSeguros={albaranesSeguros} 
                 />
@@ -614,7 +611,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
       {/* 🚀 AUDITORÍA DOCUMENTAL Y AUTOMATIZACIONES (BOTTOM) */}
       <div className="mt-8 bg-slate-900 rounded-[2.5rem] p-6 md:p-8 shadow-2xl relative overflow-hidden flex flex-col lg:flex-row gap-8">
-        <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-blue-500 to-indigo-500" />
+        <div className="absolute top-0 left-0 w-full h-1.5 bg-blue-500" />
         
         {/* PANEL 1: AUDITORÍA DE CORREOS */}
         <div className="flex-1 space-y-6">
@@ -653,7 +650,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           )}
         </div>
 
-        {/* PANEL 2: INTEGRACIÓN N8N (EL FERRARI) */}
+        {/* PANEL 2: INTEGRACIÓN N8N */}
         <div className="lg:w-1/3 w-full border-t lg:border-t-0 lg:border-l border-slate-800 pt-6 lg:pt-0 lg:pl-8 flex flex-col justify-center">
           <div className="bg-indigo-900/30 border border-indigo-500/30 p-6 rounded-3xl text-center flex flex-col items-center">
             <div className="w-14 h-14 bg-indigo-600 rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(79,70,229,0.4)] mb-4">
@@ -793,6 +790,8 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           onClose={() => setSelectedInvoice(null)} 
           onDownloadFile={handleDownloadFile}
           onTogglePago={handleTogglePago} 
+          onSaveData={onSave}
+          fullData={safeData}
         />
       )}
     </div>
