@@ -1,22 +1,22 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback, useDeferredValue } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useDeferredValue } from 'react';
 import { 
   Search, Plus, Download, Package, AlertTriangle, Check, 
   Building2, ShoppingBag, ListPlus, Users, Hotel, Layers, 
-  XCircle, LineChart as LineChartIcon, FileSpreadsheet, Mic, Square, UploadCloud, FileDown, Smartphone, Camera, Loader2
+  XCircle, LineChart as LineChartIcon, FileSpreadsheet, Mic, Square, Camera, Loader2, Smartphone
 } from 'lucide-react';
-import { AppData, Albaran, Socio } from '../types';
+import { AppData, Albaran } from '../types';
 import { Num, ArumeEngine, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import { GoogleGenAI } from "@google/genai";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend } from 'recharts';
-import { createClient } from '@supabase/supabase-js'; // 🚀 IMPORTAMOS SUPABASE
+import { createClient } from '@supabase/supabase-js'; 
 
 // 🚀 IMPORTAMOS DEL CEREBRO CENTRAL
 import { basicNorm, TOLERANCIA as CENTRAL_TOLERANCIA } from '../services/invoicing';
 
-// 🚀 HIJOS VISUALES (Debes tenerlos en tu carpeta components)
+// 🧩 COMPONENTES HIJOS
 import { AlbaranesList } from './AlbaranesList';
 import { AlbaranEditModal } from './AlbaranEditModal';
 
@@ -39,23 +39,9 @@ const SUPABASE_URL = "https://bgtelulbiaugawyrhvwt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_jagYegyG8gGMijzpLEY9BQ_iWfL1MU4";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-/* =======================================================
- * 🛡️ 1. UTILIDADES Y CONSTANTES INTEGRADAS
- * ======================================================= */
 export const TOLERANCIA = CENTRAL_TOLERANCIA; 
-export const superNorm = basicNorm; 
 
 const safeJSON = (str: string) => { try { const match = str.match(/\{[\s\S]*\}/); return match ? JSON.parse(match[0]) : {}; } catch { return {}; } };
-
-const filterByQuery = (a: Albaran, q: string) => {
-  if (!q) return true;
-  const n = basicNorm(q);
-  const prov = basicNorm(a.prov);
-  const num  = (a.num||'').toLowerCase();
-  const notes= (a.notes||'').toLowerCase();
-  const lines= (a.items||[]).some((it:any)=> basicNorm(it.n).includes(n));
-  return prov.includes(n) || num.includes(n) || notes.includes(n) || lines;
-};
 
 const looksLikeDuplicate = (prov: string, num: string, date: string, albaranes: Albaran[]) => 
   albaranes.some(a => basicNorm(a.prov) === basicNorm(prov) && (a.num||'S/N') === (num||'S/N') && (a.date||'').slice(0,10) === (date||'').slice(0,10));
@@ -80,7 +66,7 @@ const normalizeUnitPrice = (q: number, u: string | undefined, unitPrice: number)
 };
 
 /* =======================================================
- * 🚀 CEREBRO FACTURACIÓN: PROMOCIÓN AUTOMÁTICA A FACTURAS
+ * 🚀 CEREBRO FACTURACIÓN: PROMOCIÓN AUTOMÁTICA
  * ======================================================= */
 const groupKey = (alb: Albaran) => `${basicNorm(alb.prov)}__${(alb.date || DateUtil.today()).slice(0, 7)}`;
 
@@ -183,7 +169,7 @@ function useAlbaranEnginePRO(text: string) {
         u = ['kg','kgs','kilo'].includes(unitToken) ? 'kg' : ['g','gr','grs'].includes(unitToken) ? 'g' : ['l','lt','litro'].includes(unitToken) ? 'l' : ['ml'].includes(unitToken) ? 'ml' : 'uds';
       }
 
-      const nums = Array.from(line.matchAll(/(\d+(?:.\d{1,3})?)/g)).map(m=> parseFloat(m[1]));
+      const nums = Array.from(line.matchAll(/(\d+(?:\.\d{1,3})?)/g)).map(m=> parseFloat(m[1]));
       if (!nums.length) continue;
 
       const discount = line.match(/(-\s?\d+(?:[.,]\d{1,2})?)\b/)?.[1] ? Math.abs(parseFloat(line.match(/(-\s?\d+(?:[.,]\d{1,2})?)\b/)![1].replace(',','.'))) : 0;
@@ -387,65 +373,16 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const audioChunksRef = useRef<Blob[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSyncingTelegram, setIsSyncingTelegram] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   const { analyzedItems, liveTotals } = useAlbaranEnginePRO(form.text);
-
-  // 🤖 NUEVA SINCRONIZACIÓN CON TELEGRAM -> EDITAR EN FORMULARIO
-  const handleTelegramSync = async () => {
-    setIsSyncingTelegram(true);
-    try {
-      // 1. Buscamos el último albarán en Supabase que envió el Bot de Telegram (Empieza por 📸)
-      const { data: correos, error } = await supabase
-        .from('inbox_general')
-        .select('*')
-        .ilike('remitente', '📸%')
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      if (error) throw error;
-
-      if (correos && correos.length > 0) {
-        const doc = correos[0];
-        
-        // 2. Extraemos los datos que guardó el bot en el asunto y remitente
-        const provMatch = doc.remitente.match(/📸\s*(.*?)\s*\(/);
-        const prov = provMatch ? provMatch[1].trim() : "Desconocido";
-
-        const dateMatch = doc.asunto.match(/Fecha:\s*([\d-]+)/);
-        const dateStr = dateMatch ? dateMatch[1] : DateUtil.today();
-
-        const totalMatch = doc.asunto.match(/Importe:\s*([\d.]+)/);
-        const totalNum = totalMatch ? totalMatch[1] : "0";
-
-        // 3. Lo metemos en el formulario de la izquierda para que lo edites antes de guardarlo
-        setForm(prev => ({
-          ...prev,
-          prov: prov.toUpperCase(),
-          date: dateStr,
-          num: `TG-${Date.now().toString().slice(-4)}`, // Número temporal
-          text: `1x GASTOS VARIOS ${prov} 10% ${totalNum}` // Línea genérica para que el total cuadre
-        }));
-
-        // 4. (Opcional) Borramos ese registro de Supabase para no volver a importarlo mañana
-        await supabase.from('inbox_general').delete().eq('id', doc.id);
-
-        alert("✅ Ticket importado desde Telegram. Revisa los datos en el formulario de la izquierda y dale a GUARDAR ALBARÁN.");
-      } else {
-        alert("ℹ️ No hay nuevos tickets pendientes enviados desde Telegram.");
-      }
-    } catch (e) {
-      console.error(e);
-      alert("⚠️ Error al conectar con la base de datos de Telegram.");
-    } finally {
-      setIsSyncingTelegram(false);
-    }
-  };
 
   const inRange = (iso: string, from?: string, to?: string) => {
     if (!iso) return false; const d = iso.slice(0,10);
     if (from && d < from) return false; if (to && d > to) return false;
     return true;
   };
+
   const presetThisMonth = () => { const y = new Date().getFullYear(); const m = String(new Date().getMonth()+1).padStart(2,'0'); setDateFrom(`${y}-${m}-01`); setDateTo(`${y}-${m}-${String(new Date(y, new Date().getMonth()+1, 0).getDate()).padStart(2,'0')}`); };
   const presetLast7d = () => { const end = new Date(); const start = new Date(Date.now() - 6*86400000); setDateFrom(`${start.getFullYear()}-${String(start.getMonth()+1).padStart(2,'0')}-${String(start.getDate()).padStart(2,'0')}`); setDateTo(`${end.getFullYear()}-${String(end.getMonth()+1).padStart(2,'0')}-${String(end.getDate()).padStart(2,'0')}`); };
   const presetToday = () => { const t = new Date().toISOString().slice(0,10); setDateFrom(t); setDateTo(t); };
@@ -468,20 +405,52 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     return out;
   }, [albaranesSeguros]);
 
-  useEffect(() => {
-    const onOpen = (e: any) => { setInspectorDefaults({ prov: e.detail?.prov, item: e.detail?.item }); setShowInspector(true); };
-    window.addEventListener('open-price-inspector', onOpen);
-    return () => window.removeEventListener('open-price-inspector', onOpen);
-  }, []);
+  // 🤖 NUEVA SINCRONIZACIÓN CON TELEGRAM (MEJORA 3)
+  const handleTelegramSync = async () => {
+    setIsSyncingTelegram(true);
+    try {
+      const { data: correos, error } = await supabase
+        .from('inbox_general')
+        .select('*')
+        .ilike('remitente', '📸%')
+        .order('created_at', { ascending: false })
+        .limit(1);
 
-  /* =======================================================
-   * 🤖 MOTOR DE OCR / IA LOCAL
-   * ======================================================= */
+      if (error) throw error;
+
+      if (correos && correos.length > 0) {
+        const doc = correos[0];
+        const provMatch = doc.remitente.match(/📸\s*(.*?)\s*\(/);
+        const prov = provMatch ? provMatch[1].trim() : "Desconocido";
+        const dateMatch = doc.asunto.match(/Fecha:\s*([\d-]+)/);
+        const dateStr = dateMatch ? dateMatch[1] : DateUtil.today();
+        const totalMatch = doc.asunto.match(/Importe:\s*([\d.]+)/);
+        const totalNum = totalMatch ? totalMatch[1] : "0";
+
+        setForm(prev => ({
+          ...prev, prov: prov.toUpperCase(), date: dateStr, num: `TG-${Date.now().toString().slice(-4)}`,
+          text: `1x GASTOS VARIOS ${prov} 10% ${totalNum}` 
+        }));
+
+        await supabase.from('inbox_general').delete().eq('id', doc.id);
+        alert("✅ Ticket importado desde Telegram. Revisa el formulario de la izquierda.");
+      } else {
+        alert("ℹ️ No hay nuevos tickets pendientes enviados desde Telegram.");
+      }
+    } catch (e) {
+      alert("⚠️ Error al conectar con Telegram.");
+    } finally {
+      setIsSyncingTelegram(false);
+    }
+  };
+
+  // 🤖 MOTOR OCR LOCAL
   const processLocalFile = async (file: File) => {
     const apiKey = localStorage.getItem('gemini_api_key');
+    if (!apiKey) return alert("⚠️ Configura tu clave de Gemini API en los ajustes primero.");
+    
     setIsScanning(true); 
     try {
-      if (!apiKey) throw new Error("NO_API_KEY");
       const fileBase64 = await new Promise<string>((resolve) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result as string); reader.readAsDataURL(file); });
       const soloBase64 = fileBase64.split(',')[1];
 
@@ -495,15 +464,13 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         ...prev, prov: rawJson.proveedor || '', num: rawJson.num || '', date: rawJson.fecha || DateUtil.today(),
         text: (rawJson.lineas || []).map((l:any) => `${l.q} ${l.u || 'uds'} ${l.n} ${l.rate}% ${l.t}`).join('\n')
       }));
-      alert("✅ IA completada. Revisa los datos en el formulario antes de guardar.");
+      alert("✅ IA completada. Revisa los datos en el formulario.");
     } catch (e) {
       alert("⚠️ Error en IA. Rellena el albarán a mano.");
     } finally { setIsScanning(false); }
   };
 
-  /* =======================================================
-   * 🎙️ MOTOR VOSK (Restaurado)
-   * ======================================================= */
+  // 🎙️ MOTOR VOSK
   const toggleRecording = async () => {
     if (isRecording) { mediaRecorderRef.current?.stop(); setIsRecording(false); return; }
     try {
@@ -529,19 +496,12 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       if (!voskRes.ok) throw new Error("Vosk no responde");
       const voskData = await voskRes.json();
       const txt = voskData.text || "";
-      
-      setForm(prev => ({
-        ...prev,
-        text: prev.text ? `${prev.text}\n${txt}` : txt
-      }));
-      alert("🎙️ Audio procesado correctamente.");
+      setForm(prev => ({ ...prev, text: prev.text ? `${prev.text}\n${txt}` : txt }));
     } catch (e) { alert("⚠️ Error conectando con servidor VOSK local."); } 
     finally { setIsScanning(false); }
   };
 
-  /* =======================================================
-   * 💾 GUARDADO CON PRICE INTELLIGENCE Y CEREBRO FACTURACIÓN
-   * ======================================================= */
+  // 💾 GUARDADO CON PRICE INTELLIGENCE
   const handleQuickAdd = () => {
     const t = Num.parse(quickCalc.total);
     if (t > 0 && quickCalc.name) {
@@ -565,6 +525,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
   const handleSaveAlbaran = async (e: React.MouseEvent) => {
     e.preventDefault();
+    if (isSaving) return;
     if (!form.prov) return alert("⚠️ Introduce el nombre del proveedor.");
     if (analyzedItems.length === 0) return alert("⚠️ Añade al menos una línea.");
 
@@ -572,84 +533,93 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
        if (!window.confirm("⚠️ Posible duplicado (mismo proveedor, nº y fecha). ¿Guardar igualmente?")) return;
     }
 
-    const newData = JSON.parse(JSON.stringify(data)) as AppData;
-    if (!newData.facturas) newData.facturas = [];
-    if (!newData.priceHistory) newData.priceHistory = [];
-    if (!newData.albaranes) newData.albaranes = [];
+    setIsSaving(true);
+    try {
+        const newData = JSON.parse(JSON.stringify(data)) as AppData;
+        if (!newData.facturas) newData.facturas = [];
+        if (!newData.priceHistory) newData.priceHistory = [];
+        if (!newData.albaranes) newData.albaranes = [];
 
-    const robustId = `alb-${form.date.replace(/-/g,'')}-${Date.now().toString().slice(-6)}-${form.unitId}`;
-    let alerts: string[] = [];
+        const robustId = `alb-${form.date.replace(/-/g,'')}-${Date.now().toString().slice(-6)}-${form.unitId}`;
+        let alerts: string[] = [];
 
-    for (const it of analyzedItems as any[]) {
-      const provN = form.prov.trim().toUpperCase();
-      const itemN = it.n.trim().toUpperCase();
-      const normalizedPrice = normalizeUnitPrice(it.q, it.u, it.unitPrice);
+        for (const it of analyzedItems as any[]) {
+          const provN = form.prov.trim().toUpperCase();
+          const itemN = it.n.trim().toUpperCase();
+          const normalizedPrice = normalizeUnitPrice(it.q, it.u, it.unitPrice);
 
-      const increase = detectPriceIncrease(newData.priceHistory, provN, itemN, normalizedPrice);
-      if (increase.isIncrease) {
-        alerts.push(`📈 [${provN}] ${itemN} ha subido un +${increase.pct}% (Límite tolerado: ${increase.threshold}%). Antes: ${increase.previous?.unitPrice}€ -> Ahora: ${normalizedPrice}€`);
-      }
+          const increase = detectPriceIncrease(newData.priceHistory, provN, itemN, normalizedPrice);
+          if (increase.isIncrease) {
+            alerts.push(`📈 [${provN}] ${itemN} ha subido un +${increase.pct}% (Límite tolerado: ${increase.threshold}%). Antes: ${increase.previous?.unitPrice}€ -> Ahora: ${normalizedPrice}€`);
+          }
 
-      newData.priceHistory.push({ id: "price-" + Date.now() + "-" + Math.random().toString(36).slice(2), prov: provN, item: itemN, unitPrice: normalizedPrice, date: form.date });
+          newData.priceHistory.push({ id: "price-" + Date.now() + "-" + Math.random().toString(36).slice(2), prov: provN, item: itemN, unitPrice: normalizedPrice, date: form.date });
+        }
+
+        const newAlbaran: Albaran = {
+          id: robustId, prov: form.prov.trim().toUpperCase(), date: form.date, num: form.num || "S/N",
+          socio: form.socio, notes: form.notes, items: analyzedItems.map(item => item!), total: String(liveTotals.grandTotal),
+          base: String(liveTotals.baseFinal), taxes: String(liveTotals.taxFinal), invoiced: false, paid: form.paid, status: 'ok', reconciled: false, unitId: form.unitId 
+        };
+
+        newData.albaranes.unshift(newAlbaran);
+        upsertFacturaFromAlbaran(newData, newAlbaran);
+
+        await onSave(newData);
+        
+        if (alerts.length > 0) alert("⚠️ ALERTA DE COSTES (Desviaciones detectadas)\n\n" + alerts.join("\n\n") + "\n\nRevisa si es por temporada o si el proveedor ha subido tarifas.");
+        setForm(prev => ({ ...prev, prov: '', num: '', text: '', paid: false }));
+    } finally {
+        setIsSaving(false);
     }
-
-    const newAlbaran: Albaran = {
-      id: robustId, prov: form.prov.trim().toUpperCase(), date: form.date, num: form.num || "S/N",
-      socio: form.socio, notes: form.notes, items: analyzedItems.map(item => item!), total: liveTotals.grandTotal,
-      base: liveTotals.baseFinal, taxes: liveTotals.taxFinal, invoiced: false, paid: form.paid, status: 'ok', reconciled: false, unitId: form.unitId 
-    };
-
-    newData.albaranes.unshift(newAlbaran);
-
-    // 🚀 PROMOCIÓN AUTOMÁTICA
-    upsertFacturaFromAlbaran(newData, newAlbaran);
-
-    await onSave(newData);
-    
-    if (alerts.length > 0) alert("⚠️ ALERTA DE COSTES (Desviaciones detectadas)\n\n" + alerts.join("\n\n") + "\n\nRevisa si es por temporada o si el proveedor ha subido tarifas.");
-    setForm(prev => ({ ...prev, prov: '', num: '', text: '', paid: false }));
   };
 
   const handleSaveEdits = async (e?: React.MouseEvent) => {
-    if (e) e.preventDefault(); if (!editForm) return;
+    if (e) e.preventDefault(); if (!editForm || isSaving) return;
+    setIsSaving(true);
     
-    const newData = JSON.parse(JSON.stringify(data)) as AppData;
-    if (!newData.albaranes) newData.albaranes = [];
-    if (!newData.facturas) newData.facturas = [];
+    try {
+        const newData = JSON.parse(JSON.stringify(data)) as AppData;
+        if (!newData.albaranes) newData.albaranes = [];
+        if (!newData.facturas) newData.facturas = [];
 
-    const index = newData.albaranes.findIndex((a: Albaran) => a.id === editForm.id);
-    if (index === -1) return alert("⚠️ Error crítico: No se encontró el albarán.");
+        const index = newData.albaranes.findIndex((a: Albaran) => a.id === editForm.id);
+        if (index === -1) return alert("⚠️ Error crítico: No se encontró el albarán.");
 
-    const before = JSON.parse(JSON.stringify(newData.albaranes[index])) as Albaran;
+        const before = JSON.parse(JSON.stringify(newData.albaranes[index])) as Albaran;
+        const sanitizedAlbaran = { 
+          ...editForm, prov: editForm.prov?.trim().toUpperCase() || "DESCONOCIDO", socio: editForm.socio || "Arume", unitId: editForm.unitId || "REST", 
+          total: String(Num.parse(editForm.total)), base: String(Num.parse(editForm.base)), taxes: String(Num.parse(editForm.taxes)) 
+        };
 
-    const sanitizedAlbaran = { 
-      ...editForm, prov: editForm.prov?.trim().toUpperCase() || "DESCONOCIDO", socio: editForm.socio || "Arume", unitId: editForm.unitId || "REST", 
-      total: Num.parse(editForm.total), base: Num.parse(editForm.base), taxes: Num.parse(editForm.taxes) 
-    };
+        newData.albaranes[index] = sanitizedAlbaran;
+        detachFromPreviousFacturaIfMoved(newData, before, sanitizedAlbaran);
+        upsertFacturaFromAlbaran(newData, sanitizedAlbaran);
 
-    newData.albaranes[index] = sanitizedAlbaran;
-    
-    // 🚀 MOVIMIENTO INTELIGENTE
-    detachFromPreviousFacturaIfMoved(newData, before, sanitizedAlbaran);
-    upsertFacturaFromAlbaran(newData, sanitizedAlbaran);
-
-    await onSave(newData);
-    setEditForm(null); 
+        await onSave(newData);
+        setEditForm(null); 
+    } finally {
+        setIsSaving(false);
+    }
   };
 
   const handleDelete = async (id: string) => {
     if (!window.confirm("¿Eliminar este albarán permanentemente?")) return;
-    
-    const newData = JSON.parse(JSON.stringify(data)) as AppData;
-    const albaranToDelete = newData.albaranes?.find(a => a.id === id);
-    
-    if (albaranToDelete) {
-       detachFromPreviousFacturaIfMoved(newData, albaranToDelete, { ...albaranToDelete, prov: 'DELETED_MOCK', date: '1970-01-01' } as any);
+    setIsSaving(true);
+    try {
+        const newData = JSON.parse(JSON.stringify(data)) as AppData;
+        const albaranToDelete = newData.albaranes?.find(a => a.id === id);
+        
+        if (albaranToDelete) {
+           detachFromPreviousFacturaIfMoved(newData, albaranToDelete, { ...albaranToDelete, prov: 'DELETED_MOCK', date: '1970-01-01' } as any);
+        }
+        
+        newData.albaranes = (newData.albaranes || []).filter(a => a.id !== id);
+        await onSave(newData);
+        setEditForm(null);
+    } finally {
+        setIsSaving(false);
     }
-    
-    newData.albaranes = (newData.albaranes || []).filter(a => a.id !== id);
-    await onSave(newData);
-    setEditForm(null);
   };
 
   /* =======================================================
@@ -720,7 +690,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       <header className="bg-white p-6 md:p-8 rounded-[3rem] shadow-sm border border-slate-100 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
         <div>
           <h2 className="text-3xl font-black text-slate-800 tracking-tighter">Albaranes & Compras</h2>
-          <p className="text-xs text-indigo-500 font-bold uppercase tracking-widest mt-1">Con Inteligencia de Precios</p>
+          <p className="text-xs text-indigo-500 font-bold uppercase tracking-widest mt-1">Recepción y Análisis</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={handleTelegramSync} disabled={isSyncingTelegram} className="px-5 py-3 rounded-2xl font-black text-xs uppercase bg-[#229ED9] text-white shadow-md hover:bg-[#1E8CC0] transition flex items-center gap-2">
@@ -853,8 +823,8 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                   <span className="text-3xl font-black text-emerald-400 tracking-tighter">{Num.fmt(liveTotals.grandTotal)}</span>
                 </div>
 
-                <button type="button" onClick={handleSaveAlbaran} className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition active:scale-95 flex items-center justify-center gap-2">
-                  <Check className="w-5 h-5" /> GUARDAR ALBARÁN
+                <button type="button" disabled={isSaving} onClick={handleSaveAlbaran} className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50">
+                  {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Check className="w-5 h-5" />} GUARDAR ALBARÁN
                 </button>
               </motion.div>
             )}
@@ -862,6 +832,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         </aside>
 
         <section className="lg:col-span-8">
+          {/* 🧩 LLAMAMOS A LA LISTA */}
           <AlbaranesList 
             albaranes={filteredForList} 
             searchQ={deferredSearch} 
