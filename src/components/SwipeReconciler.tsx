@@ -1,10 +1,10 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle2, Sparkles, ArrowDownLeft, Search, X as CloseIcon, Zap, Target } from 'lucide-react';
+import { CheckCircle2, Sparkles, ArrowDownLeft, Search, X as CloseIcon, Zap, Target, AlertCircle, Layers } from 'lucide-react';
 import { AppData, BankMovement } from '../types';
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
-// 🚀 Importamos el cerebro de enlace
+// 🚀 Importamos el cerebro de enlace PREMIUM
 import { findMatches, executeLink } from '../services/bancoLogic';
 
 export interface SwipeReconcilerProps {
@@ -14,7 +14,7 @@ export interface SwipeReconcilerProps {
 }
 
 /* =======================================================
- * 🎨 COMPONENTE: Rayo de Energía Seguro (Anti-Memory Leaks)
+ * 🎨 COMPONENTE: Rayo de Energía Seguro
  * ======================================================= */
 const EnergyBeam = ({ sourceId, targetId, isActive }: { sourceId: string, targetId: string, isActive: boolean }) => {
   const [coords, setCoords] = useState<{x1: number, y1: number, x2: number, y2: number} | null>(null);
@@ -38,7 +38,6 @@ const EnergyBeam = ({ sourceId, targetId, isActive }: { sourceId: string, target
       }
     };
 
-    // Doble verificación suave para Framer Motion
     const t1 = setTimeout(updateCoords, 100);
     const t2 = setTimeout(updateCoords, 400);
     window.addEventListener('resize', updateCoords);
@@ -75,13 +74,11 @@ const EnergyBeam = ({ sourceId, targetId, isActive }: { sourceId: string, target
   );
 };
 
-
 /* =======================================================
  * 💳 COMPONENTE PRINCIPAL (SWIPE)
  * ======================================================= */
 export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, onClose }) => {
   
-  // 🛡️ MEJORA 1: Filtramos los pendientes de forma segura
   const pendingMovements = useMemo(() => {
     return Array.isArray(data.banco) ? data.banco.filter((b: BankMovement) => b?.status === 'pending') : [];
   }, [data.banco]);
@@ -91,7 +88,7 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
   const [isLinking, setIsLinking] = useState(false);
   
   const next = useCallback(() => {
-    if (navigator.vibrate) navigator.vibrate(20); // Zumbido háptico
+    if (navigator.vibrate) navigator.vibrate(20);
     setCurrentIndex(prev => Math.min(prev + 1, pendingMovements.length));
   }, [pendingMovements.length]);
 
@@ -105,7 +102,7 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [next, isLinking, onClose]);
 
-  // PANTALLA FINAL (Todo Conciliado)
+  // PANTALLA FINAL
   if (pendingMovements.length === 0 || currentIndex >= pendingMovements.length) {
     return (
       <div className="fixed inset-0 z-[1000] flex justify-center items-center p-4">
@@ -132,15 +129,14 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
     );
   }
 
-  // 🛡️ Extraemos el item de forma segura y blindada
   const currentItem = pendingMovements[currentIndex];
   if (!currentItem) return null;
 
   const isIncome = Num.parse(currentItem.amount) > 0;
 
-  // 🚀 USAMOS EL CEREBRO DE BÚSQUEDA
+  // 🚀 USAMOS EL NUEVO CEREBRO DE BÚSQUEDA (Con Scoring)
   const matches = useMemo(() => {
-    return findMatches(currentItem, data);
+    return findMatches(currentItem, data).slice(0, 3); // Solo enseñamos las 3 mejores opciones
   }, [currentItem, data]);
 
   const handleLinkLocal = async (matchType: string, docId: string, comision: number = 0) => {
@@ -157,7 +153,7 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
       await onSave(newData);
       setCurrentIndex(prev => prev + 1);
     } catch (e) {
-      console.error("Error al enlazar en SwipeReconciler:", e);
+      console.error("Error al enlazar:", e);
       alert("Error al intentar enlazar. Revisa tu conexión.");
     } finally {
       setIsLinking(false);
@@ -170,7 +166,7 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
   return (
     <div className="fixed inset-0 z-[1000] flex justify-center items-center p-4 overflow-hidden">
       
-      {/* INNOVACIÓN 1: Mood Lighting Dinámico */}
+      {/* Mood Lighting */}
       <motion.div 
         initial={{ opacity: 0 }} 
         animate={{ opacity: 1, backgroundColor: isIncome ? 'rgba(15, 23, 42, 0.94)' : 'rgba(15, 23, 42, 0.97)' }} 
@@ -190,7 +186,7 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
               <Sparkles className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h3 className="text-white font-black text-lg leading-none tracking-tight">Swipe Mode</h3>
+              <h3 className="text-white font-black text-lg leading-none tracking-tight">Smart Match</h3>
               <p className="text-indigo-400 text-[10px] font-black uppercase tracking-widest mt-1">{pendingMovements.length - currentIndex} RESTANTES</p>
             </div>
           </div>
@@ -204,13 +200,7 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
           <motion.div 
             key={currentItem.id}
             initial={{ scale: 0.9, opacity: 0, y: 50 }} 
-            animate={{ 
-              scale: isLinking ? 1.05 : 1, 
-              opacity: isLinking ? 0 : 1, 
-              y: isLinking ? -100 : 0, 
-              x: 0, 
-              rotate: 0 
-            }} 
+            animate={{ scale: isLinking ? 1.05 : 1, opacity: isLinking ? 0 : 1, y: isLinking ? -100 : 0, x: 0, rotate: 0 }} 
             exit={{ scale: 0.9, opacity: 0, x: -200, rotate: -10 }} 
             transition={{ type: "spring", stiffness: 300, damping: 25 }}
             drag={!isLinking ? "x" : false} 
@@ -218,51 +208,53 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
             dragElastic={0.2} 
             onDragEnd={(e, { offset, velocity }) => { if (offset.x < -80 || velocity.x < -600) next(); }}
             className={cn(
-              "w-full rounded-[3rem] p-8 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.6)] flex flex-col min-h-[500px] relative overflow-hidden",
+              "w-full rounded-[3rem] p-8 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.6)] flex flex-col min-h-[550px] relative overflow-hidden",
               isLinking ? "bg-emerald-50 border-4 border-emerald-400" : "bg-white border border-slate-200 cursor-grab active:cursor-grabbing"
             )}
           >
-            {/* INNOVACIÓN 2: Flash fotográfico al enlazar */}
             <AnimatePresence>
               {isLinking && (
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: [0, 1, 0] }} transition={{ duration: 0.5 }} className="absolute inset-0 bg-white z-[100] mix-blend-overlay" />
               )}
             </AnimatePresence>
 
-            {/* INFO DEL MOVIMIENTO BANCARIO BLINDADA */}
-            <div className="text-center mb-8 pointer-events-none relative z-10 pt-2">
+            {/* INFO DEL MOVIMIENTO BANCARIO */}
+            <div className="text-center mb-6 pointer-events-none relative z-10 pt-2 border-b border-slate-100 pb-6">
               <span className={cn("text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest mb-4 inline-flex items-center gap-1.5 shadow-sm border", 
                 isIncome ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-rose-50 text-rose-700 border-rose-200"
               )}>
                 {isLinking ? <Zap className="w-3 h-3 animate-pulse" /> : <Target className="w-3 h-3" />}
-                {isIncome ? 'Ingreso detectado' : 'Cargo detectado'}
+                {isIncome ? 'Ingreso del Banco' : 'Cargo del Banco'}
               </span>
               
-              <h2 className="text-xl md:text-2xl font-black text-slate-800 leading-tight mb-2 line-clamp-2 px-4">
+              <h2 className="text-xl font-black text-slate-800 leading-tight mb-2 line-clamp-2 px-4">
                 {String(currentItem.desc || 'Sin Concepto')}
               </h2>
               
-              <p id={`bank-amount-${currentItem.id}`} className={cn("text-5xl md:text-6xl font-black tracking-tighter inline-block relative my-2", isIncome ? "text-emerald-500" : "text-slate-900")}>
+              <p id={`bank-amount-${currentItem.id}`} className={cn("text-5xl font-black tracking-tighter inline-block relative my-2", isIncome ? "text-emerald-500" : "text-slate-900")}>
                 {Num.fmt(currentItem.amount)}
               </p>
               
               <div className="mt-2">
                 <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest bg-slate-50 border border-slate-100 inline-block px-3 py-1 rounded-lg shadow-inner">
-                  Fecha Valor: {String(currentItem.date || '')}
+                  FECHA VALOR: {String(currentItem.date || '')}
                 </span>
               </div>
             </div>
 
-            {/* OPCIONES DE COINCIDENCIA BLINDADAS */}
+            {/* OPCIONES DE COINCIDENCIA INTELIGENTES (UI MEJORADA) */}
             <div className="flex-1 relative z-10 w-full mt-2">
               {Array.isArray(matches) && matches.length > 0 ? (
-                <div className="space-y-3 relative">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3 text-center">Coincidencias Sugeridas</p>
+                <div className="space-y-4 relative">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3 text-center flex items-center justify-center gap-1">
+                    <Sparkles className="w-3 h-3 text-indigo-400"/> Sugerencias IA
+                  </p>
                   
                   {matches.map((m: any, idx: number) => {
                     const matchIdStr = `match-card-${m.id}`;
                     const isHovered = hoveredMatch === m.id;
-                    const isPerfectMatch = matches.length === 1 && idx === 0; 
+                    const isBestMatch = idx === 0 && m.score >= 80; 
+                    const isMulti = m.type === 'MULTI-ALBARÁN';
                     
                     return (
                       <div key={idx} className="relative">
@@ -280,28 +272,49 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
                           whileTap={!isLinking ? { scale: 0.98 } : {}}
                           onClick={() => handleLinkLocal(m.type, m.id, m.comision || 0)}
                           className={cn(
-                            "flex justify-between items-center p-4 rounded-2xl border-2 cursor-pointer transition-all relative z-20 bg-white overflow-hidden group",
-                            isHovered ? "border-emerald-400 shadow-[0_10px_20px_-5px_rgba(16,185,129,0.3)] bg-emerald-50/30" : "border-slate-200 hover:border-indigo-300 shadow-sm",
-                            isPerfectMatch && !isHovered && "border-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.2)]" 
+                            "flex flex-col p-4 rounded-2xl border-2 cursor-pointer transition-all relative z-20 bg-white overflow-hidden group shadow-sm",
+                            isHovered ? "border-emerald-400 shadow-[0_10px_20px_-5px_rgba(16,185,129,0.3)] bg-emerald-50/30" : "border-slate-200 hover:border-indigo-300",
+                            isBestMatch && !isHovered && "border-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.15)]" 
                           )}
                         >
-                          <div className="text-left min-w-0 pr-4 relative z-10">
-                            <span className={cn("text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded border",
-                              m.color === 'emerald' ? "bg-emerald-50 text-emerald-700 border-emerald-200" : 
-                              m.color === 'teal' ? "bg-teal-50 text-teal-700 border-teal-200" :
-                              m.color === 'amber' ? "bg-amber-50 text-amber-700 border-amber-200" : 
-                              m.color === 'indigo' ? "bg-indigo-50 text-indigo-700 border-indigo-200" : 
-                              "bg-rose-50 text-rose-700 border-rose-200"
-                            )}>{String(m.type || '')}</span>
-                            <p className="text-sm font-black text-slate-800 mt-2 truncate">{String(m.title || '')}</p>
-                            
-                            {isPerfectMatch && <p className="text-[8px] text-indigo-500 font-bold mt-1 uppercase flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> 100% Seguro</p>}
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="flex items-center gap-2">
+                              <span className={cn("text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded border flex items-center gap-1",
+                                isMulti ? "bg-purple-50 text-purple-700 border-purple-200" :
+                                m.color === 'emerald' ? "bg-emerald-50 text-emerald-700 border-emerald-200" : 
+                                m.color === 'teal' ? "bg-teal-50 text-teal-700 border-teal-200" :
+                                m.color === 'amber' ? "bg-amber-50 text-amber-700 border-amber-200" : 
+                                m.color === 'indigo' ? "bg-indigo-50 text-indigo-700 border-indigo-200" : 
+                                "bg-rose-50 text-rose-700 border-rose-200"
+                              )}>
+                                {isMulti && <Layers className="w-2.5 h-2.5"/>}
+                                {String(m.type || '')}
+                              </span>
+                            </div>
+
+                            {/* BARRA DE SCORING VISUAL */}
+                            <div className="flex items-center gap-1.5" title={`Nivel de confianza: ${m.score}%`}>
+                              <span className="text-[8px] font-black text-slate-400">SCORE</span>
+                              <div className="flex gap-0.5">
+                                {[1,2,3,4,5].map(step => (
+                                  <div key={step} className={cn("w-1.5 h-2.5 rounded-sm", (step*20) <= m.score ? "bg-indigo-500" : "bg-slate-200")} />
+                                ))}
+                              </div>
+                            </div>
                           </div>
 
-                          <div className="text-right shrink-0 relative z-10">
-                            <p className={cn("font-black text-lg tracking-tight transition-colors", isHovered ? "text-emerald-600" : "text-slate-900")}>
-                              {Num.fmt(m.amount)}
-                            </p>
+                          <div className="flex justify-between items-end">
+                            <div className="text-left min-w-0 pr-4">
+                              <p className="text-sm font-black text-slate-800 truncate">{String(m.title || '')}</p>
+                              {m.diff > 0 && <p className="text-[9px] text-amber-600 font-bold mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3"/> Diferencia: {Num.fmt(m.diff)}</p>}
+                              {isBestMatch && m.diff === 0 && <p className="text-[9px] text-emerald-600 font-bold mt-1 flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Cuadra Perfecto</p>}
+                            </div>
+
+                            <div className="text-right shrink-0">
+                              <p className={cn("font-black text-xl tracking-tight transition-colors", isHovered ? "text-emerald-600" : "text-slate-900")}>
+                                {Num.fmt(m.amount)}
+                              </p>
+                            </div>
                           </div>
                         </motion.div>
                       </div>
@@ -309,19 +322,19 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
                   })}
                 </div>
               ) : (
-                <div className="flex flex-col items-center justify-center h-full text-center py-12 pointer-events-none">
-                  <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4 border border-slate-100">
+                <div className="flex flex-col items-center justify-center h-full text-center py-8 pointer-events-none opacity-80">
+                  <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4 border border-slate-100 shadow-inner">
                     <Search className="w-8 h-8 text-slate-300" />
                   </div>
                   <p className="text-xs font-black text-slate-500 uppercase tracking-widest">Sin Coincidencias</p>
-                  <p className="text-[10px] font-bold text-slate-400 mt-1 max-w-[200px] leading-relaxed">No hay facturas ni cierres de TPV en el sistema que sumen este importe exacto.</p>
+                  <p className="text-[10px] font-bold text-slate-400 mt-2 max-w-[220px] leading-relaxed">No hay facturas ni albaranes en el sistema que se acerquen a este importe.</p>
                 </div>
               )}
             </div>
 
             {/* BOTÓN SALTAR */}
             <div className="mt-auto pt-6 relative z-10">
-              <button disabled={isLinking} onClick={next} className="w-full bg-slate-50 border border-slate-200 text-slate-400 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-100 hover:text-slate-600 transition-all flex items-center justify-center gap-2 disabled:opacity-0 active:scale-95">
+              <button disabled={isLinking} onClick={next} className="w-full bg-slate-50 border border-slate-200 text-slate-400 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-100 hover:text-slate-600 transition-all flex items-center justify-center gap-2 disabled:opacity-0 active:scale-95 shadow-sm">
                 <ArrowDownLeft className="w-4 h-4 rotate-45" /> SALTAR ESTE MOVIMIENTO
               </button>
             </div>
