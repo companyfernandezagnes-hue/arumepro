@@ -62,7 +62,8 @@ function useInvoicesFilters(
         const unitToCompare = f.unidad_negocio || 'REST';
         if (selectedUnit !== 'ALL' && unitToCompare !== selectedUnit) return false;
         
-        if (f.tipo === 'caja' || (f as any).tipo === 'banco') return false;
+        // 🛑 FILTRO MÁGICO APLICADO: Ocultamos Cajas (gastos menores), Banco y Ventas (Cajas Z)
+        if (f.tipo === 'caja' || (f as any).tipo === 'banco' || f.tipo === 'venta') return false;
 
         const normCliente = superNorm(f.cliente);
         const normProv = superNorm(f.prov);
@@ -197,7 +198,7 @@ export const InvoicesList = React.memo(({
               {historyList.map(f => {
                 const unitConfig = Array.isArray(businessUnits) ? businessUnits.find(u => u.id === (f.unidad_negocio || 'REST')) : null;
                 const titular = mode === 'socio' ? (f.cliente || f.prov || '—') : (f.prov || f.cliente || '—');
-                const isIA = f.source === 'gmail-sync' || f.source === 'dropzone' || f.source === 'email-ia';
+                const isIA = f.source === 'gmail-sync' || f.source === 'dropzone' || f.source === 'email-ia' || f.source === 'ia-auto';
                 const fTotal = Math.abs(Num.parse(f.total || 0));
                 const fBase = Num.parse(f.base || 0) || Num.round2(fTotal / 1.10);
                 const fTax = Num.parse(f.tax || 0) || Num.round2(fTotal - fBase);
