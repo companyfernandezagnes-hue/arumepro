@@ -3,7 +3,7 @@ import {
   FileText, FileArchive, Package, Zap, X, Calendar, Hash, ShieldCheck, Link as LinkIcon,
   CheckCircle2, AlertTriangle, Clock, Download, Bot
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 // 🛡️ Tipos importados correctamente
 import { FacturaExtended, BusinessUnit } from './InvoicesView';
 import { Albaran } from '../types';
@@ -25,25 +25,25 @@ interface InvoiceDetailModalProps {
   mode: 'proveedor' | 'socio';
   onClose: () => void;
   onDownloadFile: (factura: FacturaExtended) => void;
-  onTogglePago?: (id: string) => void; // 💡 Añadido opcionalmente para la innovación del botón de pago
+  onTogglePago?: (id: string) => void; 
 }
 
-// 🏷️ CHIPS DE ESTADO: (INTACTO - Recuperado de tu código)
+// 🏷️ CHIPS DE ESTADO: Blindado y con mejores copys
 const statusChip = (f: FacturaExtended | undefined | null) => {
   if (!f) return { label: 'DESCONOCIDO', cls: 'bg-slate-50 text-slate-600 border-slate-200' };
-  if (f.reconciled) return { label: 'CONCILIADA', cls: 'bg-blue-50 text-blue-600 border-blue-200' };
+  if (f.reconciled) return { label: 'CONCILIADA BANCO', cls: 'bg-blue-50 text-blue-600 border-blue-200' };
   switch (f.status) {
-    case 'paid':       return { label: 'PAGADA',     cls: 'bg-emerald-50 text-emerald-600 border-emerald-200' };
-    case 'approved':   return { label: 'APROBADA',   cls: 'bg-indigo-50 text-indigo-600 border-indigo-200' };
-    case 'mismatch':   return { label: 'REVISIÓN',   cls: 'bg-rose-50 text-rose-600 border-rose-200' };
-    case 'draft':      return { label: 'BORRADOR',   cls: 'bg-amber-50 text-amber-600 border-amber-200' };
-    case 'parsed':     return { label: 'PARSEADA',   cls: 'bg-slate-50 text-slate-600 border-slate-200' };
-    case 'ingested':   return { label: 'INGESTADA',  cls: 'bg-slate-50 text-slate-600 border-slate-200' };
-    default:           return { label: 'PENDIENTE',  cls: 'bg-amber-50 text-amber-600 border-amber-200' };
+    case 'paid':       return { label: 'PAGADA OK',     cls: 'bg-emerald-50 text-emerald-600 border-emerald-200' };
+    case 'approved':   return { label: 'PENDIENTE PAGO', cls: 'bg-indigo-50 text-indigo-600 border-indigo-200' };
+    case 'mismatch':   return { label: 'REVISIÓN URG.',  cls: 'bg-rose-50 text-rose-600 border-rose-200' };
+    case 'draft':      return { label: 'BORRADOR IA',    cls: 'bg-amber-50 text-amber-600 border-amber-200' };
+    case 'parsed':     return { label: 'LEÍDA',          cls: 'bg-slate-50 text-slate-600 border-slate-200' };
+    case 'ingested':   return { label: 'NUEVA',          cls: 'bg-slate-50 text-slate-600 border-slate-200' };
+    default:           return { label: 'SIN REVISAR',    cls: 'bg-amber-50 text-amber-600 border-amber-200' };
   }
 };
 
-// ♿ ENVOLTORIO DE ACCESIBILIDAD (INTACTO - Recuperado de tu código)
+// ♿ ENVOLTORIO DE ACCESIBILIDAD
 function useFocusTrap(active: boolean) {
   const ref = useRef<HTMLDivElement | null>(null);
   
@@ -76,16 +76,16 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
   factura, albaranes, businessUnits, mode, onClose, onDownloadFile, onTogglePago
 }: InvoiceDetailModalProps) {
 
-  // 🛡️ BLOQUEO DE SCROLL DE FONDO (Mejora de UX)
+  // 🛡️ BLOQUEO DE SCROLL DE FONDO 
   useEffect(() => {
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = 'unset'; };
   }, []);
 
-  // 🛡️ PARACAÍDAS 1: Si no hay factura, destruimos el modal antes de que crashee
+  // 🛡️ PARACAÍDAS 1: Factura vacía
   if (!factura || typeof factura !== 'object') return null;
 
-  // ♿ Cierre seguro con tecla ESC y atajo Ctrl+P para descargar
+  // ♿ Cierre seguro con tecla ESC y atajo Ctrl+P
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { 
       if (e.key === 'Escape') onClose(); 
@@ -104,7 +104,6 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
   const safeBusinessUnits = Array.isArray(businessUnits) ? businessUnits : [];
   const safeAlbaranes = Array.isArray(albaranes) ? albaranes : [];
 
-  // ✅ Indexación rápida de Unidades
   const unitById = useMemo(() => {
     const map = new Map<BusinessUnit, BusinessUnitCfg>();
     for (const u of safeBusinessUnits) {
@@ -113,37 +112,41 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
     return map;
   }, [safeBusinessUnits]);
 
-  // 🛡️ PARACAÍDAS 3: Saneamiento extremo de cadenas
+  // 🛡️ PARACAÍDAS 3: Saneamiento extremo de cadenas (Evitar errores si llega null)
   const titular = useMemo(() => {
     const raw = mode === 'socio' ? (factura.cliente || factura.prov) : (factura.prov || factura.cliente);
     return typeof raw === 'string' ? raw.trim().toUpperCase() : 'DESCONOCIDO';
   }, [factura, mode]);
 
-  const refStr  = typeof factura.num === 'string' ? factura.num.trim().toUpperCase() : 'S/N';
-  const dateStr = typeof factura.date === 'string' ? factura.date : 'FECHA DESCONOCIDA';
+  const refStr  = String(factura.num || 'S/N').toUpperCase();
+  const dateStr = String(factura.date || 'S/F');
   const isIA = factura.source === 'gmail-sync' || factura.source === 'dropzone' || factura.source === 'email-ia' || factura.source === 'ia-auto';
 
-  // 🛡️ PARACAÍDAS 4: Filtrado de Albaranes seguro
+  // 🛡️ PARACAÍDAS 4: Filtrado de Albaranes Seguro
   const albaranesVinculados = useMemo(() => {
     const ids = Array.isArray(factura.albaranIdsArr) ? factura.albaranIdsArr : [];
     if (ids.length === 0) return [];
     
     const setIds = new Set(ids);
+    // Devuelve los albaranes que sí existen (por si alguno se borró de la DB)
     return safeAlbaranes.filter(a => a && a.id && setIds.has(a.id));
   }, [factura.albaranIdsArr, safeAlbaranes]);
 
+  // 🛡️ PARACAÍDAS 5: Matemáticas Blindadas con absolutos
   const sumaAlbaranes = useMemo(() => {
-    return albaranesVinculados.reduce((acc, a) => acc + (Num.parse(a.total) || 0), 0);
+    return albaranesVinculados.reduce((acc, a) => acc + Math.abs(Num.parse(a.total) || 0), 0);
   }, [albaranesVinculados]);
 
-  // 🛡️ PARACAÍDAS 5: Matemáticas a prueba de fallos
   const total = Math.abs(Num.parse(factura.total) || 0);
   const base  = Math.abs(Num.parse(factura.base)  || Num.round2(total / 1.10));
   const iva   = Math.abs(Num.parse(factura.tax)   || Num.round2(total - base));
 
   // 💡 CÁLCULOS INNOVACIÓN: Barra de Progreso y Descuadre
-  const diferencia = Math.abs(Num.round2(sumaAlbaranes - total));
-  const isPerfectMatch = diferencia <= Math.max(0.50, total * 0.005);
+  const diferencia = Num.round2(sumaAlbaranes - total);
+  const diffAbsoluta = Math.abs(diferencia);
+  const isPerfectMatch = diffAbsoluta <= Math.max(0.50, total * 0.005); // Tolerancia 0.5% o 50 céntimos
+  
+  // Lógica barra asimétrica
   const matchPercentage = total > 0 ? Math.min((sumaAlbaranes / total) * 100, 100) : 0;
 
   const chip = statusChip(factura);
@@ -167,7 +170,7 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
       aria-labelledby="invoice-title"
       aria-describedby="invoice-desc"
     >
-      {/* 🌑 INNOVACIÓN: Fondo Glassmorphism Inteligente */}
+      {/* 🌑 INNOVACIÓN: Fondo Glassmorphism Reactivo */}
       <motion.div
         initial={{ opacity: 0 }} 
         animate={{ opacity: 1 }} 
@@ -203,21 +206,21 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
                 {titular}
               </h3>
               <p id="invoice-desc" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1 flex items-center gap-2">
-                <span className="bg-slate-100 px-2 py-0.5 rounded text-indigo-500">REF: {refStr}</span>
-                {isIA && <span className="bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded flex items-center gap-1"><Bot className="w-3 h-3"/> IA</span>}
+                <span className="bg-slate-100 px-2 py-0.5 rounded text-indigo-500 font-mono">REF: {refStr}</span>
+                {isIA && <span className="bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded flex items-center gap-1 border border-purple-100"><Bot className="w-3 h-3"/> IA</span>}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className={cn('text-[9px] font-black px-2.5 py-1 rounded-full border', chip.cls)} title="Estado de la factura">
+            <span className={cn('text-[9px] font-black px-2.5 py-1 rounded-full border shadow-sm', chip.cls)} title="Estado de la factura">
               {chip.label}
             </span>
 
             <button
               type="button"
               onClick={handleClose}
-              className="p-2.5 bg-slate-50 text-slate-400 rounded-full hover:bg-rose-50 hover:text-rose-500 transition-colors shrink-0"
+              className="p-2.5 bg-slate-50 text-slate-400 rounded-full hover:bg-slate-200 hover:text-slate-700 transition-colors shrink-0"
               aria-label="Cerrar modal"
             >
               <X className="w-5 h-5" aria-hidden="true" />
@@ -253,29 +256,29 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
               </span>
             </div>
 
-            {/* Email Meta */}
+            {/* Email Meta (Blindado) */}
             {factura.emailMeta && typeof factura.emailMeta === 'object' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border-t border-slate-50 pt-4">
                 <div className="text-[10px] text-slate-500">
                   <span className="font-black uppercase block mb-1">Correo Origen</span>
-                  <span className="text-xs font-mono text-slate-700 break-all">{factura.emailMeta.from || '—'}</span>
+                  <span className="text-xs font-mono text-slate-700 break-all">{String(factura.emailMeta.from || '—')}</span>
                 </div>
                 <div className="text-[10px] text-slate-500">
                   <span className="font-black uppercase block mb-1">Asunto</span>
-                  <span className="text-xs text-slate-700 break-words">{factura.emailMeta.subject || '—'}</span>
+                  <span className="text-xs text-slate-700 break-words line-clamp-2">{String(factura.emailMeta.subject || '—')}</span>
                 </div>
               </div>
             )}
           </div>
 
-          {/* ⚖️ INNOVACIÓN 1: Cuadro 3-Way Match con Barra de Progreso */}
+          {/* ⚖️ INNOVACIÓN 1: Cuadro 3-Way Match con Barra de Progreso Asimétrica */}
           <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
               <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest flex items-center gap-1.5">
                 <ShieldCheck className="w-3 h-3"/> Auditoría 3‑Way Match
               </p>
               <span className={cn(
-                'text-[10px] font-black px-2.5 py-1 rounded-full border',
+                'text-[10px] font-black px-2.5 py-1 rounded-full border shadow-sm',
                 isPerfectMatch ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-amber-50 text-amber-600 border-amber-200'
               )}>
                 {isPerfectMatch ? 'CUADRA PERFECTO' : 'DIFERENCIA DETECTADA'}
@@ -293,8 +296,8 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
               </div>
               <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100">
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Δ Diferencia</p>
-                <p className={cn('text-lg font-black mt-1', isPerfectMatch ? 'text-emerald-600' : 'text-amber-600')}>
-                  {Num.fmt(diferencia)}
+                <p className={cn('text-lg font-black mt-1', isPerfectMatch ? 'text-emerald-600' : (diferencia < 0 ? 'text-rose-500' : 'text-amber-500'))}>
+                  {Num.fmt(diffAbsoluta)}
                 </p>
               </div>
             </div>
@@ -302,22 +305,22 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
             {/* Barra de progreso visual */}
             <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden flex shadow-inner mt-2">
               <motion.div initial={{ width: 0 }} animate={{ width: `${matchPercentage}%` }} transition={{ duration: 0.8 }} className="h-full bg-emerald-400" />
-              {!isPerfectMatch && <motion.div initial={{ width: 0 }} animate={{ width: `${100 - matchPercentage}%` }} transition={{ duration: 0.8, delay: 0.4 }} className="h-full bg-amber-400" />}
+              {!isPerfectMatch && <motion.div initial={{ width: 0 }} animate={{ width: `${100 - matchPercentage}%` }} transition={{ duration: 0.8, delay: 0.4 }} className={cn("h-full", diferencia < 0 ? "bg-rose-400" : "bg-amber-400")} />}
             </div>
 
             {/* Lista de albaranes o fallback */}
             {albaranesVinculados.length > 0 ? (
               <div className="space-y-2 mt-4 pt-4 border-t border-slate-100">
                 {albaranesVinculados.map(alb => (
-                  <div key={alb.id} className="flex justify-between items-center text-xs py-3 px-4 bg-slate-50 border border-slate-100 rounded-xl text-slate-600 hover:bg-white hover:shadow-sm transition-colors">
+                  <div key={alb.id} className="flex justify-between items-center text-xs py-3 px-4 bg-slate-50 border border-slate-100 rounded-xl text-slate-600 hover:bg-white hover:shadow-sm transition-colors group">
                     <div className="flex items-center gap-3">
                       <Package className="w-4 h-4 opacity-50" aria-hidden="true" />
                       <div>
-                        <p className="font-bold text-slate-700">{alb.date || 'Sin fecha'}</p>
-                        <p className="text-[9px] font-mono uppercase mt-0.5 opacity-70">Ref: {alb.num || 'S/N'}</p>
+                        <p className="font-bold text-slate-700">{String(alb.date || 'Sin fecha')}</p>
+                        <p className="text-[9px] font-mono uppercase mt-0.5 opacity-70">Ref: {String(alb.num || 'S/N')}</p>
                       </div>
                     </div>
-                    <span className="font-black text-sm">{Num.fmt(Num.parse(alb.total || 0))}</span>
+                    <span className="font-black text-sm text-slate-900 group-hover:text-indigo-600 transition-colors">{Num.fmt(Math.abs(Num.parse(alb.total || 0)))}</span>
                   </div>
                 ))}
               </div>
@@ -326,14 +329,14 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
                 <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center mx-auto mb-2 shadow-sm">
                   <Zap className="w-5 h-5 text-slate-300" aria-hidden="true" />
                 </div>
-                <p className="text-xs text-slate-700 font-black">Gasto Directo</p>
+                <p className="text-xs text-slate-700 font-black">Gasto Directo (o albarán borrado)</p>
                 <p className="text-[9px] text-slate-400 uppercase tracking-widest mt-1">Sin albaranes vinculados</p>
               </div>
             )}
           </div>
         </div>
 
-        {/* 📌 Footer (INTACTO CON MEJORA DE BOTÓN) */}
+        {/* 📌 Footer: Desglose y Botones de Acción (Modo Noche) */}
         <div className="bg-slate-900 text-white shrink-0 relative z-20 shadow-[0_-10px_30px_rgba(0,0,0,0.15)] rounded-t-3xl md:rounded-t-none">
           <div className="p-6 md:p-8 pb-safe">
             
@@ -373,7 +376,7 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
                 </span>
               </div>
 
-              {/* INNOVACIÓN 2: Botones Dinámicos Inteligentes */}
+              {/* Botones Dinámicos Inteligentes Haptic */}
               <div className="flex w-full md:w-auto gap-3 mt-2 md:mt-0">
                 {onTogglePago && !factura.paid && !factura.reconciled && (
                   <button onClick={() => onTogglePago(factura.id)} className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white py-3.5 px-6 rounded-xl font-black text-[10px] uppercase tracking-widest transition-colors flex items-center justify-center gap-2 shadow-lg active:scale-95 border border-emerald-400">
