@@ -5,7 +5,8 @@ import {
   LineChart as LineChartIcon, FileText, Mic, Square, 
   UploadCloud, FileDown, Smartphone, Camera, Loader2, Mail, 
   CheckCircle2, Link as LinkIcon, Inbox, ArrowRight, CheckSquare, 
-  Sparkles, ChevronLeft, ChevronRight, Zap, FileArchive, AlertCircle, ShieldCheck
+  Sparkles, ChevronLeft, ChevronRight, Zap, FileArchive, AlertCircle, ShieldCheck,
+  Bot, Calendar // 🛡️ ICONOS FALTANTES RESTAURADOS
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
@@ -534,7 +535,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       </AnimatePresence>
       
       {/* 🛡️ BLINDAJE 1: Píldoras de Resumen Financiero Seguras */}
-      <AnimatePresence mode="popLayout">
+      <AnimatePresence mode="wait">
         {activeTab === 'hist' && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
              <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.1 }} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center">
