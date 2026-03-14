@@ -2,7 +2,8 @@ import React, { useState, useMemo, useEffect, useRef, useDeferredValue } from 'r
 import { 
   Search, Plus, Download, Package, AlertTriangle, Check, 
   Building2, ShoppingBag, ListPlus, Users, Hotel, Layers, 
-  XCircle, LineChart as LineChartIcon, FileSpreadsheet, Mic, Square, Camera, Loader2, Smartphone
+  XCircle, LineChart as LineChartIcon, FileSpreadsheet, Mic, Square, Camera, Loader2, Smartphone,
+  Calculator, Sparkles // Nuevos iconos
 } from 'lucide-react';
 import { AppData, Albaran } from '../types';
 import { Num, ArumeEngine, DateUtil } from '../services/engine';
@@ -34,7 +35,7 @@ const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string
   { id: 'CORP', name: 'Socios / Corp', icon: Users, color: 'text-slate-600', bg: 'bg-slate-100' },
 ];
 
-// 🔑 CREDENCIALES SUPABASE (Las mismas del Dashboard y el Bot)
+// 🔑 CREDENCIALES SUPABASE
 const SUPABASE_URL = "https://bgtelulbiaugawyrhvwt.supabase.co"; 
 const SUPABASE_KEY = "sb_publishable_jagYegyG8gGMijzpLEY9BQ_iWfL1MU4";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -46,7 +47,6 @@ const safeJSON = (str: string) => { try { const match = str.match(/\{[\s\S]*\}/)
 const looksLikeDuplicate = (prov: string, num: string, date: string, albaranes: Albaran[]) => 
   albaranes.some(a => basicNorm(a.prov) === basicNorm(prov) && (a.num||'S/N') === (num||'S/N') && (a.date||'').slice(0,10) === (date||'').slice(0,10));
 
-// 🧠 CEREBRO DE FLUCTUACIÓN DINÁMICA
 const getDynamicThreshold = (itemName: string) => {
   const n = itemName.toLowerCase();
   if (n.match(/tomate|lechuga|cebolla|patata|pimiento|verdura|fruta|limon|naranja/)) return 25; 
@@ -59,8 +59,8 @@ const getDynamicThreshold = (itemName: string) => {
 const normalizeUnitPrice = (q: number, u: string | undefined, unitPrice: number) => {
   if (!u) return Num.round2(unitPrice);
   switch (u) {
-    case "g":  return Num.round2(unitPrice * 1000); // €/kg
-    case "ml": return Num.round2(unitPrice * 1000); // €/l
+    case "g":  return Num.round2(unitPrice * 1000); 
+    case "ml": return Num.round2(unitPrice * 1000); 
     default:   return Num.round2(unitPrice);
   }
 };
@@ -145,14 +145,18 @@ function upsertFacturaFromAlbaran(data: AppData, alb: Albaran) {
 }
 
 /* =======================================================
- * 🧠 2. MOTOR DE PARSEO V2 INTEGRADO
+ * 🧠 2. MOTOR DE PARSEO V2 INTEGRADO (AQUÍ ESTÁ LA MAGIA)
  * ======================================================= */
-function useAlbaranEnginePRO(text: string) {
-  const analyzedItems = useMemo(() => {
-    if (!text) return [];
-    const lines = text.replace(/\t/g,' ').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-    const out = [];
+type IvaMode = 'AUTO' | 'INC' | 'EXC';
 
+function useAlbaranEnginePRO(text: string, expectedTotal: number | null, ivaMode: IvaMode) {
+  const { analyzedItems, liveTotals, decidedMode, roundingAdjustment } = useMemo(() => {
+    if (!text) return { analyzedItems: [], liveTotals: { grandTotal: 0, baseFinal: 0, taxFinal: 0, split: { base10: 0, iva10: 0, base21: 0, iva21: 0 } }, decidedMode: ivaMode, roundingAdjustment: 0 };
+    
+    const lines = text.replace(/\t/g,' ').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+    const rawData = [];
+
+    // 1. Extraemos los números puros
     for (const original of lines) {
       let line = original.replace(/[€$]/g,'').replace(/,/g,'.').replace(/\s{2,}/g,' ').trim();
       if (line.length < 3) continue;
@@ -173,8 +177,8 @@ function useAlbaranEnginePRO(text: string) {
       if (!nums.length) continue;
 
       const discount = line.match(/(-\s?\d+(?:[.,]\d{1,2})?)\b/)?.[1] ? Math.abs(parseFloat(line.match(/(-\s?\d+(?:[.,]\d{1,2})?)\b/)![1].replace(',','.'))) : 0;
-      const total = Num.round2((nums.at(-1) || 0) - discount);
-      if (!isFinite(total) || total <= 0) continue;
+      const rawNumber = Num.round2((nums.at(-1) || 0) - discount);
+      if (!isFinite(rawNumber) || rawNumber <= 0) continue;
 
       let name = line;
       if (mQty) name = name.replace(mQty[0],'');
@@ -182,30 +186,81 @@ function useAlbaranEnginePRO(text: string) {
       if (discount) name = name.replace(/(-\s?\d+(?:[.,]\d{1,2})?)\b/,'');
       name = name.replace(new RegExp(`${(nums.at(-1) || 0).toString().replace('.', '\\.')}(?!\\d)`),'').replace(/\s{2,}/g,' ').trim() || 'Varios Indefinido';
 
-      const unitPriceBruto = q > 0 ? total / q : total;
-      const base = Num.round2(total / (1 + rate/100));
-      const tax  = Num.round2(total - base);
-
-      out.push({ q, n: name, t: total, rate, base, tax, unitPrice: Num.round2(unitPriceBruto), u });
+      rawData.push({ q, name, rawNumber, rate, u });
     }
-    return out;
-  }, [text]);
 
-  const liveTotals = useMemo(() => {
-    let grandTotal = 0; let b4=0, i4=0, b10=0, i10=0, b21=0, i21=0;
-    for (const it of analyzedItems) {
-      grandTotal += it.t;
-      if (it.rate === 4) { b4 += it.base; i4 += it.tax; }
-      else if (it.rate === 21) { b21 += it.base; i21 += it.tax; }
-      else { b10 += it.base; i10 += it.tax; }
-    }
-    return { 
-      grandTotal: Num.round2(grandTotal), baseFinal: Num.round2(b4+b10+b21), taxFinal: Num.round2(i4+i10+i21),
-      split: { base10: Num.round2(b10), iva10: Num.round2(i10), base21: Num.round2(b21), iva21: Num.round2(i21) }
+    // 2. Función constructora de líneas
+    const buildLines = (isIvaIncluded: boolean) => {
+      const out = [];
+      let grandTotal = 0, b4=0, i4=0, b10=0, i10=0, b21=0, i21=0;
+
+      for (const raw of rawData) {
+        let total, base, tax, unitPriceBruto;
+
+        if (isIvaIncluded) {
+          total = raw.rawNumber;
+          base = Num.round2(total / (1 + raw.rate/100));
+          tax = Num.round2(total - base);
+          unitPriceBruto = raw.q > 0 ? total / raw.q : total;
+        } else {
+          base = raw.rawNumber; // El número de la línea ES la base imponible
+          tax = Num.round2(base * (raw.rate/100));
+          total = Num.round2(base + tax);
+          unitPriceBruto = raw.q > 0 ? base / raw.q : base; // Unitario se muestra como NETO
+        }
+
+        grandTotal += total;
+        if (raw.rate === 4) { b4 += base; i4 += tax; }
+        else if (raw.rate === 21) { b21 += base; i21 += tax; }
+        else { b10 += base; i10 += tax; }
+
+        out.push({ q: raw.q, n: raw.name, t: Num.round2(total), rate: raw.rate, base: Num.round2(base), tax: Num.round2(tax), unitPrice: Num.round2(unitPriceBruto), u: raw.u });
+      }
+
+      return { 
+        lines: out, 
+        sumTotal: Num.round2(grandTotal), 
+        totals: {
+          grandTotal: Num.round2(grandTotal), baseFinal: Num.round2(b4+b10+b21), taxFinal: Num.round2(i4+i10+i21),
+          split: { base10: Num.round2(b10), iva10: Num.round2(i10), base21: Num.round2(b21), iva21: Num.round2(i21) }
+        }
+      };
     };
-  }, [analyzedItems]);
 
-  return { analyzedItems, liveTotals };
+    // 3. Evaluar ambos escenarios si está en AUTO
+    let calcInc = buildLines(true);
+    let calcExc = buildLines(false);
+    
+    let chosenCalc = calcInc;
+    let finalMode: 'INC' | 'EXC' = 'INC';
+
+    if (ivaMode === 'INC') { chosenCalc = calcInc; finalMode = 'INC'; }
+    else if (ivaMode === 'EXC') { chosenCalc = calcExc; finalMode = 'EXC'; }
+    else if (expectedTotal && expectedTotal > 0) {
+      // Magia IA: Elegimos el que esté más cerca del total escaneado
+      const diffInc = Math.abs(calcInc.sumTotal - expectedTotal);
+      const diffExc = Math.abs(calcExc.sumTotal - expectedTotal);
+      
+      if (diffExc < diffInc && diffExc < 5) {
+        chosenCalc = calcExc; finalMode = 'EXC';
+      }
+    }
+
+    // INNOVACIÓN 1: Auto-Sanación de Redondeo (±0.05€ de tolerancia para inyectar)
+    let rounding = 0;
+    if (expectedTotal && expectedTotal > 0) {
+       const diff = Num.round2(expectedTotal - chosenCalc.sumTotal);
+       if (diff !== 0 && Math.abs(diff) <= 0.05) {
+          rounding = diff;
+          // Ajustar directamente en los totales
+          chosenCalc.totals.grandTotal = Num.round2(chosenCalc.totals.grandTotal + rounding);
+       }
+    }
+
+    return { analyzedItems: chosenCalc.lines, liveTotals: chosenCalc.totals, decidedMode: finalMode, roundingAdjustment: rounding };
+  }, [text, expectedTotal, ivaMode]);
+
+  return { analyzedItems, liveTotals, decidedMode, roundingAdjustment };
 }
 
 /* =======================================================
@@ -362,7 +417,10 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const [showInspector, setShowInspector] = useState(false);
   const [inspectorDefaults, setInspectorDefaults] = useState<{prov?:string; item?:string}>({});
   
-  const [form, setForm] = useState({ prov: '', date: DateUtil.today(), num: '', socio: 'Arume', notes: '', text: '', paid: false, unitId: 'REST' as BusinessUnit });
+  // AÑADIDO: expectedTotal (extraido de Gemini) y Modo de Control de IVA
+  const [form, setForm] = useState({ prov: '', date: DateUtil.today(), num: '', socio: 'Arume', notes: '', text: '', paid: false, unitId: 'REST' as BusinessUnit, expectedTotal: null as number | null });
+  const [ivaMode, setIvaMode] = useState<IvaMode>('AUTO');
+  
   const [quickCalc, setQuickCalc] = useState({ name: '', total: '', iva: 10 });
   const [editForm, setEditForm] = useState<Albaran | null>(null);
 
@@ -375,7 +433,11 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const [isSyncingTelegram, setIsSyncingTelegram] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  const { analyzedItems, liveTotals } = useAlbaranEnginePRO(form.text);
+  // INVOCAR AL CEREBRO DE IVA DUAL
+  const { analyzedItems, liveTotals, decidedMode, roundingAdjustment } = useAlbaranEnginePRO(form.text, form.expectedTotal, ivaMode);
+
+  // Para el feedback visual de la tarjeta de total
+  const isTotalMatching = form.expectedTotal ? Math.abs(liveTotals.grandTotal - form.expectedTotal) <= TOLERANCIA : true;
 
   const inRange = (iso: string, from?: string, to?: string) => {
     if (!iso) return false; const d = iso.slice(0,10);
@@ -405,7 +467,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     return out;
   }, [albaranesSeguros]);
 
-  // 🤖 NUEVA SINCRONIZACIÓN CON TELEGRAM (MEJORA 3)
   const handleTelegramSync = async () => {
     setIsSyncingTelegram(true);
     try {
@@ -425,10 +486,11 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         const dateMatch = doc.asunto.match(/Fecha:\s*([\d-]+)/);
         const dateStr = dateMatch ? dateMatch[1] : DateUtil.today();
         const totalMatch = doc.asunto.match(/Importe:\s*([\d.]+)/);
-        const totalNum = totalMatch ? totalMatch[1] : "0";
+        const totalNum = totalMatch ? parseFloat(totalMatch[1]) : 0;
 
         setForm(prev => ({
           ...prev, prov: prov.toUpperCase(), date: dateStr, num: `TG-${Date.now().toString().slice(-4)}`,
+          expectedTotal: totalNum,
           text: `1x GASTOS VARIOS ${prov} 10% ${totalNum}` 
         }));
 
@@ -444,7 +506,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     }
   };
 
-  // 🤖 MOTOR OCR LOCAL
+  // 🤖 MOTOR OCR LOCAL - AHORA EXTRAE TOTAL_FACTURA
   const processLocalFile = async (file: File) => {
     const apiKey = localStorage.getItem('gemini_api_key');
     if (!apiKey) return alert("⚠️ Configura tu clave de Gemini API en los ajustes primero.");
@@ -455,22 +517,26 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       const soloBase64 = fileBase64.split(',')[1];
 
       const ai = new GoogleGenAI({ apiKey });
-      const prompt = `Analiza este albarán. Devuelve SOLO un JSON estricto: { "proveedor": "Nombre", "num": "Nº", "fecha": "YYYY-MM-DD", "lineas": [ {"q": 1, "n": "Producto", "t": 10.50, "rate": 10, "u": "kg"} ] }`;
+      // PROMPT MEJORADO para pedir el total escaneado
+      const prompt = `Analiza este albarán. Devuelve SOLO un JSON estricto: { "proveedor": "Nombre", "num": "Nº", "fecha": "YYYY-MM-DD", "total_factura": 0, "lineas": [ {"q": 1, "n": "Producto", "t": 10.50, "rate": 10, "u": "kg"} ] }`;
       
       const response = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: soloBase64, mimeType: file.type } }] }], config: { responseMimeType: "application/json", temperature: 0.1 } });
       const rawJson = safeJSON(response.text || "");
       
       setForm(prev => ({ 
-        ...prev, prov: rawJson.proveedor || '', num: rawJson.num || '', date: rawJson.fecha || DateUtil.today(),
+        ...prev, 
+        prov: rawJson.proveedor || '', 
+        num: rawJson.num || '', 
+        date: rawJson.fecha || DateUtil.today(),
+        expectedTotal: rawJson.total_factura || null,
         text: (rawJson.lineas || []).map((l:any) => `${l.q} ${l.u || 'uds'} ${l.n} ${l.rate}% ${l.t}`).join('\n')
       }));
-      alert("✅ IA completada. Revisa los datos en el formulario.");
+      alert("✅ IA completada. He auto-detectado el modo de IVA según el total del documento.");
     } catch (e) {
       alert("⚠️ Error en IA. Rellena el albarán a mano.");
     } finally { setIsScanning(false); }
   };
 
-  // 🎙️ MOTOR VOSK
   const toggleRecording = async () => {
     if (isRecording) { mediaRecorderRef.current?.stop(); setIsRecording(false); return; }
     try {
@@ -501,12 +567,11 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     finally { setIsScanning(false); }
   };
 
-  // 💾 GUARDADO CON PRICE INTELLIGENCE
   const handleQuickAdd = () => {
     const t = Num.parse(quickCalc.total);
     if (t > 0 && quickCalc.name) {
-      const calc = ArumeEngine.calcularImpuestos(t, quickCalc.iva as any);
-      const newLine = `1x ${quickCalc.name} ${quickCalc.iva}% ${calc.total.toFixed(2)}`;
+      // Al inyectar manual, inyectamos siempre asumiendo el precio como viene. El motor decidirá.
+      const newLine = `1x ${quickCalc.name} ${quickCalc.iva}% ${t.toFixed(2)}`;
       setForm(prev => ({ ...prev, text: prev.text ? `${prev.text}\n${newLine}` : newLine }));
       setQuickCalc({ name: '', total: '', iva: 10 });
     }
@@ -542,8 +607,16 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
         const robustId = `alb-${form.date.replace(/-/g,'')}-${Date.now().toString().slice(-6)}-${form.unitId}`;
         let alerts: string[] = [];
+        
+        // INNOVACIÓN 1: Inyectar línea de ajuste si existía redondeo
+        const finalItems = [...analyzedItems];
+        if (roundingAdjustment !== 0) {
+            finalItems.push({ q: 1, n: "AJUSTE REDONDEO IA", t: roundingAdjustment, rate: 0, base: roundingAdjustment, tax: 0, unitPrice: roundingAdjustment, u: 'uds' } as any);
+        }
 
-        for (const it of analyzedItems as any[]) {
+        for (const it of finalItems as any[]) {
+          if (it.n === "AJUSTE REDONDEO IA") continue; // No trackeamos el ajuste en el historial
+
           const provN = form.prov.trim().toUpperCase();
           const itemN = it.n.trim().toUpperCase();
           const normalizedPrice = normalizeUnitPrice(it.q, it.u, it.unitPrice);
@@ -558,7 +631,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
         const newAlbaran: Albaran = {
           id: robustId, prov: form.prov.trim().toUpperCase(), date: form.date, num: form.num || "S/N",
-          socio: form.socio, notes: form.notes, items: analyzedItems.map(item => item!), total: String(liveTotals.grandTotal),
+          socio: form.socio, notes: form.notes, items: finalItems as any[], total: String(liveTotals.grandTotal),
           base: String(liveTotals.baseFinal), taxes: String(liveTotals.taxFinal), invoiced: false, paid: form.paid, status: 'ok', reconciled: false, unitId: form.unitId 
         };
 
@@ -568,7 +641,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         await onSave(newData);
         
         if (alerts.length > 0) alert("⚠️ ALERTA DE COSTES (Desviaciones detectadas)\n\n" + alerts.join("\n\n") + "\n\nRevisa si es por temporada o si el proveedor ha subido tarifas.");
-        setForm(prev => ({ ...prev, prov: '', num: '', text: '', paid: false }));
+        setForm(prev => ({ ...prev, prov: '', num: '', text: '', paid: false, expectedTotal: null }));
     } finally {
         setIsSaving(false);
     }
@@ -622,9 +695,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     }
   };
 
-  /* =======================================================
-   * 📤 EXPORTACIÓN EXCEL 3 HOJAS PRO (Formateado Gestoría)
-   * ======================================================= */
   const filteredForList = useMemo(() => {
     return albaranesSeguros.filter(a => (selectedUnit==='ALL' ? true : a.unitId === selectedUnit)).filter(a => (!dateFrom && !dateTo) ? true : inRange(a.date||'', dateFrom, dateTo)).filter(a => !deferredSearch || filterByQuery(a, deferredSearch));
   }, [albaranesSeguros, selectedUnit, dateFrom, dateTo, deferredSearch]);
@@ -671,6 +741,14 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, wsDetail, "Detalle"); XLSX.utils.book_append_sheet(wb, wsProv, "Resumen Prov"); XLSX.utils.book_append_sheet(wb, wsIva, "Totales IVA");
     XLSX.writeFile(wb, `Albaranes_${dateFrom || 'ALL'}.xlsx`);
   };
+
+  // Función de filtro seguro
+  function filterByQuery(a: Albaran, q: string) {
+    const term = basicNorm(q);
+    if (basicNorm(a.prov).includes(term)) return true;
+    if (basicNorm(a.num || '').includes(term)) return true;
+    return (a.items || []).some(it => basicNorm(it.n).includes(term));
+  }
 
   return (
     <div className="space-y-6 pb-24 max-w-[1600px] mx-auto animate-fade-in relative">
@@ -793,9 +871,35 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                   </div>
                 </div>
 
+                {/* MEJORA: Panel de Control de IVA y Total Escaneado */}
+                <div className="mb-5 p-4 rounded-2xl border border-slate-200 bg-slate-50 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-amber-500" /> Control de IVA en Líneas</span>
+                    <select value={ivaMode} onChange={(e) => setIvaMode(e.target.value as any)} className="bg-white border border-slate-200 rounded-lg text-[10px] font-bold px-2 py-1 outline-none text-slate-700">
+                      <option value="AUTO">🤖 Auto-Detectar</option>
+                      <option value="INC">✅ Líneas CON Iva</option>
+                      <option value="EXC">❌ Líneas SIN Iva</option>
+                    </select>
+                  </div>
+                  
+                  <div className="flex justify-between items-center bg-white p-2.5 rounded-xl border border-slate-100 shadow-sm">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Escaneado (Referencia)</label>
+                    <div className="relative w-24">
+                      <input type="number" step="0.01" value={form.expectedTotal || ''} onChange={(e) => setForm({...form, expectedTotal: e.target.value ? parseFloat(e.target.value) : null})} placeholder="0.00" className="w-full text-right bg-transparent text-sm font-black text-slate-700 outline-none" />
+                      <span className="absolute right-0 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none opacity-0">€</span>
+                    </div>
+                  </div>
+
+                  {decidedMode && ivaMode === 'AUTO' && form.expectedTotal && (
+                    <p className="text-[9px] font-bold text-indigo-600 bg-indigo-50 p-1.5 rounded text-center">
+                      IA Asignó: {decidedMode === 'INC' ? 'Precios Finales (Con IVA)' : 'Bases Imponibles (Sin IVA)'}
+                    </p>
+                  )}
+                </div>
+
                 <div className="flex items-center gap-1 mb-3 bg-indigo-50/50 p-2 rounded-xl border border-indigo-100">
-                  <input type="text" value={quickCalc.name} onChange={(e) => setQuickCalc({ ...quickCalc, name: e.target.value })} placeholder="Producto rápido..." className="w-1/2 p-2 bg-white rounded-lg text-xs font-bold outline-none" />
-                  <input type="number" value={quickCalc.total} onChange={(e) => setQuickCalc({ ...quickCalc, total: e.target.value })} placeholder="Total €" className="w-1/4 p-2 bg-white rounded-lg text-xs font-bold outline-none text-right" />
+                  <input type="text" value={quickCalc.name} onChange={(e) => setQuickCalc({ ...quickCalc, name: e.target.value })} placeholder="Añadir a mano..." className="w-1/2 p-2 bg-white rounded-lg text-xs font-bold outline-none" />
+                  <input type="number" value={quickCalc.total} onChange={(e) => setQuickCalc({ ...quickCalc, total: e.target.value })} placeholder="Precio €" className="w-1/4 p-2 bg-white rounded-lg text-xs font-bold outline-none text-right" />
                   <button type="button" onClick={handleQuickAdd} className="w-8 h-8 bg-indigo-600 text-white rounded-lg flex items-center justify-center hover:bg-indigo-700 transition shadow-sm"><Plus className="w-4 h-4" /></button>
                 </div>
 
@@ -815,12 +919,24 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                   </div>
                 </div>
 
-                <div className="flex justify-between items-center bg-slate-900 p-5 rounded-2xl text-white mb-5 shadow-lg">
+                {/* TARJETA DE TOTALES CON FEEDBACK VISUAL DE CUADRE */}
+                <div className={cn("flex justify-between items-center p-5 rounded-2xl text-white mb-5 shadow-lg transition-colors", 
+                  !form.expectedTotal ? "bg-slate-900" : isTotalMatching ? "bg-emerald-600" : "bg-amber-600"
+                )}>
                   <div className="flex flex-col">
-                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-widest">Total Calculado</span>
-                    <span className="text-[9px] text-slate-500">Tolerancia: ±{TOLERANCIA.toFixed(2)}€</span>
+                    <span className="text-[10px] font-black uppercase text-white/70 tracking-widest">Total Calculado</span>
+                    {roundingAdjustment !== 0 && (
+                      <span className="text-[9px] text-white/90 font-bold bg-white/20 px-1.5 py-0.5 rounded mt-1">
+                        Ajuste auto: {roundingAdjustment > 0 ? '+' : ''}{roundingAdjustment}€
+                      </span>
+                    )}
                   </div>
-                  <span className="text-3xl font-black text-emerald-400 tracking-tighter">{Num.fmt(liveTotals.grandTotal)}</span>
+                  <div className="text-right">
+                    <span className="text-3xl font-black tracking-tighter">{Num.fmt(liveTotals.grandTotal)}</span>
+                    {form.expectedTotal && !isTotalMatching && (
+                      <p className="text-[9px] font-bold text-white/80 mt-1">Ref: {Num.fmt(form.expectedTotal)} (Dif: {Num.fmt(Math.abs(liveTotals.grandTotal - form.expectedTotal))})</p>
+                    )}
+                  </div>
                 </div>
 
                 <button type="button" disabled={isSaving} onClick={handleSaveAlbaran} className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50">
