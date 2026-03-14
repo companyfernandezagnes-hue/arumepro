@@ -1,10 +1,12 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { Truck, CheckCircle2, Clock, Link as LinkIcon, Package, ChevronDown, ChevronUp, Edit2 } from 'lucide-react';
+import { Truck, CheckCircle2, Clock, Link as LinkIcon, Package, ChevronDown, ChevronUp, Edit2, Loader2, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Albaran } from '../types';
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
-import { BusinessUnit } from './AlbaranesView';
+
+// 🛡️ CORRECCIÓN: El BusinessUnit viene de InvoicesView o de tu types global.
+import { BusinessUnit } from './InvoicesView'; 
 
 interface AlbaranesListProps {
   albaranes: Albaran[];
@@ -41,8 +43,18 @@ const isYesterday = (d: Date) => {
 const groupByDateKey = (list: Albaran[]) => {
   const m = new Map<string, Albaran[]>();
   for (const a of list) {
-    const d = new Date(a.date || '');
-    const key = isToday(d) ? "HOY" : isYesterday(d) ? "AYER" : (a.date || '').slice(0, 10);
+    if (!a.date) continue;
+    const d = new Date(a.date);
+    
+    // INNOVACIÓN 1: Agrupación más inteligente
+    let key = "";
+    if (isToday(d)) key = "HOY";
+    else if (isYesterday(d)) key = "AYER";
+    else {
+        const monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+        key = `${d.getDate()} ${monthNames[d.getMonth()]} ${d.getFullYear()}`;
+    }
+
     if (!m.has(key)) m.set(key, []);
     m.get(key)!.push(a);
   }
@@ -54,16 +66,19 @@ export const AlbaranesList = React.memo(({
   albaranes, searchQ, selectedUnit, businessUnits, onOpenEdit 
 }: AlbaranesListProps) => {
   
+  // 🛡️ PARACAÍDAS DE DATOS: Aseguramos que siempre sea un array
+  const safeAlbaranes = Array.isArray(albaranes) ? albaranes : [];
+
   /* ----------------------- FILTRO + ORDEN ----------------------- */
   const filtered = useMemo(() => {
     const q = norm(searchQ);
-    const out = albaranes.filter(a => {
+    const out = safeAlbaranes.filter(a => {
       if (selectedUnit !== 'ALL' && (a.unitId || 'REST') !== selectedUnit) return false;
       if (!q) return true;
       return norm(a.prov).includes(q) || norm(a.num).includes(q) || norm(a.notes).includes(q);
     });
     return out.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
-  }, [albaranes, searchQ, selectedUnit]);
+  }, [safeAlbaranes, searchQ, selectedUnit]);
 
   /* ----------------------- AGRUPACIÓN DATOS --------------------- */
   const groups = useMemo(() => groupByDateKey(filtered), [filtered]);
@@ -77,18 +92,29 @@ export const AlbaranesList = React.memo(({
   };
 
   /* ----------------------- PAGINACIÓN SUAVE ----------------------- */
-  const pageSize = 100;
+  const pageSize = 50; // Reducido a 50 para evitar lags en móviles
   const [page, setPage] = useState(1);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   useEffect(() => {
     const onScroll = () => {
-      if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 200) {
-        setPage(p => Math.min(p + 1, Math.ceil(filtered.length / pageSize)));
+      if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) {
+        const maxPages = Math.ceil(filtered.length / pageSize);
+        if (page < maxPages) {
+            setIsLoadingMore(true);
+            setTimeout(() => {
+                setPage(p => Math.min(p + 1, maxPages));
+                setIsLoadingMore(false);
+            }, 300); // Pequeño delay visual
+        }
       }
     };
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
-  }, [filtered.length]);
+  }, [filtered.length, page]);
+
+  // Resetear paginación si cambia el filtro
+  useEffect(() => { setPage(1); }, [searchQ, selectedUnit]);
 
   const visibleGroups = useMemo(() => {
     const result = new Map<string, Albaran[]>();
@@ -120,12 +146,12 @@ export const AlbaranesList = React.memo(({
 
   /* ----------------------- RENDER LISTA ESTILO EXCEL ------------------------- */
   return (
-    <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col max-h-[75vh] mb-20">
-      <div className="overflow-x-auto custom-scrollbar flex-1">
+    <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col max-h-[80vh] mb-20 relative">
+      <div className="overflow-x-auto custom-scrollbar flex-1 pb-10">
         <table className="w-full text-left border-collapse whitespace-nowrap min-w-[900px]">
           
           {/* CABECERA FIJA */}
-          <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 z-20 shadow-sm">
+          <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 z-30 shadow-sm">
             <tr className="text-[10px] font-bold text-slate-500 uppercase tracking-widest select-none">
               <th className="p-3 w-8 text-center"></th>
               <th className="p-3">Fecha</th>
@@ -145,7 +171,7 @@ export const AlbaranesList = React.memo(({
                   
                   {/* FILA DE AGRUPACIÓN (HOY, AYER, FECHA) */}
                   <tr>
-                    <td colSpan={8} className="bg-slate-50/80 px-4 py-2 text-[10px] font-black text-indigo-500 uppercase tracking-widest border-y border-slate-200">
+                    <td colSpan={8} className="bg-slate-50/80 px-4 py-2 text-[10px] font-black text-indigo-500 uppercase tracking-widest border-y border-slate-200 sticky top-10 z-20 backdrop-blur-sm shadow-sm">
                       {key}
                     </td>
                   </tr>
@@ -160,7 +186,6 @@ export const AlbaranesList = React.memo(({
                         {/* FILA PRINCIPAL DEL ALBARÁN */}
                         <motion.tr 
                           layout 
-                          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                           onClick={() => onOpenEdit(a)} 
                           className={cn("hover:bg-indigo-50/40 cursor-pointer transition-colors group z-10 relative", isExpanded ? "bg-indigo-50/30" : "")}
                         >
@@ -187,19 +212,27 @@ export const AlbaranesList = React.memo(({
                           <td className="p-3 text-right font-black text-slate-900 text-sm">{Num.fmt(a.total)}</td>
                           
                           <td className="p-3 text-center">
-                            {a.reconciled ? (
-                              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200"><LinkIcon className="w-3 h-3" /> CONCILIADO</span>
-                            ) : a.paid ? (
-                              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200"><CheckCircle2 className="w-3 h-3" /> PAGADO</span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200"><Clock className="w-3 h-3" /> PENDIENTE</span>
-                            )}
+                            <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }}>
+                              {a.reconciled ? (
+                                <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200"><LinkIcon className="w-3 h-3" /> CONCILIADO</span>
+                              ) : a.paid ? (
+                                <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200"><CheckCircle2 className="w-3 h-3" /> PAGADO</span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[9px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200"><Clock className="w-3 h-3" /> PENDIENTE</span>
+                              )}
+                            </motion.div>
                           </td>
+                          
                           <td className="p-3 text-center">
                             <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button type="button" onClick={(e) => { e.stopPropagation(); onOpenEdit(a); }} className="p-1.5 rounded text-indigo-500 hover:bg-indigo-100 transition" title="Editar">
-                                <Edit2 className="w-4 h-4" />
-                              </button>
+                              {/* INNOVACIÓN 5: Botón Editar Inteligente */}
+                              {a.reconciled ? (
+                                 <button type="button" disabled className="p-1.5 rounded text-slate-300 cursor-not-allowed" title="Bloqueado por Banco"><Lock className="w-4 h-4"/></button>
+                              ) : (
+                                 <button type="button" onClick={(e) => { e.stopPropagation(); onOpenEdit(a); }} className="p-1.5 rounded text-indigo-500 hover:bg-indigo-100 transition" title="Editar">
+                                   <Edit2 className="w-4 h-4" />
+                                 </button>
+                              )}
                             </div>
                           </td>
                         </motion.tr>
@@ -229,10 +262,10 @@ export const AlbaranesList = React.memo(({
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
                                       {a.items?.map((it: any, idx: number) => (
-                                        <tr key={idx} className="hover:bg-slate-50">
+                                        <tr key={idx} className="hover:bg-slate-50 transition-colors cursor-default">
                                           <td className="px-3 py-2 text-center font-bold text-slate-700">{it.q}</td>
                                           <td className="px-3 py-2 text-center text-slate-500">{it.u}</td>
-                                          <td className="px-3 py-2 font-medium text-slate-800">{it.n}</td>
+                                          <td className="px-3 py-2 font-medium text-slate-800">{highlight(it.n || '', searchQ)}</td>
                                           <td className="px-3 py-2 text-center text-slate-500">{it.rate}%</td>
                                           <td className="px-3 py-2 text-right text-slate-500">{Num.fmt(it.unitPrice)}</td>
                                           <td className="px-3 py-2 text-right font-bold text-indigo-600">{Num.fmt(it.t)}</td>
@@ -254,6 +287,16 @@ export const AlbaranesList = React.memo(({
             </AnimatePresence>
           </tbody>
         </table>
+
+        {/* INNOVACIÓN 2: Badge de Carga */}
+        {isLoadingMore && (
+           <div className="flex justify-center py-4 absolute bottom-0 left-0 right-0 bg-gradient-to-t from-white to-transparent">
+               <span className="bg-slate-800 text-white px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-lg">
+                  <Loader2 className="w-3 h-3 animate-spin"/> Cargando más...
+               </span>
+           </div>
+        )}
+
       </div>
     </div>
   );
