@@ -34,9 +34,9 @@ import { AuthScreen } from './components/AuthScreen';
 
 // 👑 MÓDULOS MAESTROS
 import { ComprasDashboard } from './components/ComprasDashboard';
-import { MarketingView } from './components/MarketingView'; // 💡 IMPORTACIÓN CORRECTA AÑADIDA
+import { MarketingView } from './components/MarketingView'; // 💡 EL ARCHIVO DEBE LLAMARSE EXACTAMENTE ASÍ
 
-// 🛡️ TIPOS Y CONSTANTES ACTUALIZADOS
+// 🛡️ TIPOS Y CONSTANTES
 type TabKey = 
   | 'dashboard' | 'ia' | 'diario' | 'importador' 
   | 'compras' | 'facturas' | 'albaranes' 
@@ -87,11 +87,14 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex flex-col items-center justify-center p-8 bg-white border border-slate-200 rounded-xl shadow-sm m-4">
-          <AlertTriangle className="w-12 h-12 text-rose-500 mb-3" />
-          <h2 className="text-sm font-bold text-slate-800">Error visual en este módulo</h2>
-          <p className="text-xs text-slate-500 mt-1">El resto de la contabilidad sigue segura.</p>
-          <button onClick={() => this.setState({hasError: false})} className="mt-4 px-4 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-200 transition">Recargar Módulo</button>
+        <div className="flex flex-col items-center justify-center p-8 bg-white border border-slate-200 rounded-xl shadow-sm m-4 text-center">
+          <AlertTriangle className="w-12 h-12 text-rose-500 mb-3 mx-auto" />
+          <h2 className="text-base font-black text-slate-800">Error en este módulo</h2>
+          <p className="text-xs text-slate-500 mt-1 mb-4">El resto de la app sigue funcionando. Tus datos están a salvo.</p>
+          <div className="flex gap-2 justify-center">
+             <button onClick={() => this.setState({hasError: false})} className="px-4 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-200 transition">Intentar Recuperar</button>
+             <button onClick={() => window.location.reload()} className="px-4 py-2 bg-indigo-600 text-white text-xs font-bold rounded-lg hover:bg-indigo-700 transition">Reiniciar App</button>
+          </div>
         </div>
       );
     }
@@ -100,9 +103,9 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
 }
 
 /* =======================================================
- * 🧭 1. BUSCADOR RÁPIDO (CMD + K) MEJORADO
+ * 🧭 1. BUSCADOR RÁPIDO (CMD + K)
  * ======================================================= */
-type CmdItem<T extends string> = { key: T; label: string; group?: string; icon?: any; shortcut?: string; isAction?: boolean };
+type CmdItem<T extends string> = { key: T; label: string; group?: string; icon?: any; shortcut?: string; isAction?: boolean; badge?: string };
 
 function CommandPalette<T extends string>({ open, onClose, items, onSelect, onAction }: { open: boolean, onClose: ()=>void, items: CmdItem<T>[], onSelect: (k:T)=>void, onAction: (k:T)=>void }) {
   const [q, setQ] = useState('');
@@ -119,14 +122,14 @@ function CommandPalette<T extends string>({ open, onClose, items, onSelect, onAc
     <AnimatePresence>
       <div className="fixed inset-0 z-[300] flex justify-center items-start pt-[12vh] px-4" aria-modal="true" role="dialog">
         <motion.button initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} aria-label="Cerrar" className="absolute inset-0 w-full h-full bg-slate-900/50 backdrop-blur-sm cursor-default border-none outline-none" onClick={onClose} />
-        <motion.div initial={{ y: -10, scale: 0.98, opacity: 0 }} animate={{ y: 0, scale: 1, opacity: 1 }} className="relative w-full max-w-xl rounded-xl bg-white shadow-2xl border border-slate-200 overflow-hidden z-10">
-          <div className="p-3 border-b border-slate-100 flex items-center gap-3 bg-slate-50">
+        <motion.div initial={{ y: -10, scale: 0.98, opacity: 0 }} animate={{ y: 0, scale: 1, opacity: 1 }} className="relative w-full max-w-xl rounded-xl bg-white shadow-2xl border border-slate-200 overflow-hidden z-10 flex flex-col max-h-[70vh]">
+          <div className="p-3 border-b border-slate-100 flex items-center gap-3 bg-slate-50 shrink-0">
             <Search className="w-5 h-5 text-indigo-500" />
-            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar módulo o acción rápida..." className="flex-1 outline-none text-sm font-semibold text-slate-800 bg-transparent" onKeyDown={(e) => { if (e.key === 'Enter' && filtered.length > 0) { filtered[0].isAction ? onAction(filtered[0].key) : onSelect(filtered[0].key); } if (e.key === 'Escape') onClose(); }} />
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar módulo o acción..." className="flex-1 outline-none text-sm font-semibold text-slate-800 bg-transparent" onKeyDown={(e) => { if (e.key === 'Enter' && filtered.length > 0) { filtered[0].isAction ? onAction(filtered[0].key) : onSelect(filtered[0].key); } if (e.key === 'Escape') onClose(); }} />
             <span className="text-[10px] font-bold text-slate-400 bg-slate-200 px-1.5 py-0.5 rounded">ESC</span>
           </div>
-          <div className="max-h-[50vh] overflow-y-auto p-2 custom-scrollbar bg-white">
-            {filtered.length === 0 && <p className="text-xs font-semibold text-slate-400 px-4 py-8 text-center">No se encontraron resultados.</p>}
+          <div className="overflow-y-auto p-2 custom-scrollbar bg-white flex-1">
+            {filtered.length === 0 && <p className="text-xs font-semibold text-slate-400 px-4 py-8 text-center">No hay resultados.</p>}
             <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1">
               {filtered.map((i) => {
                 const Icon = i.icon;
@@ -136,6 +139,7 @@ function CommandPalette<T extends string>({ open, onClose, items, onSelect, onAc
                       <div className="flex items-center gap-2">
                         {Icon && <Icon className={cn("w-4 h-4 transition-colors", i.isAction ? "text-indigo-500" : "text-slate-400 group-hover:text-indigo-500")} />}
                         {i.label}
+                        {i.badge && <span className="ml-1 px-1.5 py-0.5 bg-fuchsia-100 text-fuchsia-600 text-[8px] font-black uppercase rounded">{i.badge}</span>}
                       </div>
                       {i.shortcut && <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded transition-colors", i.isAction ? "bg-indigo-200 text-indigo-800" : "text-slate-400 bg-slate-100 group-hover:bg-indigo-100 group-hover:text-indigo-500")}>{i.shortcut}</span>}
                     </button>
@@ -256,10 +260,10 @@ function DockButton<T extends string>({ item, active, onClick }: { item: DockIte
 export default function App() {
   const { data: db, loading, saveData, setData, reloadData } = useArumeData();
   
-  // 🚀 MEJORA 1: Hash Routing (Mantiene la pestaña al recargar F5)
+  // 🚀 MEJORA 1: Hash Routing Saneado
   const [activeTab, setActiveTab] = useState<TabKey>(() => {
     const hash = window.location.hash.replace('#', '') as TabKey;
-    return TAB_LABELS[hash] ? hash : 'dashboard';
+    return TAB_LABELS[hash] ? hash : 'dashboard'; // Si es inventado, va a dashboard
   });
 
   const [isConfigOpen, setIsConfigOpen] = useState(false);
@@ -270,11 +274,12 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
 
-  // 🚀 MEJORA 2 & 4: Cambio de pestaña optimizado con vibración háptica
+  // MEJORA 2: Cambio de pestaña optimizado y actualización de Título Web
   const handleTabChange = useCallback((tab: TabKey) => {
-    if (navigator.vibrate) navigator.vibrate(30); // Feedback físico sutil
+    if (navigator.vibrate) navigator.vibrate(30); 
     setActiveTab(tab);
     window.location.hash = tab;
+    document.title = `${TAB_LABELS[tab]} - Arume Pro`; // Título dinámico
     setIsCmdOpen(false);
   }, []);
 
@@ -338,14 +343,18 @@ export default function App() {
     if (!file || !db) return;
     
     e.target.value = '';
+    
+    const apiKey = localStorage.getItem('gemini_api_key');
+    if (!apiKey) {
+        alert("⚠️ Configura tu clave de Gemini API en los Ajustes primero.");
+        setIsConfigOpen(true);
+        return;
+    }
+
     setIsProcessingPhoto(true);
 
     try {
-      const apiKey = localStorage.getItem('gemini_api_key');
-      if (!apiKey) throw new Error("NO_API_KEY");
-
       const soloBase64 = await compressImageForAI(file);
-
       const ai = new GoogleGenAI({ apiKey });
       const prompt = `Actúa como un Auditor Contable. Lee esta imagen de un ticket o factura. Extrae TODO lo posible. Devuelve SOLO un JSON estricto sin comentarios: 
       { 
@@ -399,12 +408,7 @@ export default function App() {
       if (activeTab !== 'compras') handleTabChange('compras');
 
     } catch (e: any) {
-      if (e.message === "NO_API_KEY") {
-        alert("⚠️ Configura tu clave de Gemini API en los ajustes primero.");
-        setIsConfigOpen(true);
-      } else {
-        alert("❌ Error al procesar la imagen: " + (e.message || "Imagen ilegible"));
-      }
+      alert("❌ Error al procesar la imagen: " + (e.message || "Imagen ilegible"));
     } finally {
       setIsProcessingPhoto(false);
     }
@@ -430,7 +434,7 @@ export default function App() {
     return () => document.removeEventListener('keydown', onKey);
   }, [handleTabChange]);
 
-  // 💡 DOCK ACTUALIZADO CON MARKETING
+  // 💡 DOCK ACTUALIZADO
   const navItems = useMemo<DockItemDef<TabKey>[]>(() => ([
     { key: 'dashboard',  label: 'Dash',       icon: LayoutDashboard, group: 'main', shortcut: '⌘1' },
     { key: 'ia',         label: 'IA',         icon: Sparkles,        group: 'main' },
@@ -438,7 +442,6 @@ export default function App() {
     { key: 'importador', label: 'Subir',      icon: Import,          group: 'main' },
     
     { key: 'compras',    label: 'Compras',    icon: Receipt,         group: 'fin',  shortcut: '⌘3' },
-    
     { key: 'banco',      label: 'Banco',      icon: Building2,       group: 'fin',  shortcut: '⌘4' },
     { key: 'tesoreria',  label: 'Tesorería',  icon: TrendingUp,      group: 'fin'  },
     { key: 'liquidez',   label: 'Liquidez',   icon: Scale,           group: 'fin'  },
@@ -446,16 +449,15 @@ export default function App() {
     { key: 'informes',   label: 'Informes',   icon: PieChart,        group: 'ops'  },
     { key: 'menus',      label: 'Menús',      icon: ChefHat,         group: 'ops'  },
     { key: 'stock',      label: 'Stock',      icon: Package,         group: 'ops'  },
-    
-    { key: 'marketing',  label: 'Marketing',  icon: Megaphone,       group: 'ops', shortcut: '⌘5' },
-    
+    { key: 'marketing',  label: 'Marketing',  icon: Megaphone,       group: 'ops',  shortcut: '⌘5' },
     { key: 'cierre',     label: 'Cierre',     icon: Lock,            group: 'ops'  },
   ]), []);
 
-  // 💡 ITEMS DEL BUSCADOR (CMD+K) MEJORADO CON ACCIONES RÁPIDAS
+  // 💡 ITEMS DEL BUSCADOR (CMD+K)
   const cmdItems = useMemo<CmdItem<string>[]>(() => [
-    ...navItems.map(n => ({ key: n.key, label: TAB_LABELS[n.key as TabKey], group: n.group, icon: n.icon, shortcut: n.shortcut })),
-    { key: 'action_scan', label: 'Escanear Ticket o Factura', icon: Camera, isAction: true, shortcut: 'Enter' }
+    ...navItems.map(n => ({ key: n.key, label: TAB_LABELS[n.key as TabKey], group: n.group, icon: n.icon, shortcut: n.shortcut, badge: n.key === 'marketing' ? 'Nuevo' : undefined })),
+    { key: 'action_scan', label: 'Escanear Ticket o Factura', icon: Camera, isAction: true, shortcut: 'Enter' },
+    { key: 'action_settings', label: 'Abrir Configuración (APIs)', icon: Settings, isAction: true }
   ], [navItems]);
 
   // 🔀 SWITCH DE PANTALLAS
@@ -480,7 +482,6 @@ export default function App() {
       case 'stock':     return <StockView {...props} />;
       case 'cierre':    return <CierreContableView {...props} />;
       
-      // 💡 CONEXIÓN REAL DEL MÓDULO DE MARKETING
       case 'marketing': return <MarketingView data={db} />;
       
       default:          return <DashboardView data={db} />;
@@ -506,6 +507,9 @@ export default function App() {
       </div>
     );
   }
+
+  // Lógica para esconder el botón de cámara en pantallas donde no sirve
+  const showCameraButton = !['marketing', 'informes', 'cierre'].includes(activeTab);
 
   return (
     <AuthScreen>
@@ -548,7 +552,14 @@ export default function App() {
 
         <main className="flex-1 overflow-y-auto pb-safe">
           <AnimatePresence mode="wait">
-            <motion.div key={activeTab} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -5 }} transition={{ duration: 0.1 }} className="p-2 md:p-4 max-w-[1600px] mx-auto pb-24">
+            <motion.div 
+              key={activeTab} 
+              initial={{ opacity: 0, y: 10 }} 
+              animate={{ opacity: 1, y: 0 }} 
+              exit={{ opacity: 0, y: -10 }} 
+              transition={{ type: "spring", stiffness: 300, damping: 30 }} 
+              className="p-2 md:p-4 max-w-[1600px] mx-auto pb-24"
+            >
               <ErrorBoundary key={activeTab}>
                 {content}
               </ErrorBoundary>
@@ -557,7 +568,7 @@ export default function App() {
         </main>
 
         {/* BOTÓN FLOTANTE DINÁMICO */}
-        {activeTab !== 'marketing' && (
+        {showCameraButton && (
           <button 
             onClick={() => fileInputRef.current?.click()}
             disabled={isProcessingPhoto}
@@ -572,7 +583,7 @@ export default function App() {
           </button>
         )}
 
-        {/* Overlay procesando */}
+        {/* Overlay procesando foto */}
         <AnimatePresence>
           {isProcessingPhoto && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
@@ -596,7 +607,10 @@ export default function App() {
           open={isCmdOpen} onClose={() => setIsCmdOpen(false)} 
           items={cmdItems} 
           onSelect={(key) => handleTabChange(key as TabKey)} 
-          onAction={(key) => { if (key === 'action_scan') { fileInputRef.current?.click(); setIsCmdOpen(false); } }} 
+          onAction={(key) => { 
+            if (key === 'action_scan') { fileInputRef.current?.click(); setIsCmdOpen(false); }
+            if (key === 'action_settings') { setIsConfigOpen(true); setIsCmdOpen(false); }
+          }} 
         />
         
         <SettingsModal isOpen={isConfigOpen} onClose={() => setIsConfigOpen(false)} db={db} setDb={setData} onSave={handleSave} />
