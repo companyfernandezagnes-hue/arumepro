@@ -4,7 +4,7 @@ import { CheckCircle2, Sparkles, ArrowDownLeft, Search, X as CloseIcon, Zap, Tar
 import { AppData, BankMovement } from '../types';
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
-// 🚀 Importamos el cerebro 
+// 🚀 Importamos el cerebro de enlace
 import { findMatches, executeLink } from '../services/bancoLogic';
 
 export interface SwipeReconcilerProps {
@@ -14,18 +14,18 @@ export interface SwipeReconcilerProps {
 }
 
 /* =======================================================
- * 🎨 COMPONENTE: Rayo de Energía Mejorado
+ * 🎨 COMPONENTE: Rayo de Energía Seguro (Anti-Memory Leaks)
  * ======================================================= */
 const EnergyBeam = ({ sourceId, targetId, isActive }: { sourceId: string, targetId: string, isActive: boolean }) => {
   const [coords, setCoords] = useState<{x1: number, y1: number, x2: number, y2: number} | null>(null);
-  const isMounted = useRef(true);
 
   useEffect(() => {
-    isMounted.current = true;
-    const update = () => {
-      if (!isMounted.current) return;
+    let animationFrameId: number;
+
+    const updateCoords = () => {
       const el1 = document.getElementById(sourceId);
       const el2 = document.getElementById(targetId);
+      
       if (el1 && el2) {
         const r1 = el1.getBoundingClientRect();
         const r2 = el2.getBoundingClientRect();
@@ -37,16 +37,17 @@ const EnergyBeam = ({ sourceId, targetId, isActive }: { sourceId: string, target
         });
       }
     };
-    
-    // Doble intento para asegurar renderizado de Framer Motion
-    const t1 = setTimeout(update, 100);
-    const t2 = setTimeout(update, 400);
-    window.addEventListener('resize', update);
-    
-    return () => { 
-      isMounted.current = false;
-      clearTimeout(t1); clearTimeout(t2); 
-      window.removeEventListener('resize', update); 
+
+    // Doble verificación suave para Framer Motion
+    const t1 = setTimeout(updateCoords, 100);
+    const t2 = setTimeout(updateCoords, 400);
+    window.addEventListener('resize', updateCoords);
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      window.removeEventListener('resize', updateCoords);
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
     };
   }, [sourceId, targetId, isActive]);
 
@@ -75,7 +76,12 @@ const EnergyBeam = ({ sourceId, targetId, isActive }: { sourceId: string, target
 };
 
 
+/* =======================================================
+ * 💳 COMPONENTE PRINCIPAL (SWIPE)
+ * ======================================================= */
 export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, onClose }) => {
+  
+  // 🛡️ MEJORA 1: Filtramos los pendientes de forma segura
   const pendingMovements = useMemo(() => {
     return (data.banco || []).filter((b: BankMovement) => b.status === 'pending');
   }, [data.banco]);
@@ -84,36 +90,41 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
   const [hoveredMatch, setHoveredMatch] = useState<string | null>(null);
   const [isLinking, setIsLinking] = useState(false);
   
+  const next = useCallback(() => {
+    if (navigator.vibrate) navigator.vibrate(20); // Zumbido háptico
+    setCurrentIndex(prev => Math.min(prev + 1, pendingMovements.length));
+  }, [pendingMovements.length]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft' && !isLinking) next();
-      if (e.key === 'Escape' && !isLinking) onClose();
+      if (isLinking) return;
+      if (e.key === 'ArrowLeft') next();
+      if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentIndex, pendingMovements.length, isLinking, onClose]);
+  }, [next, isLinking, onClose]);
 
-  const next = () => setCurrentIndex(prev => prev + 1);
-
+  // PANTALLA FINAL (Todo Conciliado)
   if (pendingMovements.length === 0 || currentIndex >= pendingMovements.length) {
     return (
       <div className="fixed inset-0 z-[1000] flex justify-center items-center p-4">
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-slate-900/95 backdrop-blur-xl" />
         <motion.div 
-          initial={{ scale: 0.5, opacity: 0, y: 20 }} 
+          initial={{ scale: 0.5, opacity: 0, y: 30 }} 
           animate={{ scale: 1, opacity: 1, y: 0 }} 
-          transition={{ type: "spring", damping: 20, stiffness: 200 }}
+          transition={{ type: "spring", damping: 15, stiffness: 200 }}
           className="relative z-10 flex flex-col items-center text-center"
         >
           <motion.div 
             initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.2, type: "spring" }}
-            className="w-24 h-24 bg-emerald-500 rounded-full flex items-center justify-center mb-6 shadow-[0_0_60px_-10px_rgba(16,185,129,0.6)] border-4 border-emerald-300"
+            className="w-28 h-28 bg-emerald-500 rounded-full flex items-center justify-center mb-6 shadow-[0_0_60px_-10px_rgba(16,185,129,0.7)] border-4 border-emerald-300"
           >
-            <CheckCircle2 className="w-12 h-12 text-white" />
+            <CheckCircle2 className="w-14 h-14 text-white" />
           </motion.div>
           <h2 className="text-4xl font-black text-white tracking-tighter mb-2">¡Todo al día!</h2>
-          <p className="text-emerald-400 font-bold uppercase tracking-widest mb-8">El banco está 100% conciliado</p>
-          <button onClick={onClose} className="bg-white text-slate-900 px-8 py-4 rounded-full font-black text-sm hover:scale-105 active:scale-95 transition-all shadow-xl shadow-white/10">
+          <p className="text-emerald-400 font-bold uppercase tracking-widest mb-8">Banco 100% Conciliado</p>
+          <button onClick={onClose} className="bg-white text-slate-900 px-8 py-4 rounded-full font-black text-sm hover:scale-105 active:scale-95 transition-all shadow-xl">
             VOLVER AL PANEL
           </button>
         </motion.div>
@@ -121,10 +132,13 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
     );
   }
 
+  // 🛡️ Extraemos el item de forma segura
   const currentItem = pendingMovements[currentIndex];
+  if (!currentItem) return null; // Fallback extremo
+
   const isIncome = Num.parse(currentItem.amount) > 0;
 
-  // 🚀 USAMOS EL CEREBRO DE BUSQUEDA
+  // 🚀 USAMOS EL CEREBRO DE BÚSQUEDA
   const matches = useMemo(() => {
     return findMatches(currentItem, data);
   }, [currentItem, data]);
@@ -132,18 +146,22 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
   const handleLinkLocal = async (matchType: string, docId: string, comision: number = 0) => {
     if (isLinking) return;
     setIsLinking(true);
-    setHoveredMatch(docId); // Forzamos el rayo láser en verde
+    setHoveredMatch(docId); // Forzamos el rayo láser
+    if (navigator.vibrate) navigator.vibrate([30, 50, 30]); // Patrón de éxito háptico
 
-    // Esperamos 700ms para la animación (reducido ligeramente para mayor agilidad)
+    // Esperamos a que la animación termine (700ms)
     await new Promise(r => setTimeout(r, 700));
 
     try {
       const newData = JSON.parse(JSON.stringify(data));
       executeLink(newData, currentItem.id, matchType, docId, comision); 
       await onSave(newData);
-      next();
+      
+      // Solo avanzamos si todo ha ido bien
+      setCurrentIndex(prev => prev + 1);
     } catch (e) {
-      alert("Error al enlazar");
+      console.error("Error al enlazar en SwipeReconciler:", e);
+      alert("Error al intentar enlazar. Revisa tu conexión.");
     } finally {
       setIsLinking(false);
       setHoveredMatch(null);
@@ -155,15 +173,15 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
   return (
     <div className="fixed inset-0 z-[1000] flex justify-center items-center p-4 overflow-hidden">
       
-      {/* INNOVACIÓN 1: Mood Lighting dinámico */}
+      {/* INNOVACIÓN 1: Mood Lighting Dinámico */}
       <motion.div 
         initial={{ opacity: 0 }} 
-        animate={{ opacity: 1, backgroundColor: isIncome ? 'rgba(15, 23, 42, 0.95)' : 'rgba(15, 23, 42, 0.98)' }} 
+        animate={{ opacity: 1, backgroundColor: isIncome ? 'rgba(15, 23, 42, 0.94)' : 'rgba(15, 23, 42, 0.97)' }} 
         exit={{ opacity: 0 }} 
         onClick={() => !isLinking && onClose()} 
-        className="absolute inset-0 backdrop-blur-xl transition-colors duration-500" 
+        className="absolute inset-0 backdrop-blur-2xl transition-colors duration-700" 
       >
-        <div className={cn("absolute inset-0 opacity-10 mix-blend-color transition-colors duration-1000", isIncome ? "bg-emerald-500" : "bg-rose-500")} />
+        <div className={cn("absolute inset-0 opacity-[0.08] mix-blend-screen transition-colors duration-1000", isIncome ? "bg-emerald-400" : "bg-rose-500")} />
       </motion.div>
       
       <div className={cn("relative z-10 w-full max-w-lg flex flex-col items-center transition-all duration-300", isLinking && "pointer-events-none")}>
@@ -175,7 +193,7 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
               <Sparkles className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h3 className="text-white font-black text-lg leading-none">Swipe Mode</h3>
+              <h3 className="text-white font-black text-lg leading-none tracking-tight">Swipe Mode</h3>
               <p className="text-indigo-400 text-[10px] font-black uppercase tracking-widest mt-1">{pendingMovements.length - currentIndex} RESTANTES</p>
             </div>
           </div>
@@ -184,7 +202,7 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
           </button>
         </div>
 
-        {/* TARJETA PRINCIPAL (Pop Layout) */}
+        {/* TARJETA PRINCIPAL */}
         <AnimatePresence mode="popLayout">
           <motion.div 
             key={currentItem.id}
@@ -200,27 +218,27 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
             transition={{ type: "spring", stiffness: 300, damping: 25 }}
             drag={!isLinking ? "x" : false} 
             dragConstraints={{ left: 0, right: 0 }} 
-            dragElastic={0.4} // Más resistencia
-            onDragEnd={(e, { offset, velocity }) => { if (offset.x < -60 || velocity.x < -600) next(); }}
+            dragElastic={0.2} // 🛡️ MEJORA 4: Resistencia más firme
+            onDragEnd={(e, { offset, velocity }) => { if (offset.x < -80 || velocity.x < -600) next(); }}
             className={cn(
-              "w-full rounded-[3rem] p-8 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.5)] flex flex-col min-h-[500px] relative overflow-hidden",
+              "w-full rounded-[3rem] p-8 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.6)] flex flex-col min-h-[500px] relative overflow-hidden",
               isLinking ? "bg-emerald-50 border-4 border-emerald-400" : "bg-white border border-slate-200 cursor-grab active:cursor-grabbing"
             )}
           >
-            {/* Destello verde cuando se enlaza (INNOVACIÓN 2) */}
+            {/* INNOVACIÓN 2: Flash fotográfico al enlazar */}
             <AnimatePresence>
               {isLinking && (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-emerald-400/20 z-0 mix-blend-overlay" />
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: [0, 1, 0] }} transition={{ duration: 0.5 }} className="absolute inset-0 bg-white z-[100] mix-blend-overlay" />
               )}
             </AnimatePresence>
 
-            {/* INFO DEL BANCO */}
+            {/* INFO DEL MOVIMIENTO BANCARIO */}
             <div className="text-center mb-8 pointer-events-none relative z-10 pt-2">
               <span className={cn("text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest mb-4 inline-flex items-center gap-1.5 shadow-sm border", 
                 isIncome ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-rose-50 text-rose-700 border-rose-200"
               )}>
                 {isLinking ? <Zap className="w-3 h-3 animate-pulse" /> : <Target className="w-3 h-3" />}
-                {isIncome ? 'Ingreso detectado' : 'Cargo detectado'}
+                {isIncome ? 'Ingreso Bancario' : 'Cargo Bancario'}
               </span>
               
               <h2 className="text-xl md:text-2xl font-black text-slate-800 leading-tight mb-2 line-clamp-2 px-4">{currentItem.desc}</h2>
@@ -236,20 +254,20 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
               </div>
             </div>
 
-            {/* OPCIONES DE ENLACE */}
+            {/* OPCIONES DE COINCIDENCIA */}
             <div className="flex-1 relative z-10 w-full mt-2">
               {matches.length > 0 ? (
                 <div className="space-y-3 relative">
-                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3 text-center">Coincidencias Encontradas</p>
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3 text-center">Coincidencias Sugeridas</p>
                   
                   {matches.map((m: any, idx: number) => {
                     const matchIdStr = `match-card-${m.id}`;
                     const isHovered = hoveredMatch === m.id;
-                    const isPerfect = matches.length === 1 && idx === 0; // Si es la única opción
+                    const isPerfectMatch = matches.length === 1 && idx === 0; // INNOVACIÓN 3
                     
                     return (
                       <div key={idx} className="relative">
-                        {/* 🌟 RAYO DE ENERGÍA (SVG) */}
+                        {/* 🌟 RAYO DE ENERGÍA SVG */}
                         <EnergyBeam 
                           sourceId={`bank-amount-${currentItem.id}`} 
                           targetId={matchIdStr} 
@@ -266,12 +284,9 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
                           className={cn(
                             "flex justify-between items-center p-4 rounded-2xl border-2 cursor-pointer transition-all relative z-20 bg-white overflow-hidden group",
                             isHovered ? "border-emerald-400 shadow-[0_10px_20px_-5px_rgba(16,185,129,0.3)] bg-emerald-50/30" : "border-slate-200 hover:border-indigo-300 shadow-sm",
-                            isPerfect && !isHovered && "border-indigo-200 shadow-indigo-100" // INNOVACIÓN 4: Auto-Skip sutil
+                            isPerfectMatch && !isHovered && "border-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.2)]" // Resplandor de auto-match
                           )}
                         >
-                          {/* Resplandor de hover */}
-                          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] pointer-events-none" />
-
                           <div className="text-left min-w-0 pr-4 relative z-10">
                             <span className={cn("text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded border",
                               m.color === 'emerald' ? "bg-emerald-50 text-emerald-700 border-emerald-200" : 
@@ -282,8 +297,7 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
                             )}>{m.type}</span>
                             <p className="text-sm font-black text-slate-800 mt-2 truncate">{m.title}</p>
                             
-                            {/* INNOVACIÓN 3: Score de Confianza */}
-                            {isPerfect && <p className="text-[8px] text-indigo-500 font-bold mt-1 uppercase">100% Match Exacto</p>}
+                            {isPerfectMatch && <p className="text-[8px] text-indigo-500 font-bold mt-1 uppercase flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> 100% Seguro</p>}
                           </div>
 
                           <div className="text-right shrink-0 relative z-10">
@@ -298,18 +312,18 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full text-center py-12 pointer-events-none">
-                  <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4">
+                  <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4 border border-slate-100">
                     <Search className="w-8 h-8 text-slate-300" />
                   </div>
-                  <p className="text-xs font-black text-slate-500 uppercase tracking-widest">Cero Coincidencias</p>
-                  <p className="text-[10px] font-bold text-slate-400 mt-1 max-w-[200px] leading-relaxed">No hay facturas ni cierres en el sistema que sumen este importe.</p>
+                  <p className="text-xs font-black text-slate-500 uppercase tracking-widest">Sin Coincidencias</p>
+                  <p className="text-[10px] font-bold text-slate-400 mt-1 max-w-[200px] leading-relaxed">No hay facturas ni cierres de TPV en el sistema que sumen este importe exacto.</p>
                 </div>
               )}
             </div>
 
             {/* BOTÓN SALTAR */}
             <div className="mt-auto pt-6 relative z-10">
-              <button disabled={isLinking} onClick={next} className="w-full bg-slate-50 border border-slate-200 text-slate-400 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-100 hover:text-slate-600 transition-all flex items-center justify-center gap-2 disabled:opacity-0">
+              <button disabled={isLinking} onClick={next} className="w-full bg-slate-50 border border-slate-200 text-slate-400 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-100 hover:text-slate-600 transition-all flex items-center justify-center gap-2 disabled:opacity-0 active:scale-95">
                 <ArrowDownLeft className="w-4 h-4 rotate-45" /> SALTAR ESTE MOVIMIENTO
               </button>
             </div>
@@ -327,6 +341,7 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
             <motion.div 
               initial={{ width: 0 }} 
               animate={{ width: `${progressPercent}%` }} 
+              transition={{ ease: "circOut", duration: 0.5 }}
               className="h-full bg-indigo-500 rounded-full shadow-[0_0_10px_rgba(99,102,241,0.8)]" 
             />
           </div>
