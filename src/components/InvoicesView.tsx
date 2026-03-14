@@ -4,13 +4,14 @@ import {
   CheckCircle2, Clock, Check, Download, Package, 
   X, Layers, ShieldCheck, List, Sparkles, ArrowDownLeft,
   Calendar, Wand2, PieChart, ArrowUpRight, ArrowDownRight,
-  Eye, Save, MailCheck, Webhook, FileText, Inbox, AlertCircle, Bot
+  Eye, Save, MailCheck, Webhook, FileText, Inbox, AlertCircle, Bot,
+  ChevronLeft, ChevronRight, Users // 🛡️ EL FIX: Faltaban estos iconos
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import { GoogleGenAI } from "@google/genai";
 
-// 🛡️ TIPOS Y SERVICIOS CORRECTOS (Solo Facturación, Nada de Banco)
+// 🛡️ TIPOS Y SERVICIOS
 import { AppData, FacturaExtended, BusinessUnit, EmailDraft } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
@@ -27,17 +28,6 @@ const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string
   { id: 'SHOP', name: 'Tienda Sake', icon: Package, color: 'text-emerald-600', bg: 'bg-emerald-50' },
   { id: 'CORP', name: 'Socios / Corp', icon: Users, color: 'text-slate-600', bg: 'bg-slate-100' },
 ];
-
-function Users(props: { className?: string; }) {
-  return (
-      <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-          <circle cx="9" cy="7" r="4" />
-          <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-      </svg>
-  );
-}
 
 export interface InvoicesViewProps {
   data: AppData;
