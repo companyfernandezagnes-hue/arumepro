@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Package, Wallet, ChefHat, Users, Settings, Search,
   TrendingUp, X, RefreshCw, FileText, Truck, Scale, Zap, Building2, 
   PieChart, Lock, Import, Sparkles, WifiOff, AlertTriangle, Camera, Loader2,
-  Receipt, Megaphone // 💡 NUEVOS ICONOS AÑADIDOS
+  Receipt, Megaphone
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -32,22 +32,23 @@ import { SettingsModal } from './components/SettingsModal';
 import { TelegramWidget } from './components/TelegramWidget';
 import { AuthScreen } from './components/AuthScreen';
 
-// 👑 NUEVO MANDO CENTRAL DE COMPRAS
+// 👑 MÓDULOS MAESTROS
 import { ComprasDashboard } from './components/ComprasDashboard';
+import { MarketingView } from './components/MarketingView'; // 💡 IMPORTACIÓN CORRECTA AÑADIDA
 
 // 🛡️ TIPOS Y CONSTANTES ACTUALIZADOS
 type TabKey = 
   | 'dashboard' | 'ia' | 'diario' | 'importador' 
-  | 'compras' | 'facturas' | 'albaranes' // Mantenemos las viejas por compatibilidad de atajos
+  | 'compras' | 'facturas' | 'albaranes' 
   | 'tesoreria' | 'liquidez' | 'banco' | 'fixed' 
-  | 'informes' | 'menus' | 'stock' | 'cierre' | 'marketing'; // 💡 MARKETING AÑADIDO
+  | 'informes' | 'menus' | 'stock' | 'cierre' | 'marketing';
 
 const TAB_LABELS: Record<TabKey, string> = {
   dashboard: 'Dashboard', ia: 'IA', diario: 'Caja Diaria', importador: 'Importador',
-  compras: 'Compras', facturas: 'Compras', albaranes: 'Compras', // Todas apuntan al mismo sitio
+  compras: 'Compras', facturas: 'Compras', albaranes: 'Compras', 
   tesoreria: 'Tesorería', liquidez: 'Liquidez',
   banco: 'Banco', fixed: 'G. Fijos', informes: 'Informes', menus: 'Menús', stock: 'Stock', cierre: 'Cierre',
-  marketing: 'Marketing' // 💡 ETIQUETA AÑADIDA
+  marketing: 'Marketing'
 };
 
 const jsonSafeClone = <T,>(obj: T): T => { try { return JSON.parse(JSON.stringify(obj)); } catch { return obj; } };
@@ -99,11 +100,11 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
 }
 
 /* =======================================================
- * 🧭 1. BUSCADOR RÁPIDO (CMD + K)
+ * 🧭 1. BUSCADOR RÁPIDO (CMD + K) MEJORADO
  * ======================================================= */
-type CmdItem<T extends string> = { key: T; label: string; group?: string; icon?: any; shortcut?: string };
+type CmdItem<T extends string> = { key: T; label: string; group?: string; icon?: any; shortcut?: string; isAction?: boolean };
 
-function CommandPalette<T extends string>({ open, onClose, items, onSelect }: { open: boolean, onClose: ()=>void, items: CmdItem<T>[], onSelect: (k:T)=>void }) {
+function CommandPalette<T extends string>({ open, onClose, items, onSelect, onAction }: { open: boolean, onClose: ()=>void, items: CmdItem<T>[], onSelect: (k:T)=>void, onAction: (k:T)=>void }) {
   const [q, setQ] = useState('');
   const filtered = useMemo(() => {
     const qq = q.trim().toLowerCase();
@@ -121,22 +122,22 @@ function CommandPalette<T extends string>({ open, onClose, items, onSelect }: { 
         <motion.div initial={{ y: -10, scale: 0.98, opacity: 0 }} animate={{ y: 0, scale: 1, opacity: 1 }} className="relative w-full max-w-xl rounded-xl bg-white shadow-2xl border border-slate-200 overflow-hidden z-10">
           <div className="p-3 border-b border-slate-100 flex items-center gap-3 bg-slate-50">
             <Search className="w-5 h-5 text-indigo-500" />
-            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar módulo..." className="flex-1 outline-none text-sm font-semibold text-slate-800 bg-transparent" onKeyDown={(e) => { if (e.key === 'Enter' && filtered.length > 0) onSelect(filtered[0].key); if (e.key === 'Escape') onClose(); }} />
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar módulo o acción rápida..." className="flex-1 outline-none text-sm font-semibold text-slate-800 bg-transparent" onKeyDown={(e) => { if (e.key === 'Enter' && filtered.length > 0) { filtered[0].isAction ? onAction(filtered[0].key) : onSelect(filtered[0].key); } if (e.key === 'Escape') onClose(); }} />
             <span className="text-[10px] font-bold text-slate-400 bg-slate-200 px-1.5 py-0.5 rounded">ESC</span>
           </div>
           <div className="max-h-[50vh] overflow-y-auto p-2 custom-scrollbar bg-white">
-            {filtered.length === 0 && <p className="text-xs font-semibold text-slate-400 px-4 py-8 text-center">No se encontraron módulos.</p>}
-            <ul className="grid grid-cols-2 gap-1">
+            {filtered.length === 0 && <p className="text-xs font-semibold text-slate-400 px-4 py-8 text-center">No se encontraron resultados.</p>}
+            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1">
               {filtered.map((i) => {
                 const Icon = i.icon;
                 return (
                   <li key={i.key}>
-                    <button className="w-full text-left px-3 py-2.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 transition-colors flex items-center justify-between group" onClick={() => onSelect(i.key)}>
+                    <button className={cn("w-full text-left px-3 py-2.5 rounded-lg text-xs font-semibold transition-colors flex items-center justify-between group", i.isAction ? "text-indigo-700 bg-indigo-50 hover:bg-indigo-100" : "text-slate-600 hover:bg-slate-100")} onClick={() => i.isAction ? onAction(i.key) : onSelect(i.key)}>
                       <div className="flex items-center gap-2">
-                        {Icon && <Icon className="w-4 h-4 text-slate-400 group-hover:text-indigo-500 transition-colors" />}
+                        {Icon && <Icon className={cn("w-4 h-4 transition-colors", i.isAction ? "text-indigo-500" : "text-slate-400 group-hover:text-indigo-500")} />}
                         {i.label}
                       </div>
-                      {i.shortcut && <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded group-hover:bg-indigo-100 group-hover:text-indigo-500 transition-colors">{i.shortcut}</span>}
+                      {i.shortcut && <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded transition-colors", i.isAction ? "bg-indigo-200 text-indigo-800" : "text-slate-400 bg-slate-100 group-hover:bg-indigo-100 group-hover:text-indigo-500")}>{i.shortcut}</span>}
                     </button>
                   </li>
                 );
@@ -254,15 +255,28 @@ function DockButton<T extends string>({ item, active, onClick }: { item: DockIte
  * ======================================================= */
 export default function App() {
   const { data: db, loading, saveData, setData, reloadData } = useArumeData();
-  const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
+  
+  // 🚀 MEJORA 1: Hash Routing (Mantiene la pestaña al recargar F5)
+  const [activeTab, setActiveTab] = useState<TabKey>(() => {
+    const hash = window.location.hash.replace('#', '') as TabKey;
+    return TAB_LABELS[hash] ? hash : 'dashboard';
+  });
+
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
-  
   const [isCmdOpen, setIsCmdOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
+
+  // 🚀 MEJORA 2 & 4: Cambio de pestaña optimizado con vibración háptica
+  const handleTabChange = useCallback((tab: TabKey) => {
+    if (navigator.vibrate) navigator.vibrate(30); // Feedback físico sutil
+    setActiveTab(tab);
+    window.location.hash = tab;
+    setIsCmdOpen(false);
+  }, []);
 
   useEffect(() => {
     const onOnline = () => setIsOffline(false); const onOffline = () => setIsOffline(true);
@@ -315,7 +329,6 @@ export default function App() {
     } catch (error) { console.error("Error crítico al guardar:", error); } 
     finally { isSyncingRef.current = false; setIsSyncing(false); }
   }, [saveData, setData, isOffline]);
-
 
   /* =======================================================
    * 📸 PROCESADOR DE CÁMARA CON COMPRESIÓN
@@ -383,7 +396,7 @@ export default function App() {
       await handleSave(newData);
       
       alert("✅ Ticket escaneado y enviado al Centro de Compras para su revisión.");
-      if (activeTab !== 'compras') setActiveTab('compras');
+      if (activeTab !== 'compras') handleTabChange('compras');
 
     } catch (e: any) {
       if (e.message === "NO_API_KEY") {
@@ -397,7 +410,6 @@ export default function App() {
     }
   };
 
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const active = document.activeElement as HTMLElement;
@@ -407,25 +419,24 @@ export default function App() {
       const mod = e.ctrlKey || e.metaKey;
       if (mod) {
         if (e.key.toLowerCase() === 'k') { e.preventDefault(); setIsCmdOpen(v => !v); }
-        if (e.key === '1') { e.preventDefault(); setActiveTab('dashboard'); }
-        if (e.key === '2') { e.preventDefault(); setActiveTab('diario'); }
-        if (e.key === '3') { e.preventDefault(); setActiveTab('compras'); } // Atajo actualizado
-        if (e.key === '4') { e.preventDefault(); setActiveTab('banco'); }
-        if (e.key === '5') { e.preventDefault(); setActiveTab('marketing'); } // Atajo añadido
+        if (e.key === '1') { e.preventDefault(); handleTabChange('dashboard'); }
+        if (e.key === '2') { e.preventDefault(); handleTabChange('diario'); }
+        if (e.key === '3') { e.preventDefault(); handleTabChange('compras'); } 
+        if (e.key === '4') { e.preventDefault(); handleTabChange('banco'); }
+        if (e.key === '5') { e.preventDefault(); handleTabChange('marketing'); } 
       }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, []);
+  }, [handleTabChange]);
 
-  // 💡 DOCK ACTUALIZADO: Hemos unificado Facturas y Albaranes en "Compras", y añadido "Marketing"
+  // 💡 DOCK ACTUALIZADO CON MARKETING
   const navItems = useMemo<DockItemDef<TabKey>[]>(() => ([
     { key: 'dashboard',  label: 'Dash',       icon: LayoutDashboard, group: 'main', shortcut: '⌘1' },
     { key: 'ia',         label: 'IA',         icon: Sparkles,        group: 'main' },
     { key: 'diario',     label: 'Caja',       icon: Wallet,          group: 'main', shortcut: '⌘2' },
     { key: 'importador', label: 'Subir',      icon: Import,          group: 'main' },
     
-    // 👇 FUSIÓN APLICADA
     { key: 'compras',    label: 'Compras',    icon: Receipt,         group: 'fin',  shortcut: '⌘3' },
     
     { key: 'banco',      label: 'Banco',      icon: Building2,       group: 'fin',  shortcut: '⌘4' },
@@ -436,24 +447,28 @@ export default function App() {
     { key: 'menus',      label: 'Menús',      icon: ChefHat,         group: 'ops'  },
     { key: 'stock',      label: 'Stock',      icon: Package,         group: 'ops'  },
     
-    // 👇 MARKETING AÑADIDO AL FINAL DEL DOCK
     { key: 'marketing',  label: 'Marketing',  icon: Megaphone,       group: 'ops', shortcut: '⌘5' },
     
     { key: 'cierre',     label: 'Cierre',     icon: Lock,            group: 'ops'  },
   ]), []);
 
-  // 🔀 SWITCH DE PANTALLAS ACTUALIZADO
+  // 💡 ITEMS DEL BUSCADOR (CMD+K) MEJORADO CON ACCIONES RÁPIDAS
+  const cmdItems = useMemo<CmdItem<string>[]>(() => [
+    ...navItems.map(n => ({ key: n.key, label: TAB_LABELS[n.key as TabKey], group: n.group, icon: n.icon, shortcut: n.shortcut })),
+    { key: 'action_scan', label: 'Escanear Ticket o Factura', icon: Camera, isAction: true, shortcut: 'Enter' }
+  ], [navItems]);
+
+  // 🔀 SWITCH DE PANTALLAS
   const content = useMemo(() => {
     const props = { data: db, onSave: handleSave };
     switch (activeTab) {
       case 'dashboard': return <DashboardView data={db} />;
       case 'ia':        return <AIConsultant data={db} />; 
       case 'diario':    return <CashView {...props} />;
-      case 'importador':return <ImportView data={db} onSave={handleSave} onNavigate={(tab) => setActiveTab(tab as TabKey)} />;
+      case 'importador':return <ImportView data={db} onSave={handleSave} onNavigate={(tab) => handleTabChange(tab as TabKey)} />;
       
-      // 👇 MAGIA: El nuevo Mando Central
       case 'compras':   
-      case 'facturas':  // Los mantenemos por si algún link interno o atajo antiguo lo llama
+      case 'facturas':  
       case 'albaranes': return <ComprasDashboard {...props} />;
       
       case 'tesoreria': return <TesoreriaView {...props} />;
@@ -465,22 +480,12 @@ export default function App() {
       case 'stock':     return <StockView {...props} />;
       case 'cierre':    return <CierreContableView {...props} />;
       
-      // 👇 MAGIA: Pestaña en espera de tu código
-      case 'marketing': return (
-        <div className="min-h-[70vh] flex flex-col items-center justify-center bg-white rounded-[3rem] border border-slate-200 shadow-sm p-8 text-center">
-          <div className="w-24 h-24 bg-indigo-50 rounded-full flex items-center justify-center mb-6">
-            <Megaphone className="w-12 h-12 text-indigo-400" />
-          </div>
-          <h2 className="text-2xl font-black text-slate-800 tracking-tight">Centro de Marketing</h2>
-          <p className="text-sm font-bold text-slate-500 mt-2 max-w-md">
-            Espacio reservado. Esperando que introduzcas el código del nuevo módulo para darle vida a las campañas y redes de Arume. 🚀
-          </p>
-        </div>
-      );
+      // 💡 CONEXIÓN REAL DEL MÓDULO DE MARKETING
+      case 'marketing': return <MarketingView data={db} />;
       
       default:          return <DashboardView data={db} />;
     }
-  }, [activeTab, db, handleSave]);
+  }, [activeTab, db, handleSave, handleTabChange]);
 
   if (loading) return (
     <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center">
@@ -506,18 +511,10 @@ export default function App() {
     <AuthScreen>
       <div id="app-root-container" className="min-h-[100dvh] bg-slate-50 flex flex-col font-sans text-xs text-slate-800 relative overflow-x-hidden pt-safe">
         
-        {/* 📸 INPUT INVISIBLE PARA CÁMARA */}
-        <input 
-          type="file" 
-          accept="image/*" 
-          capture="environment" 
-          ref={fileInputRef} 
-          onChange={handlePhotoCapture} 
-          className="hidden" 
-        />
+        <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={handlePhotoCapture} className="hidden" />
 
-        {/* HEADER CONTABLE */}
-        <header className="sticky top-0 z-[110] bg-white/90 backdrop-blur-md border-b border-slate-200 px-4 py-2 flex justify-between items-center shadow-sm">
+        {/* HEADER CONTABLE REACTIVO */}
+        <header className="sticky top-0 z-[110] bg-white/80 backdrop-blur-xl border-b border-slate-200 px-4 py-2 flex justify-between items-center shadow-sm">
           <div className="flex items-center gap-3">
             <h1 className="text-sm font-black text-slate-900 tracking-tight flex items-center gap-1.5">
               ARUME <span className="bg-indigo-600 text-white px-1.5 py-0.5 rounded text-[8px] uppercase tracking-widest">PRO</span>
@@ -528,7 +525,7 @@ export default function App() {
           
           <div className="flex items-center gap-2">
             <button onClick={() => setIsCmdOpen(true)} className="hidden sm:flex items-center gap-1.5 px-2 py-1.5 bg-slate-50 text-slate-500 rounded border border-slate-200 hover:bg-slate-100 hover:text-slate-800 transition text-[10px] font-bold">
-              <Search className="w-3 h-3" /> Buscar (⌘K)
+              <Search className="w-3 h-3" /> Acciones (⌘K)
             </button>
 
             {isOffline && (
@@ -559,18 +556,21 @@ export default function App() {
           </AnimatePresence>
         </main>
 
-        {/* 📸 BOTÓN FLOTANTE CÁMARA (FAB) */}
-        <button 
-          onClick={() => fileInputRef.current?.click()}
-          disabled={isProcessingPhoto}
-          className={cn(
-            "fixed bottom-24 right-4 z-[90] w-14 h-14 rounded-full flex items-center justify-center text-white shadow-xl transition-all duration-300 md:hidden",
-            isProcessingPhoto ? "bg-indigo-400 cursor-not-allowed scale-95" : "bg-indigo-600 hover:bg-indigo-700 hover:scale-105 active:scale-95"
-          )}
-          aria-label="Escanear ticket con cámara"
-        >
-          {isProcessingPhoto ? <Loader2 className="w-6 h-6 animate-spin" /> : <Camera className="w-6 h-6" />}
-        </button>
+        {/* BOTÓN FLOTANTE DINÁMICO */}
+        {activeTab !== 'marketing' && (
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isProcessingPhoto}
+            className={cn(
+              "fixed bottom-24 right-4 z-[90] w-14 h-14 rounded-full flex items-center justify-center text-white shadow-xl transition-all duration-300 md:hidden",
+              isProcessingPhoto ? "bg-indigo-400 cursor-not-allowed scale-95" : "bg-indigo-600 hover:bg-indigo-700 hover:scale-105 active:scale-95",
+              activeTab === 'compras' && "animate-bounce shadow-indigo-500/50"
+            )}
+            aria-label="Escanear ticket con cámara"
+          >
+            {isProcessingPhoto ? <Loader2 className="w-6 h-6 animate-spin" /> : <Camera className="w-6 h-6" />}
+          </button>
+        )}
 
         {/* Overlay procesando */}
         <AnimatePresence>
@@ -590,8 +590,15 @@ export default function App() {
 
         <TelegramWidget currentModule={TAB_LABELS[activeTab]} telegramToken={db?.config?.telegramToken} chatId={db?.config?.telegramChatId} />
         
-        <AutoHideDock items={navItems} activeKey={activeTab} onChange={(k) => setActiveTab(k)} />
-        <CommandPalette open={isCmdOpen} onClose={() => setIsCmdOpen(false)} items={navItems.map(n => ({ key: n.key, label: TAB_LABELS[n.key], group: n.group, icon: n.icon, shortcut: n.shortcut }))} onSelect={(key) => { setActiveTab(key); setIsCmdOpen(false); }} />
+        <AutoHideDock items={navItems} activeKey={activeTab} onChange={(k) => handleTabChange(k)} />
+        
+        <CommandPalette 
+          open={isCmdOpen} onClose={() => setIsCmdOpen(false)} 
+          items={cmdItems} 
+          onSelect={(key) => handleTabChange(key as TabKey)} 
+          onAction={(key) => { if (key === 'action_scan') { fileInputRef.current?.click(); setIsCmdOpen(false); } }} 
+        />
+        
         <SettingsModal isOpen={isConfigOpen} onClose={() => setIsConfigOpen(false)} db={db} setDb={setData} onSave={handleSave} />
       </div>
     </AuthScreen>
