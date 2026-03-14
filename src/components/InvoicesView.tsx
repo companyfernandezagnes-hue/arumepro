@@ -78,6 +78,7 @@ const ConnectionLine = ({ sourceId, targetId, status = 'default' }: { sourceId: 
   const theme = colors[status as keyof typeof colors];
 
   useEffect(() => {
+    let frameId: number;
     const updateCoords = () => {
       const sourceEl = document.getElementById(sourceId);
       const targetEl = document.getElementById(targetId);
@@ -103,6 +104,7 @@ const ConnectionLine = ({ sourceId, targetId, status = 'default' }: { sourceId: 
       clearTimeout(timer);
       window.removeEventListener('resize', updateCoords);
       window.removeEventListener('scroll', updateCoords, true);
+      if (frameId) cancelAnimationFrame(frameId);
     };
   }, [sourceId, targetId]);
 
@@ -132,7 +134,7 @@ const ConnectionLine = ({ sourceId, targetId, status = 'default' }: { sourceId: 
 };
 
 /* =======================================================
- * 🏦 COMPONENTE PRINCIPAL (Orquestador Intacto)
+ * 🏦 COMPONENTE PRINCIPAL (Orquestador Blindado al 100%)
  * ======================================================= */
 export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const safeData = data || {};
@@ -141,8 +143,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const sociosSeguros = Array.isArray(safeData.socios) ? safeData.socios : [];
 
   const fallbackSocios = [{ id: "s1", n: "ARUME" }, { id: "s2", n: "PAU" }];
-  const sociosRealesObj = sociosSeguros.length > 0 ? sociosSeguros.filter(s => s?.active) : fallbackSocios;
-  const SOCIOS_REALES_NAMES = sociosRealesObj.map(s => s.n);
+  const sociosRealesObj = sociosSeguros.length > 0 ? sociosSeguros.filter(s => s && s.active) : fallbackSocios;
+  
+  // 🛡️ BLINDAJE 3: Evitar crash si 'n' es undefined
+  const SOCIOS_REALES_NAMES = sociosRealesObj.map(s => String(s?.n || 'Desconocido'));
 
   const [activeTab, setActiveTab] = useState<'pend' | 'hist'>('pend');
   const [mode, setMode] = useState<'proveedor' | 'socio'>('proveedor');
@@ -196,13 +200,17 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // 🛡️ BLINDAJE 5: DRAFTS IA SEGUROS
   const draftsIA = useMemo(() => {
     try {
-      return facturasSeguras.filter(f => f?.status === 'draft').map(draft => {
-        const oficialName = getOfficialProvName(draft.prov);
-        const matchResult = matchAlbaranesToFactura(draft, albaranesSeguros, basicNorm(oficialName));
-        return { ...draft, ...matchResult, prov: oficialName }; 
-      });
+      return facturasSeguras
+        .filter(f => f && typeof f === 'object' && f.status === 'draft')
+        .map(draft => {
+          const provStr = String(draft.prov || '');
+          const oficialName = String(getOfficialProvName(provStr));
+          const matchResult = matchAlbaranesToFactura(draft, albaranesSeguros, basicNorm(oficialName));
+          return { ...draft, ...matchResult, prov: oficialName }; 
+        });
     } catch (error) {
       console.error("Error en draftsIA:", error); return [];
     }
@@ -213,7 +221,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     setIsSyncing(true); 
     try {
       const sha = await sha256File(file);
-      const isDuplicate = facturasSeguras.some(f => f.attachmentSha === sha);
+      const isDuplicate = facturasSeguras.some(f => f && f.attachmentSha === sha);
       if (isDuplicate) { setIsSyncing(false); return alert("⚠️ Este documento ya ha sido subido anteriormente."); }
 
       const apiKey = localStorage.getItem('gemini_api_key');
@@ -257,8 +265,9 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       await onSave({ ...safeData, facturas: [nuevaFacturaIA, ...facturasSeguras] });
       alert("✅ Factura extraída correctamente. Revisa la bandeja superior.");
 
-    } catch (e) {
-      alert("⚠️ Error en IA. Quizás la clave API es incorrecta o la imagen no es legible.");
+    } catch (e: any) {
+      if (e.message === "NO_API_KEY") alert("⚠️ Falta API KEY Gemini en Ajustes");
+      else alert("⚠️ Error en IA. Quizás la clave API es incorrecta o la imagen no es legible.");
     } finally { setIsSyncing(false); }
   };
 
@@ -324,7 +333,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     setIsProcessing(true);
     try {
       const newData = JSON.parse(JSON.stringify(safeData)); 
-      const draftIdx = newData.facturas.findIndex((f: any) => f.id === draftId);
+      const draftIdx = newData.facturas.findIndex((f: any) => f && f.id === draftId);
       const audit = draftsIA.find(d => d.id === draftId);
       if (draftIdx === -1 || !audit) return;
 
@@ -354,26 +363,35 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
   const handleDiscardDraftIA = async (id: string) => {
     if (!window.confirm("¿Estás seguro de eliminar este borrador permanentemente?")) return;
-    await onSave({ ...safeData, facturas: facturasSeguras.filter(f => f.id !== id) });
+    await onSave({ ...safeData, facturas: facturasSeguras.filter(f => f && f.id !== id) });
   };
 
+  // 🛡️ BLINDAJE 1: SANEAMIENTO DE FECHAS EN AGRUPACIÓN
   const pendingGroups = useMemo(() => {
     try {
       const byMonth: Record<string, { name: string; groups: Record<string, any> }> = {};
       const q = deferredSearch ? basicNorm(deferredSearch) : ''; 
 
       albaranesSeguros.forEach(a => {
-        const aDate = a?.date || '';
-        if (a?.invoiced || typeof aDate !== 'string' || !aDate.startsWith(year.toString())) return;
+        if (!a || typeof a !== 'object' || a.invoiced) return;
+        
+        // Limpiador agresivo de fechas
+        let aDate = String(a.date || '');
+        if (aDate.includes('/')) {
+            const parts = aDate.split('/');
+            if (parts.length === 3) aDate = `${parts[2].length === 2 ? '20'+parts[2] : parts[2]}-${parts[1]}-${parts[0]}`;
+        }
+        
+        if (!aDate.startsWith(year.toString())) return;
         
         const itemUnit = (a as any).unitId || 'REST';
         if (selectedUnit !== 'ALL' && itemUnit !== selectedUnit) return;
         
-        const owner = (mode === 'proveedor' ? a?.prov : a?.socio) || 'Arume';
+        const owner = String((mode === 'proveedor' ? a.prov : a.socio) || 'Arume');
         
         if (q) {
             const matchOwner = basicNorm(owner).includes(q); 
-            const matchNum = basicNorm(a?.num || '').includes(q); 
+            const matchNum = basicNorm(String(a.num || '')).includes(q); 
             if (!matchOwner && !matchNum) return;
         }
 
@@ -383,9 +401,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         if (!byMonth[mk]) {
           const parts = mk.split('-'); 
           const y = parts[0] || '0000';
-          const m = parts[1] ? parseInt(parts[1]) : 1;
+          const m = parseInt(parts[1] || '1', 10);
+          const finalM = isNaN(m) ? 1 : m;
           const names = ["","Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
-          byMonth[mk] = { name: `${names[m] || 'Mes'} ${y}`, groups: {} };
+          byMonth[mk] = { name: `${names[finalM] || 'Mes'} ${y}`, groups: {} };
         }
 
         const groupKey = `${basicNorm(owner)}_${itemUnit}`; 
@@ -393,13 +412,17 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
             byMonth[mk].groups[groupKey] = { label: owner, unitId: itemUnit, t: 0, ids: [], count: 0 };
         }
         
-        byMonth[mk].groups[groupKey].t += (Num.parse(a?.total) || 0); 
+        // Matemáticas seguras
+        byMonth[mk].groups[groupKey].t += Math.abs(Num.parse(a.total) || 0); 
         byMonth[mk].groups[groupKey].count += 1; 
-        byMonth[mk].groups[groupKey].ids.push(a?.id);
+        byMonth[mk].groups[groupKey].ids.push(a.id);
       });
 
       return Object.entries(byMonth).sort((a, b) => b[0].localeCompare(a[0]));
-    } catch (error) { return []; }
+    } catch (error) { 
+      console.error("Error agrupando albaranes:", error);
+      return []; 
+    }
   }, [albaranesSeguros, year, mode, deferredSearch, selectedUnit]);
 
   const handleConfirmManualInvoice = async () => {
@@ -425,6 +448,8 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       linkAlbaranesToFactura(newData, newFacId, modalForm.selectedAlbs);
       await onSave(newData); 
       setSelectedGroup(null);
+    } catch (e) {
+      alert("Error guardando la factura.");
     } finally {
       setIsProcessing(false);
     }
@@ -432,7 +457,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
   const handleTogglePago = async (id: string) => {
     const newData = { ...safeData, facturas: [...facturasSeguras] };
-    const idx = newData.facturas.findIndex(f => f.id === id);
+    const idx = newData.facturas.findIndex(f => f && f.id === id);
     if (idx !== -1) {
       if (newData.facturas[idx].reconciled) return alert("🔒 Factura conciliada por el banco.");
       newData.facturas[idx].paid = !newData.facturas[idx].paid;
@@ -442,25 +467,28 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   };
 
   const handleDeleteFactura = async (id: string) => {
-    const fac = facturasSeguras.find(f => f.id === id); 
+    const fac = facturasSeguras.find(f => f && f.id === id); 
     if (!fac) return;
     if (fac.reconciled) return alert("⚠️ No puedes borrar una factura validada por el Banco.");
     if (!window.confirm(`🛑 ¿Eliminar DEFINITIVAMENTE la factura ${fac.num || 'sin número'}?`)) return;
     
     const newData = JSON.parse(JSON.stringify(safeData));
     const idsToFree = fac.albaranIdsArr || [];
-    newData.albaranes.forEach((a: any) => { if (idsToFree.includes(a.id)) a.invoiced = false; });
-    newData.facturas = newData.facturas.filter((f: any) => f.id !== id);
+    if (Array.isArray(newData.albaranes)) {
+       newData.albaranes.forEach((a: any) => { if (a && idsToFree.includes(a.id)) a.invoiced = false; });
+    }
+    newData.facturas = newData.facturas.filter((f: any) => f && f.id !== id);
     await onSave(newData);
   };
 
   const handleExportGestoria = () => {
     const q = exportQuarter; const y = year; const startMonth = (q - 1) * 3 + 1; const endMonth = q * 3;
     const filtered = facturasSeguras.filter(f => {
-      const fDate = f?.date || '';
+      if (!f || typeof f !== 'object') return false;
+      const fDate = String(f.date || '');
       return f.status !== 'draft' && f.tipo !== 'caja' && (f as any).tipo !== 'banco' && 
              (selectedUnit === 'ALL' || f.unidad_negocio === selectedUnit) && 
-             (typeof fDate === 'string' && fDate.startsWith(y.toString())) && 
+             (fDate.startsWith(y.toString())) && 
              Number(fDate.split('-')[1]) >= startMonth && 
              Number(fDate.split('-')[1]) <= endMonth;
     });
@@ -469,8 +497,8 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
     const rows = filtered.map(f => {
       const total = Math.abs(Num.parse(f.total) || 0); 
-      const base = Num.parse(f.base) || Num.round2(total / 1.10); 
-      const tax = Num.parse(f.tax) || Num.round2(total - base);
+      const base = Math.abs(Num.parse(f.base) || Num.round2(total / 1.10)); 
+      const tax = Math.abs(Num.parse(f.tax) || Num.round2(total - base));
       return { 'FECHA': f.date || '', 'Nº FACTURA': f.num || '', 'PROVEEDOR/CLIENTE': f.prov || f.cliente || '—', 'UNIDAD NEGOCIO': BUSINESS_UNITS.find(u => u.id === f.unidad_negocio)?.name || 'Restaurante', 'BASE IMPONIBLE': Num.fmt(base), 'IVA': Num.fmt(tax), 'TOTAL': Num.fmt(total), 'ESTADO': f.paid ? 'PAGADA' : 'PENDIENTE', 'CONCILIADA': f.reconciled ? 'SÍ' : 'NO' };
     });
     const ws = XLSX.utils.json_to_sheet(rows); 
@@ -490,90 +518,45 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     } catch(e) { alert("Error al descargar el archivo"); }
   };
 
-  const renderPendingGroups = () => {
-    if (!pendingGroups || pendingGroups.length === 0) {
-      return (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="py-20 flex flex-col items-center justify-center bg-white rounded-[2rem] border border-slate-200 shadow-sm text-center">
-          <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4"><Package className="w-8 h-8 text-slate-300" /></div>
-          <p className="text-slate-800 font-black text-sm uppercase tracking-widest">Todo al día</p>
-          <p className="text-xs font-bold text-slate-400 mt-2 max-w-sm">No hay albaranes sueltos pendientes de facturar en este periodo.</p>
-        </motion.div>
-      );
-    }
-    
-    return pendingGroups.map(([mk, dataGroup]) => (
-      <div key={mk} className="mb-6 animate-fade-in bg-white p-5 rounded-[2rem] shadow-sm border border-slate-200">
-        <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2">
-          <Clock className="w-4 h-4 text-indigo-500" /> {dataGroup.name}
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          {Object.values(dataGroup.groups || {}).map((g: any) => {
-            const unitConfig = BUSINESS_UNITS.find(u => u.id === g.unitId);
-            const groupId = `source-group-${basicNorm(g.label)}-${g.unitId}`; 
-            
-            return (
-              <div 
-                key={g.label + g.unitId} 
-                id={groupId} 
-                onClick={() => { setSelectedGroup({ label: g.label, ids: g.ids, unitId: g.unitId }); setModalForm({ num: '', date: DateUtil.today(), selectedAlbs: [...g.ids], unitId: g.unitId }); }} 
-                className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-200 hover:border-indigo-400 hover:bg-white hover:shadow-md transition-all cursor-pointer group relative z-10"
-              >
-                <div className="min-w-0 pr-3">
-                  <p className="font-black text-slate-800 text-sm group-hover:text-indigo-600 transition truncate">{g.label}</p>
-                  <div className="flex items-center gap-2 mt-1.5">
-                    {unitConfig && <span className={cn("text-[9px] px-2 py-0.5 rounded font-black uppercase tracking-wider", unitConfig.bg, unitConfig.color)}>{unitConfig.name.split(' ')[0]}</span>}
-                    <span className="text-[10px] font-bold text-slate-400">{g.count} albaranes</span>
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="font-black text-slate-900 text-base">{Num.fmt(g.t)}</p>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    ));
-  };
-
   return (
     <div className="animate-fade-in space-y-4 pb-24 relative max-w-[1600px] mx-auto text-xs">
       
       {/* OVERLAY DRAG & DROP */}
       <AnimatePresence>
         {isDragging && (
-          <motion.div data-test-id="drop-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[999] pointer-events-none flex items-center justify-center bg-slate-900/60 backdrop-blur-sm">
-            <div className="relative z-10 w-full max-w-sm mx-4 border-2 border-dashed border-white/50 rounded-3xl flex flex-col items-center justify-center bg-indigo-600 p-10 shadow-2xl">
-              <FileDown className="w-16 h-16 text-white mb-4 animate-bounce" />
+          <motion.div data-test-id="drop-overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[999] pointer-events-none flex items-center justify-center bg-slate-900/60 backdrop-blur-md">
+            <div className="relative z-10 w-full max-w-sm mx-4 border-2 border-dashed border-white/50 rounded-[2rem] flex flex-col items-center justify-center bg-indigo-600/90 backdrop-blur-sm p-10 shadow-2xl">
+              <UploadCloud className="w-16 h-16 text-white mb-4 animate-bounce" />
               <h2 className="text-2xl font-black text-white tracking-tight uppercase">Suelta la Factura</h2>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
       
-      {/* 💡 INNOVACIÓN: Píldoras de Resumen Financiero */}
-      {activeTab === 'hist' && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center">
-             <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Facturado</p>
-             <p className="text-xl font-black text-slate-800">{Num.fmt(facturasSeguras.filter(f => f.status !== 'draft' && f.tipo === 'compra').reduce((acc, f) => acc + (Num.parse(f.total)||0), 0))}</p>
-           </div>
-           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center">
-             <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest mb-1">Pendiente Pago</p>
-             <p className="text-xl font-black text-rose-600">{Num.fmt(facturasSeguras.filter(f => f.status !== 'draft' && f.tipo === 'compra' && !f.paid).reduce((acc, f) => acc + (Num.parse(f.total)||0), 0))}</p>
-           </div>
-           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center">
-             <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mb-1">Total Pagado</p>
-             <p className="text-xl font-black text-emerald-600">{Num.fmt(facturasSeguras.filter(f => f.status !== 'draft' && f.tipo === 'compra' && f.paid).reduce((acc, f) => acc + (Num.parse(f.total)||0), 0))}</p>
-           </div>
-           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center bg-gradient-to-br from-indigo-50 to-white">
-             <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">Docs. en IA</p>
-             <p className="text-xl font-black text-indigo-700">{draftsIA.length} Borradores</p>
-           </div>
-        </div>
-      )}
+      {/* 🛡️ BLINDAJE 1: Píldoras de Resumen Financiero Seguras */}
+      <AnimatePresence mode="popLayout">
+        {activeTab === 'hist' && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.1 }} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center">
+               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Facturado</p>
+               <p className="text-xl font-black text-slate-800">{Num.fmt(facturasSeguras.filter(f => f && typeof f === 'object' && f.status !== 'draft' && f.tipo === 'compra').reduce((acc, f) => acc + Math.abs(Num.parse(f.total)||0), 0))}</p>
+             </motion.div>
+             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.2 }} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center">
+               <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest mb-1">Pendiente Pago</p>
+               <p className="text-xl font-black text-rose-600">{Num.fmt(facturasSeguras.filter(f => f && typeof f === 'object' && f.status !== 'draft' && f.tipo === 'compra' && !f.paid).reduce((acc, f) => acc + Math.abs(Num.parse(f.total)||0), 0))}</p>
+             </motion.div>
+             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.3 }} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center">
+               <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mb-1">Total Pagado</p>
+               <p className="text-xl font-black text-emerald-600">{Num.fmt(facturasSeguras.filter(f => f && typeof f === 'object' && f.status !== 'draft' && f.tipo === 'compra' && f.paid).reduce((acc, f) => acc + Math.abs(Num.parse(f.total)||0), 0))}</p>
+             </motion.div>
+             <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.4 }} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center bg-gradient-to-br from-indigo-50 to-white">
+               <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">Docs. en IA</p>
+               <p className="text-xl font-black text-indigo-700">{draftsIA.length} Borradores</p>
+             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* CABECERA COMPACTA Y BOTONES RÁPIDOS */}
       <header className="bg-white/90 backdrop-blur-md rounded-[2rem] border border-slate-200 shadow-sm p-4 md:p-5 flex flex-col xl:flex-row justify-between gap-4 relative z-40 items-center sticky top-4">
         <div className="flex items-center gap-4 w-full xl:w-auto justify-between">
           <div className="flex items-center gap-3">
@@ -588,7 +571,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
-          {/* BOTONES DE NAVEGACIÓN PRINCIPAL */}
           <div className="flex items-center bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-full md:w-auto">
             <button onClick={() => setActiveTab('pend')} className={cn("flex-1 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all", activeTab === 'pend' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50")}>📦 Albaranes Sueltos</button>
             <button onClick={() => setActiveTab('hist')} className={cn("flex-1 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all", activeTab === 'hist' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50")}>💰 Bóveda Facturas</button>
@@ -596,23 +578,21 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
           <div className="w-px h-8 bg-slate-200 hidden md:block mx-1"></div>
 
-          {/* BOTONES DE ACCIÓN RÁPIDA */}
           <button onClick={handleFetchEmails} disabled={isSyncing} className={cn("px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 border shadow-sm", draftsIA.length === 0 ? "bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50")}>
             {isSyncing ? <Loader2 className="w-4 h-4 animate-spin"/> : <Inbox className="w-4 h-4" />} IMAP
           </button>
           
           <input type="file" ref={fileInputRef} className="hidden" accept="application/pdf, image/*" onChange={(e) => { if (e.target.files && e.target.files[0]) { processLocalFile(e.target.files[0]); e.target.value = ''; } }} />
-          <button onClick={() => fileInputRef.current?.click()} disabled={isSyncing} className="px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-slate-900 text-white hover:bg-slate-800 transition-all flex items-center gap-2 shadow-md">
+          <button onClick={() => fileInputRef.current?.click()} disabled={isSyncing} className="px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-slate-900 text-white hover:bg-slate-800 transition-all flex items-center gap-2 shadow-md active:scale-95">
             {isSyncing ? <Loader2 className="w-4 h-4 animate-spin"/> : <UploadCloud className="w-4 h-4" />} PDF
           </button>
           
-          <button onClick={() => setIsExportModalOpen(true)} className="px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-all flex items-center gap-2 shadow-sm">
+          <button onClick={() => setIsExportModalOpen(true)} className="px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-all flex items-center gap-2 shadow-sm active:scale-95">
             <Download className="w-4 h-4" /> Gestoría
           </button>
         </div>
       </header>
 
-      {/* FILTROS SECUNDARIOS (Aparecen bajo el header) */}
       <div className="bg-white px-5 py-3 rounded-2xl shadow-sm border border-slate-200 flex flex-col lg:flex-row items-center justify-between gap-3 relative z-30">
           <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
             <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200">
@@ -644,64 +624,75 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       {/* CUERPO PRINCIPAL */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 relative z-10">
         
-        {/* COLUMNA IZQUIERDA: LISTADOS */}
         <section className="xl:col-span-8 space-y-4">
           <AnimatePresence mode="wait">
             {activeTab === 'pend' ? (
-              <motion.div key="pend" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}>
-                {renderPendingGroups()}
+              <motion.div key="pend" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{type: 'spring', damping: 25}}>
+                {pendingGroups.length > 0 ? pendingGroups.map(([mk, dataGroup]) => (
+                  <div key={mk} className="mb-6 animate-fade-in bg-white p-5 rounded-[2rem] shadow-sm border border-slate-200">
+                    <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2">
+                       <Clock className="w-4 h-4 text-indigo-500" /> {dataGroup.name}
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                      {Object.values(dataGroup.groups || {}).map((g: any) => {
+                         const unitConfig = BUSINESS_UNITS.find(u => u.id === g.unitId);
+                         return (
+                            <div key={g.label + g.unitId} onClick={() => { setSelectedGroup({ label: String(g.label), ids: g.ids, unitId: g.unitId }); setModalForm({ num: '', date: DateUtil.today(), selectedAlbs: [...g.ids], unitId: g.unitId }); }} className="flex justify-between items-center p-4 bg-slate-50 rounded-2xl border border-slate-200 hover:border-indigo-400 hover:bg-white hover:shadow-md transition-all cursor-pointer">
+                              <div className="min-w-0 pr-3">
+                                <p className="font-black text-slate-800 text-sm truncate">{String(g.label)}</p>
+                                <div className="flex items-center gap-2 mt-1.5">
+                                   {unitConfig && <span className={cn("text-[8px] px-1.5 py-0.5 rounded font-black uppercase tracking-wider", unitConfig.bg, unitConfig.color)}>{unitConfig.name.split(' ')[0]}</span>}
+                                   <span className="text-[10px] font-bold text-slate-400">{g.count} albaranes</span>
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0"><p className="font-black text-slate-900 text-base">{Num.fmt(g.t)}</p></div>
+                            </div>
+                         );
+                      })}
+                    </div>
+                  </div>
+                )) : (
+                  <div className="py-24 text-center bg-white rounded-[2rem] border border-slate-200 flex flex-col items-center">
+                      <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4"><Package className="w-8 h-8 text-slate-300" /></div>
+                      <p className="text-slate-800 font-black text-sm uppercase tracking-widest">Todo al día</p>
+                      <p className="text-xs font-bold text-slate-400 mt-2">No hay albaranes sueltos pendientes de facturar.</p>
+                  </div>
+                )}
               </motion.div>
             ) : (
-              <motion.div key="hist" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-                {/* 🧩 AQUI LLAMAMOS A TU TABLA DE FACTURAS (InvoicesList) */}
+              <motion.div key="hist" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{type: 'spring', damping: 25}}>
                 <InvoicesList 
-                  facturas={facturasSeguras} 
-                  searchQ={deferredSearch} 
-                  selectedUnit={selectedUnit} 
-                  mode={mode} 
-                  filterStatus={filterStatus} 
-                  year={year} 
-                  businessUnits={BUSINESS_UNITS} 
-                  sociosReales={SOCIOS_REALES_NAMES} 
-                  superNorm={basicNorm} 
-                  onOpenDetail={setSelectedInvoice as any} 
-                  onTogglePago={handleTogglePago} 
-                  onDelete={handleDeleteFactura} 
-                  albaranesSeguros={albaranesSeguros} 
+                  facturas={facturasSeguras} searchQ={deferredSearch} selectedUnit={selectedUnit} mode={mode} filterStatus={filterStatus} year={year} businessUnits={BUSINESS_UNITS} sociosReales={SOCIOS_REALES_NAMES} superNorm={basicNorm} onOpenDetail={setSelectedInvoice as any} onTogglePago={handleTogglePago} onDelete={handleDeleteFactura} albaranesSeguros={albaranesSeguros} 
                 />
               </motion.div>
             )}
           </AnimatePresence>
         </section>
 
-        {/* COLUMNA DERECHA: BANDEJAS (IMAP E IA) */}
         <aside className="xl:col-span-4">
           <div className="sticky top-28 space-y-6">
             
-            {/* IMAP */}
-            <AnimatePresence>
-              {emailInbox.length > 0 && (
-                <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="bg-white p-5 rounded-[2rem] border border-slate-200 shadow-sm">
-                  <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2"><Inbox className="w-5 h-5 text-blue-500"/> Correos ({emailInbox.length})</h4>
-                  <div className="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
-                    {emailInbox.map(mail => (
-                      <div key={mail.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl hover:border-blue-300 hover:shadow-md transition-all group">
-                        <div className="flex justify-between items-start mb-2">
-                          <p className="text-xs font-black text-slate-800 truncate pr-2 group-hover:text-blue-600 transition-colors">{mail.from}</p>
-                          <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded-lg border border-blue-100">{mail.date}</span>
-                        </div>
-                        <p className="text-[10px] font-bold text-slate-500 truncate mb-3">{mail.subject}</p>
-                        <button onClick={() => handleParseEmail(mail.id)} disabled={isSyncing} className="w-full bg-white border-2 border-dashed border-blue-200 text-blue-600 font-black text-[10px] uppercase py-2.5 rounded-xl hover:bg-blue-50 hover:border-blue-400 transition-all flex justify-center items-center gap-1.5">
-                          {isSyncing ? <Loader2 className="w-4 h-4 animate-spin"/> : <Sparkles className="w-4 h-4"/>} Extraer PDF con IA
-                        </button>
+            {emailInbox.length > 0 && (
+              <div className="bg-white p-5 rounded-[2rem] border border-slate-200 shadow-sm">
+                <h4 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2"><Inbox className="w-5 h-5 text-blue-500"/> Correos ({emailInbox.length})</h4>
+                <div className="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+                  {emailInbox.map(mail => (
+                    <div key={mail.id} className="p-4 bg-slate-50 border border-slate-100 rounded-2xl hover:border-blue-300 hover:shadow-md transition-all group">
+                      <div className="flex justify-between items-start mb-2">
+                        <p className="text-xs font-black text-slate-800 truncate pr-2 group-hover:text-blue-600 transition-colors">{mail.from}</p>
+                        <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded-lg border border-blue-100">{mail.date}</span>
                       </div>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+                      <p className="text-[10px] font-bold text-slate-500 truncate mb-3">{mail.subject}</p>
+                      <button onClick={() => handleParseEmail(mail.id)} disabled={isSyncing} className="w-full bg-white border-2 border-dashed border-blue-200 text-blue-600 font-black text-[10px] uppercase py-2.5 rounded-xl hover:bg-blue-50 hover:border-blue-400 transition-all flex justify-center items-center gap-1.5">
+                        {isSyncing ? <Loader2 className="w-4 h-4 animate-spin"/> : <Sparkles className="w-4 h-4"/>} Extraer PDF con IA
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
-            {/* IA DRAFTS */}
+            {/* BANDEJA IA */}
             <div className={cn("p-5 md:p-6 rounded-[2rem] border shadow-xl transition-all duration-500", draftsIA.length > 0 ? "bg-slate-900 border-slate-800" : "bg-white border-slate-200")}>
               <div className="flex justify-between items-center mb-5">
                 <h4 className={cn("text-xs font-black uppercase tracking-widest flex items-center gap-2", draftsIA.length > 0 ? "text-white" : "text-slate-600")}>
@@ -709,34 +700,22 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                 </h4>
                 {draftsIA.length > 0 && <span className="bg-purple-500 text-white px-2.5 py-1 rounded-lg text-[10px] font-black">{draftsIA.length} Pendientes</span>}
               </div>
-
+              
               {draftsIA.length > 0 ? (
                 <div className="space-y-3 max-h-[60vh] overflow-y-auto custom-scrollbar pr-2">
                   {draftsIA.map(d => {
                     const destId = `dest-draft-${d.id}`; 
-                    
-                    const activeConnections = d.candidatos && d.candidatos.length > 0 
-                      ? Array.from(new Set(d.candidatos.map((c: any) => `source-group-${basicNorm(d.prov)}-${c.unitId || 'REST'}`))) 
-                      : [];
-
-                    const connectionStatus = d.cuadraPerfecto ? 'perfect' : 'warning';
+                    const activeConnections = d.candidatos && d.candidatos.length > 0 ? Array.from(new Set(d.candidatos.map((c: any) => `source-group-${basicNorm(d.prov)}-${c.unitId || 'REST'}`))) : [];
+                    const isPerfect = d.cuadraPerfecto;
 
                     return (
-                      <div key={d.id} id={destId} className={cn("bg-slate-800 p-4 rounded-2xl border transition-all duration-300 relative z-10 cursor-default", d.cuadraPerfecto ? "border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.15)]" : "border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.15)]")}>
+                      <div key={d.id} id={destId} className={cn("bg-slate-800 p-4 rounded-2xl border transition-all duration-300 relative z-10 cursor-default", isPerfect ? "border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.15)]" : "border-amber-500/50 shadow-[0_0_15px_rgba(245,158,11,0.15)]")}>
+                        {activeConnections.map(sourceId => <ConnectionLine key={`${sourceId}-${destId}`} sourceId={sourceId as string} targetId={destId} status={isPerfect ? 'perfect' : 'warning'} />)}
                         
-                        {activeConnections.map(sourceId => (
-                          <ConnectionLine 
-                            key={`${sourceId}-${destId}`} 
-                            sourceId={sourceId as string} 
-                            targetId={destId} 
-                            status={connectionStatus}
-                          />
-                        ))}
-
                         <div className="flex justify-between items-start mb-3">
                           <div className="min-w-0 pr-2">
-                            <span className="font-black text-white text-sm truncate block">{d.prov || 'Desconocido'}</span>
-                            <span className="text-[10px] font-bold text-slate-400 mt-1 block flex items-center gap-1.5"><Calendar className="w-3 h-3"/> {d.date} <span className="text-slate-600">|</span> {d.num}</span>
+                            <span className="font-black text-white text-sm truncate block">{String(d.prov || 'Desconocido')}</span>
+                            <span className="text-[10px] font-bold text-slate-400 mt-1 block flex items-center gap-1.5"><Calendar className="w-3 h-3"/> {String(d.date || '')} <span className="text-slate-600">|</span> {String(d.num || '')}</span>
                           </div>
                           <button onClick={() => handleDiscardDraftIA(d.id)} className="p-1.5 bg-slate-700/50 rounded-lg text-slate-400 hover:bg-rose-500/20 hover:text-rose-400 transition-colors"><Trash2 className="w-4 h-4"/></button>
                         </div>
@@ -746,15 +725,15 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                             <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Total Fra.</p>
                             <span className="text-xl font-black text-white leading-none">{Num.fmt(d.total)}</span>
                           </div>
-                          {d.cuadraPerfecto ? (
+                          {isPerfect ? (
                              <span className="text-[10px] font-black uppercase text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded-lg flex items-center gap-1"><ShieldCheck className="w-3.5 h-3.5"/> Cuadra</span>
                           ) : (
                              <span className="text-[10px] font-black uppercase text-amber-400 bg-amber-400/10 px-2 py-1 rounded-lg flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5"/> Diff: {Num.fmt(d.diferencia)}</span>
                           )}
                         </div>
                         
-                        <button onClick={() => handleConfirmAuditoriaIA(d.id)} disabled={isProcessing} className={cn("w-full mt-3 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex justify-center items-center gap-2", d.cuadraPerfecto ? "bg-emerald-600 hover:bg-emerald-500 text-white" : "bg-indigo-600 hover:bg-indigo-500 text-white")}>
-                          {isProcessing ? <Loader2 className="w-4 h-4 animate-spin"/> : <CheckCircle2 className="w-4 h-4"/>} Confirmar y Guardar
+                        <button onClick={() => handleConfirmAuditoriaIA(d.id)} disabled={isProcessing} className={cn("w-full mt-3 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex justify-center items-center gap-2", isPerfect ? "bg-emerald-600 hover:bg-emerald-500 text-white" : "bg-indigo-600 hover:bg-indigo-500 text-white")}>
+                          {isProcessing ? <Loader2 className="w-4 h-4 animate-spin"/> : <CheckCircle2 className="w-4 h-4"/>} Confirmar Guardado
                         </button>
                       </div>
                     );
@@ -763,7 +742,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
               ) : (
                 <div className="text-center opacity-40 py-10">
                   <Bot className="w-12 h-12 mx-auto text-slate-400 mb-3" />
-                  <p className="text-xs font-black uppercase tracking-widest text-slate-300">Sin Tareas</p>
+                  <p className="text-xs font-black uppercase tracking-widest text-slate-300">Sin Tareas IA</p>
                 </div>
               )}
             </div>
@@ -771,7 +750,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         </aside>
       </div>
 
-      {/* MODALES FLOTANTES */}
       <AnimatePresence>
         {isExportModalOpen && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[500] flex justify-center items-center p-4 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsExportModalOpen(false)}>
@@ -802,6 +780,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         )}
       </AnimatePresence>
 
+      {/* 🛡️ BLINDAJE 3: MODAL DE AGRUPACIÓN MANUAL */}
       <AnimatePresence>
         {selectedGroup && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[500] flex justify-center items-center p-4 bg-slate-900/60 backdrop-blur-sm" onClick={() => setSelectedGroup(null)}>
@@ -821,18 +800,18 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
               </div>
 
               <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-50 rounded-2xl p-3 border border-slate-200 space-y-2">
-                {(albaranesSeguros).filter(a => selectedGroup.ids.includes(a.id)).map(a => (
+                {(albaranesSeguros).filter(a => a && selectedGroup.ids.includes(a.id)).map(a => (
                   <label key={a.id} className={cn("flex justify-between items-center p-3 rounded-xl cursor-pointer border transition-all", modalForm.selectedAlbs.includes(a.id) ? "bg-white border-indigo-400 shadow-sm" : "border-transparent hover:bg-white hover:border-slate-300")}>
                     <div className="flex items-center gap-3">
                       <div className={cn("w-5 h-5 rounded flex items-center justify-center border", modalForm.selectedAlbs.includes(a.id) ? "bg-indigo-600 border-indigo-600 text-white" : "bg-white border-slate-300")}>
                         {modalForm.selectedAlbs.includes(a.id) && <Check className="w-3.5 h-3.5"/>}
                       </div>
                       <div>
-                        <p className="font-black text-slate-800 text-xs">{a.date}</p>
-                        <p className="text-[10px] text-slate-500 font-mono mt-0.5">Ref: {a.num || 'S/N'}</p>
+                        <p className="font-black text-slate-800 text-xs">{String(a.date || 'S/F')}</p>
+                        <p className="text-[10px] text-slate-500 font-mono mt-0.5">Ref: {String(a.num || 'S/N')}</p>
                       </div>
                     </div>
-                    <p className="font-black text-slate-900 text-sm">{Num.fmt(a.total)}</p>
+                    <p className="font-black text-slate-900 text-sm">{Num.fmt(Math.abs(Num.parse(a.total || 0)))}</p>
                   </label>
                 ))}
               </div>
@@ -840,7 +819,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
               <div className="mt-6 space-y-4">
                 <div className="flex items-center justify-between bg-slate-900 p-4 rounded-2xl text-white shadow-inner">
                   <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Factura</span>
-                  <span className="text-2xl font-black text-emerald-400 tracking-tighter">{Num.fmt(modalForm.selectedAlbs.reduce((acc, id) => { const alb = albaranesSeguros.find(a => a.id === id); return acc + (Num.parse(alb?.total) || 0); }, 0))}</span>
+                  <span className="text-2xl font-black text-emerald-400 tracking-tighter">{Num.fmt(modalForm.selectedAlbs.reduce((acc, id) => { const alb = albaranesSeguros.find(a => a && a.id === id); return acc + Math.abs(Num.parse(alb?.total || 0)); }, 0))}</span>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-4">
@@ -861,7 +840,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         )}
       </AnimatePresence>
 
-      {/* 🧩 MODAL DE DETALLE (FACTURA COMPLETA) */}
       {selectedInvoice && typeof selectedInvoice === 'object' && selectedInvoice.id && (
         <InvoiceDetailModal 
           factura={selectedInvoice as any} 
@@ -870,7 +848,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           mode={mode} 
           onClose={() => setSelectedInvoice(null)} 
           onDownloadFile={handleDownloadFile}
-          onTogglePago={handleTogglePago} // 💡 INNOVACIÓN: Le pasamos la función para pagar desde dentro
+          onTogglePago={handleTogglePago} 
         />
       )}
     </div>
