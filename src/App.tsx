@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { 
   LayoutDashboard, Package, Wallet, ChefHat, Users, Settings, Search,
   TrendingUp, X, RefreshCw, FileText, Truck, Scale, Zap, Building2, 
-  PieChart, Lock, Import, Sparkles, WifiOff, AlertTriangle, Camera, Loader2
+  PieChart, Lock, Import, Sparkles, WifiOff, AlertTriangle, Camera, Loader2,
+  Receipt, Megaphone // 💡 NUEVOS ICONOS AÑADIDOS
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -17,8 +18,6 @@ import { DateUtil } from './services/engine';
 // 📄 COMPONENTES (Vistas)
 import { CashView } from './components/CashView';
 import { ImportView } from './components/ImportView';
-import { InvoicesView } from './components/InvoicesView';
-import { AlbaranesView } from './components/AlbaranesView';
 import { TesoreriaView } from './components/TesoreriaView';
 import { LiquidacionesView } from './components/LiquidacionesView';
 import { BancoView } from './components/BancoView';
@@ -31,28 +30,34 @@ import { DashboardView } from './components/DashboardView';
 import { AIConsultant } from './components/AIConsultant'; 
 import { SettingsModal } from './components/SettingsModal';
 import { TelegramWidget } from './components/TelegramWidget';
-import { AuthScreen } from './components/AuthScreen'; // 🔒 ESCUDO IMPORTADO
+import { AuthScreen } from './components/AuthScreen';
 
-// 🛡️ TIPOS Y CONSTANTES
+// 👑 NUEVO MANDO CENTRAL DE COMPRAS
+import { ComprasDashboard } from './components/ComprasDashboard';
+
+// 🛡️ TIPOS Y CONSTANTES ACTUALIZADOS
 type TabKey = 
   | 'dashboard' | 'ia' | 'diario' | 'importador' 
-  | 'facturas' | 'albaranes' | 'tesoreria' | 'liquidez' 
-  | 'banco' | 'fixed' | 'informes' | 'menus' | 'stock' | 'cierre';
+  | 'compras' | 'facturas' | 'albaranes' // Mantenemos las viejas por compatibilidad de atajos
+  | 'tesoreria' | 'liquidez' | 'banco' | 'fixed' 
+  | 'informes' | 'menus' | 'stock' | 'cierre' | 'marketing'; // 💡 MARKETING AÑADIDO
 
 const TAB_LABELS: Record<TabKey, string> = {
   dashboard: 'Dashboard', ia: 'IA', diario: 'Caja Diaria', importador: 'Importador',
-  facturas: 'Facturas', albaranes: 'Albaranes', tesoreria: 'Tesorería', liquidez: 'Liquidez',
-  banco: 'Banco', fixed: 'G. Fijos', informes: 'Informes', menus: 'Menús', stock: 'Stock', cierre: 'Cierre'
+  compras: 'Compras', facturas: 'Compras', albaranes: 'Compras', // Todas apuntan al mismo sitio
+  tesoreria: 'Tesorería', liquidez: 'Liquidez',
+  banco: 'Banco', fixed: 'G. Fijos', informes: 'Informes', menus: 'Menús', stock: 'Stock', cierre: 'Cierre',
+  marketing: 'Marketing' // 💡 ETIQUETA AÑADIDA
 };
 
 const jsonSafeClone = <T,>(obj: T): T => { try { return JSON.parse(JSON.stringify(obj)); } catch { return obj; } };
 
 /* =======================================================
- * 🗜️ COMPRESOR DE IMÁGENES (Evita que el móvil explote)
+ * 🗜️ COMPRESOR DE IMÁGENES
  * ======================================================= */
 const compressImageForAI = async (file: File): Promise<string> => {
   const bitmap = await createImageBitmap(file);
-  const MAX_W = 1200, MAX_H = 1200; // Reducido para mayor velocidad
+  const MAX_W = 1200, MAX_H = 1200; 
   const ratio = Math.min(MAX_W / bitmap.width, MAX_H / bitmap.height, 1);
   
   const canvas = document.createElement('canvas');
@@ -72,7 +77,7 @@ const compressImageForAI = async (file: File): Promise<string> => {
 };
 
 /* =======================================================
- * 🛡️ PARACAÍDAS ANTI-PANTALLAZO AZUL (ErrorBoundary)
+ * 🛡️ PARACAÍDAS ANTI-PANTALLAZO AZUL
  * ======================================================= */
 class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean}> {
   constructor(props: any) { super(props); this.state = { hasError: false }; }
@@ -116,7 +121,7 @@ function CommandPalette<T extends string>({ open, onClose, items, onSelect }: { 
         <motion.div initial={{ y: -10, scale: 0.98, opacity: 0 }} animate={{ y: 0, scale: 1, opacity: 1 }} className="relative w-full max-w-xl rounded-xl bg-white shadow-2xl border border-slate-200 overflow-hidden z-10">
           <div className="p-3 border-b border-slate-100 flex items-center gap-3 bg-slate-50">
             <Search className="w-5 h-5 text-indigo-500" />
-            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar módulo (Ej: Facturas...)" className="flex-1 outline-none text-sm font-semibold text-slate-800 bg-transparent" onKeyDown={(e) => { if (e.key === 'Enter' && filtered.length > 0) onSelect(filtered[0].key); if (e.key === 'Escape') onClose(); }} />
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar módulo..." className="flex-1 outline-none text-sm font-semibold text-slate-800 bg-transparent" onKeyDown={(e) => { if (e.key === 'Enter' && filtered.length > 0) onSelect(filtered[0].key); if (e.key === 'Escape') onClose(); }} />
             <span className="text-[10px] font-bold text-slate-400 bg-slate-200 px-1.5 py-0.5 rounded">ESC</span>
           </div>
           <div className="max-h-[50vh] overflow-y-auto p-2 custom-scrollbar bg-white">
@@ -162,7 +167,7 @@ function useSwipeUpToReveal(onReveal: () => void) {
 }
 
 /* =======================================================
- * 🚀 3. EL DOCK ESTILO MAC (Densidad Contable)
+ * 🚀 3. EL DOCK ESTILO MAC
  * ======================================================= */
 type DockItemDef<T extends string> = { key: T; label: string; icon: any; group?: 'main'|'fin'|'ops'; shortcut?: string };
 
@@ -326,7 +331,6 @@ export default function App() {
       const apiKey = localStorage.getItem('gemini_api_key');
       if (!apiKey) throw new Error("NO_API_KEY");
 
-      // 🗜️ Usamos el compresor mágico para no colgar el móvil
       const soloBase64 = await compressImageForAI(file);
 
       const ai = new GoogleGenAI({ apiKey });
@@ -371,15 +375,15 @@ export default function App() {
         source: 'dropzone', 
         status: 'draft', 
         unidad_negocio: 'REST', 
-        file_base64: `data:image/jpeg;base64,${soloBase64}` // Guardamos la foto comprimida!
+        file_base64: `data:image/jpeg;base64,${soloBase64}`
       };
 
       const newData = JSON.parse(JSON.stringify(db));
       newData.facturas = [nuevaFacturaIA, ...(newData.facturas || [])];
       await handleSave(newData);
       
-      alert("✅ Ticket escaneado y enviado a la Bandeja de Facturas para su revisión.");
-      if (activeTab !== 'facturas') setActiveTab('facturas');
+      alert("✅ Ticket escaneado y enviado al Centro de Compras para su revisión.");
+      if (activeTab !== 'compras') setActiveTab('compras');
 
     } catch (e: any) {
       if (e.message === "NO_API_KEY") {
@@ -405,32 +409,40 @@ export default function App() {
         if (e.key.toLowerCase() === 'k') { e.preventDefault(); setIsCmdOpen(v => !v); }
         if (e.key === '1') { e.preventDefault(); setActiveTab('dashboard'); }
         if (e.key === '2') { e.preventDefault(); setActiveTab('diario'); }
-        if (e.key === '3') { e.preventDefault(); setActiveTab('facturas'); }
-        if (e.key === '4') { e.preventDefault(); setActiveTab('albaranes'); }
-        if (e.key === '5') { e.preventDefault(); setActiveTab('banco'); }
+        if (e.key === '3') { e.preventDefault(); setActiveTab('compras'); } // Atajo actualizado
+        if (e.key === '4') { e.preventDefault(); setActiveTab('banco'); }
+        if (e.key === '5') { e.preventDefault(); setActiveTab('marketing'); } // Atajo añadido
       }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
+  // 💡 DOCK ACTUALIZADO: Hemos unificado Facturas y Albaranes en "Compras", y añadido "Marketing"
   const navItems = useMemo<DockItemDef<TabKey>[]>(() => ([
     { key: 'dashboard',  label: 'Dash',       icon: LayoutDashboard, group: 'main', shortcut: '⌘1' },
     { key: 'ia',         label: 'IA',         icon: Sparkles,        group: 'main' },
     { key: 'diario',     label: 'Caja',       icon: Wallet,          group: 'main', shortcut: '⌘2' },
     { key: 'importador', label: 'Subir',      icon: Import,          group: 'main' },
-    { key: 'facturas',   label: 'Facturas',   icon: FileText,        group: 'fin',  shortcut: '⌘3' },
-    { key: 'albaranes',  label: 'Albaranes',  icon: Truck,           group: 'fin',  shortcut: '⌘4' },
-    { key: 'banco',      label: 'Banco',      icon: Building2,       group: 'fin',  shortcut: '⌘5' },
+    
+    // 👇 FUSIÓN APLICADA
+    { key: 'compras',    label: 'Compras',    icon: Receipt,         group: 'fin',  shortcut: '⌘3' },
+    
+    { key: 'banco',      label: 'Banco',      icon: Building2,       group: 'fin',  shortcut: '⌘4' },
     { key: 'tesoreria',  label: 'Tesorería',  icon: TrendingUp,      group: 'fin'  },
     { key: 'liquidez',   label: 'Liquidez',   icon: Scale,           group: 'fin'  },
     { key: 'fixed',      label: 'Fijos',      icon: Zap,             group: 'fin'  },
     { key: 'informes',   label: 'Informes',   icon: PieChart,        group: 'ops'  },
     { key: 'menus',      label: 'Menús',      icon: ChefHat,         group: 'ops'  },
     { key: 'stock',      label: 'Stock',      icon: Package,         group: 'ops'  },
+    
+    // 👇 MARKETING AÑADIDO AL FINAL DEL DOCK
+    { key: 'marketing',  label: 'Marketing',  icon: Megaphone,       group: 'ops', shortcut: '⌘5' },
+    
     { key: 'cierre',     label: 'Cierre',     icon: Lock,            group: 'ops'  },
   ]), []);
 
+  // 🔀 SWITCH DE PANTALLAS ACTUALIZADO
   const content = useMemo(() => {
     const props = { data: db, onSave: handleSave };
     switch (activeTab) {
@@ -438,8 +450,12 @@ export default function App() {
       case 'ia':        return <AIConsultant data={db} />; 
       case 'diario':    return <CashView {...props} />;
       case 'importador':return <ImportView data={db} onSave={handleSave} onNavigate={(tab) => setActiveTab(tab as TabKey)} />;
-      case 'facturas':  return <InvoicesView {...props} />;
-      case 'albaranes': return <AlbaranesView {...props} />;
+      
+      // 👇 MAGIA: El nuevo Mando Central
+      case 'compras':   
+      case 'facturas':  // Los mantenemos por si algún link interno o atajo antiguo lo llama
+      case 'albaranes': return <ComprasDashboard {...props} />;
+      
       case 'tesoreria': return <TesoreriaView {...props} />;
       case 'liquidez':  return <LiquidacionesView {...props} />;
       case 'banco':     return <BancoView {...props} />;
@@ -448,6 +464,20 @@ export default function App() {
       case 'menus':     return <MenuView db={db} onSave={handleSave} />;
       case 'stock':     return <StockView {...props} />;
       case 'cierre':    return <CierreContableView {...props} />;
+      
+      // 👇 MAGIA: Pestaña en espera de tu código
+      case 'marketing': return (
+        <div className="min-h-[70vh] flex flex-col items-center justify-center bg-white rounded-[3rem] border border-slate-200 shadow-sm p-8 text-center">
+          <div className="w-24 h-24 bg-indigo-50 rounded-full flex items-center justify-center mb-6">
+            <Megaphone className="w-12 h-12 text-indigo-400" />
+          </div>
+          <h2 className="text-2xl font-black text-slate-800 tracking-tight">Centro de Marketing</h2>
+          <p className="text-sm font-bold text-slate-500 mt-2 max-w-md">
+            Espacio reservado. Esperando que introduzcas el código del nuevo módulo para darle vida a las campañas y redes de Arume. 🚀
+          </p>
+        </div>
+      );
+      
       default:          return <DashboardView data={db} />;
     }
   }, [activeTab, db, handleSave]);
@@ -473,7 +503,6 @@ export default function App() {
   }
 
   return (
-    // 🛡️ EL ESCUDO: Todo envuelto en AuthScreen para pedir el PIN
     <AuthScreen>
       <div id="app-root-container" className="min-h-[100dvh] bg-slate-50 flex flex-col font-sans text-xs text-slate-800 relative overflow-x-hidden pt-safe">
         
