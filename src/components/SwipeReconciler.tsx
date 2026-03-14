@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle2, Sparkles, ArrowDownLeft, Search, X as CloseIcon, Zap, Target } from 'lucide-react';
 import { AppData, BankMovement } from '../types';
@@ -83,7 +83,7 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
   
   // 🛡️ MEJORA 1: Filtramos los pendientes de forma segura
   const pendingMovements = useMemo(() => {
-    return (data.banco || []).filter((b: BankMovement) => b.status === 'pending');
+    return Array.isArray(data.banco) ? data.banco.filter((b: BankMovement) => b?.status === 'pending') : [];
   }, [data.banco]);
 
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -132,9 +132,9 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
     );
   }
 
-  // 🛡️ Extraemos el item de forma segura
+  // 🛡️ Extraemos el item de forma segura y blindada
   const currentItem = pendingMovements[currentIndex];
-  if (!currentItem) return null; // Fallback extremo
+  if (!currentItem) return null;
 
   const isIncome = Num.parse(currentItem.amount) > 0;
 
@@ -146,18 +146,15 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
   const handleLinkLocal = async (matchType: string, docId: string, comision: number = 0) => {
     if (isLinking) return;
     setIsLinking(true);
-    setHoveredMatch(docId); // Forzamos el rayo láser
-    if (navigator.vibrate) navigator.vibrate([30, 50, 30]); // Patrón de éxito háptico
+    setHoveredMatch(docId); 
+    if (navigator.vibrate) navigator.vibrate([30, 50, 30]); 
 
-    // Esperamos a que la animación termine (700ms)
     await new Promise(r => setTimeout(r, 700));
 
     try {
       const newData = JSON.parse(JSON.stringify(data));
       executeLink(newData, currentItem.id, matchType, docId, comision); 
       await onSave(newData);
-      
-      // Solo avanzamos si todo ha ido bien
       setCurrentIndex(prev => prev + 1);
     } catch (e) {
       console.error("Error al enlazar en SwipeReconciler:", e);
@@ -218,7 +215,7 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
             transition={{ type: "spring", stiffness: 300, damping: 25 }}
             drag={!isLinking ? "x" : false} 
             dragConstraints={{ left: 0, right: 0 }} 
-            dragElastic={0.2} // 🛡️ MEJORA 4: Resistencia más firme
+            dragElastic={0.2} 
             onDragEnd={(e, { offset, velocity }) => { if (offset.x < -80 || velocity.x < -600) next(); }}
             className={cn(
               "w-full rounded-[3rem] p-8 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.6)] flex flex-col min-h-[500px] relative overflow-hidden",
@@ -232,16 +229,18 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
               )}
             </AnimatePresence>
 
-            {/* INFO DEL MOVIMIENTO BANCARIO */}
+            {/* INFO DEL MOVIMIENTO BANCARIO BLINDADA */}
             <div className="text-center mb-8 pointer-events-none relative z-10 pt-2">
               <span className={cn("text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest mb-4 inline-flex items-center gap-1.5 shadow-sm border", 
                 isIncome ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-rose-50 text-rose-700 border-rose-200"
               )}>
                 {isLinking ? <Zap className="w-3 h-3 animate-pulse" /> : <Target className="w-3 h-3" />}
-                {isIncome ? 'Ingreso Bancario' : 'Cargo Bancario'}
+                {isIncome ? 'Ingreso detectado' : 'Cargo detectado'}
               </span>
               
-              <h2 className="text-xl md:text-2xl font-black text-slate-800 leading-tight mb-2 line-clamp-2 px-4">{currentItem.desc}</h2>
+              <h2 className="text-xl md:text-2xl font-black text-slate-800 leading-tight mb-2 line-clamp-2 px-4">
+                {String(currentItem.desc || 'Sin Concepto')}
+              </h2>
               
               <p id={`bank-amount-${currentItem.id}`} className={cn("text-5xl md:text-6xl font-black tracking-tighter inline-block relative my-2", isIncome ? "text-emerald-500" : "text-slate-900")}>
                 {Num.fmt(currentItem.amount)}
@@ -249,25 +248,24 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
               
               <div className="mt-2">
                 <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest bg-slate-50 border border-slate-100 inline-block px-3 py-1 rounded-lg shadow-inner">
-                  Fecha Valor: {currentItem.date}
+                  Fecha Valor: {String(currentItem.date || '')}
                 </span>
               </div>
             </div>
 
-            {/* OPCIONES DE COINCIDENCIA */}
+            {/* OPCIONES DE COINCIDENCIA BLINDADAS */}
             <div className="flex-1 relative z-10 w-full mt-2">
-              {matches.length > 0 ? (
+              {Array.isArray(matches) && matches.length > 0 ? (
                 <div className="space-y-3 relative">
                   <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3 text-center">Coincidencias Sugeridas</p>
                   
                   {matches.map((m: any, idx: number) => {
                     const matchIdStr = `match-card-${m.id}`;
                     const isHovered = hoveredMatch === m.id;
-                    const isPerfectMatch = matches.length === 1 && idx === 0; // INNOVACIÓN 3
+                    const isPerfectMatch = matches.length === 1 && idx === 0; 
                     
                     return (
                       <div key={idx} className="relative">
-                        {/* 🌟 RAYO DE ENERGÍA SVG */}
                         <EnergyBeam 
                           sourceId={`bank-amount-${currentItem.id}`} 
                           targetId={matchIdStr} 
@@ -284,7 +282,7 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
                           className={cn(
                             "flex justify-between items-center p-4 rounded-2xl border-2 cursor-pointer transition-all relative z-20 bg-white overflow-hidden group",
                             isHovered ? "border-emerald-400 shadow-[0_10px_20px_-5px_rgba(16,185,129,0.3)] bg-emerald-50/30" : "border-slate-200 hover:border-indigo-300 shadow-sm",
-                            isPerfectMatch && !isHovered && "border-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.2)]" // Resplandor de auto-match
+                            isPerfectMatch && !isHovered && "border-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.2)]" 
                           )}
                         >
                           <div className="text-left min-w-0 pr-4 relative z-10">
@@ -294,8 +292,8 @@ export const SwipeReconciler: React.FC<SwipeReconcilerProps> = ({ data, onSave, 
                               m.color === 'amber' ? "bg-amber-50 text-amber-700 border-amber-200" : 
                               m.color === 'indigo' ? "bg-indigo-50 text-indigo-700 border-indigo-200" : 
                               "bg-rose-50 text-rose-700 border-rose-200"
-                            )}>{m.type}</span>
-                            <p className="text-sm font-black text-slate-800 mt-2 truncate">{m.title}</p>
+                            )}>{String(m.type || '')}</span>
+                            <p className="text-sm font-black text-slate-800 mt-2 truncate">{String(m.title || '')}</p>
                             
                             {isPerfectMatch && <p className="text-[8px] text-indigo-500 font-bold mt-1 uppercase flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> 100% Seguro</p>}
                           </div>
