@@ -2,20 +2,17 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { AppData, EmailDraft } from '../types';
 
 // 1. NUEVA CONEXIÓN: Apuntando a las variables de entorno (.env)
-// ⚠️ Asegúrate de tener estas variables en tu archivo .env:
-// VITE_SUPABASE_URL=https://bgtelulbiaugawyrhvwt.supabase.co
-// VITE_SUPABASE_ANON_KEY=sb_publishable_jagYegyG8gGMijzpLEY9BQ_iWfL1MU4
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://bgtelulbiaugawyrhvwt.supabase.co";
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_jagYegyG8gGMijzpLEY9BQ_iWfL1MU4";
 
-// 🛡️ FIX: PATRÓN SINGLETON PARA EVITAR MÚLTIPLES INSTANCIAS (Evita pantallazos azules)
+// 🛡️ FIX: PATRÓN SINGLETON PARA EVITAR MÚLTIPLES INSTANCIAS
 let supabaseInstance: SupabaseClient | null = null;
 
 export const supabase = (() => {
   if (!supabaseInstance) {
     supabaseInstance = createClient(SUPABASE_URL, SUPABASE_KEY, {
       auth: {
-        storageKey: 'arume-auth-token-v3', // Clave única actualizada para la nueva DB
+        storageKey: 'arume-auth-token-v3', 
         autoRefreshToken: true,
         persistSession: true,
         detectSessionInUrl: false
@@ -25,7 +22,6 @@ export const supabase = (() => {
   return supabaseInstance;
 })();
 
-// 2. SOLO para desarrollo (Para poder hacer pruebas desde la consola si hace falta)
 if (typeof window !== 'undefined') {
   // @ts-ignore
   window.supabase = supabase;
@@ -34,7 +30,6 @@ if (typeof window !== 'undefined') {
 // ================ Utilidades Robustas ==================
 const sleep = (ms: number) => new Promise(res => setTimeout(res, ms));
 
-// Sistema de reintentos: Si el internet falla, lo vuelve a intentar solo
 async function withRetries<T>(fn: () => Promise<T>, { retries = 3, baseMs = 700, maxMs = 3000 } = {}): Promise<T> {
   let attempt = 0;
   while (true) {
@@ -44,13 +39,12 @@ async function withRetries<T>(fn: () => Promise<T>, { retries = 3, baseMs = 700,
       attempt++;
       if (attempt > retries) throw err;
       const wait = Math.min(baseMs * Math.pow(2, attempt - 1) + Math.random() * 200, maxMs);
-      console.warn(`🔄 Reintento ${attempt}/${retries} en ${Math.round(wait)}ms...`, err?.message || err);
+      console.warn(`🔄 Reintento Supabase ${attempt}/${retries} en ${Math.round(wait)}ms...`);
       await sleep(wait);
     }
   }
 }
 
-// 🛡️ Evita que la app se quede colgada esperando. Aumentado a 15 segundos para mayor seguridad.
 async function withTimeout<T>(p: Promise<T>, ms = 15000): Promise<T> {
   const ac = new AbortController();
   const to = setTimeout(() => ac.abort(), ms);
@@ -63,6 +57,40 @@ async function withTimeout<T>(p: Promise<T>, ms = 15000): Promise<T> {
     clearTimeout(to);
   }
 }
+
+// 🚀 INNOVACIÓN 1: Saneamiento estricto del esquema de datos
+// Esto garantiza que NUNCA desaparezcan los Socios ni las tablas principales
+const enforceSchema = (d: any): AppData => {
+  const safeData = d || {};
+  return {
+    ...safeData,
+    config: safeData.config || {},
+    socios: Array.isArray(safeData.socios) ? safeData.socios : [],
+    facturas: Array.isArray(safeData.facturas) ? safeData.facturas : [],
+    albaranes: Array.isArray(safeData.albaranes) ? safeData.albaranes : [],
+    banco: Array.isArray(safeData.banco) ? safeData.banco : [],
+    cierres: Array.isArray(safeData.cierres) ? safeData.cierres : [],
+    gastos_fijos: Array.isArray(safeData.gastos_fijos) ? safeData.gastos_fijos : [],
+    ventas_menu: Array.isArray(safeData.ventas_menu) ? safeData.ventas_menu : [],
+    platos: Array.isArray(safeData.platos) ? safeData.platos : [],
+    recetas: Array.isArray(safeData.recetas) ? safeData.recetas : [],
+    ingredientes: Array.isArray(safeData.ingredientes) ? safeData.ingredientes : [],
+    priceHistory: Array.isArray(safeData.priceHistory) ? safeData.priceHistory : [],
+  };
+};
+
+// 🚀 INNOVACIÓN 2: Desenvolvedor Recursivo Anti-Matrioska
+const unwrapData = (rawData: any) => {
+  let cleanData = rawData;
+  let iterations = 0;
+  // Mientras esté envuelto en "data" y no tenga las tablas principales, lo desenvolvemos
+  while (cleanData && typeof cleanData === 'object' && 'data' in cleanData && !cleanData.banco && iterations < 5) {
+    console.warn("⚠️ Efecto Matrioska detectado. Desenvolviendo capa...");
+    cleanData = cleanData.data;
+    iterations++;
+  }
+  return enforceSchema(cleanData);
+};
 
 // ================== Funciones Core: Arume Data ============================
 
@@ -77,15 +105,14 @@ export async function fetchArumeData(retries = 3): Promise<{ data: AppData | nul
         
       if (error) throw error;
       
-      // 🚀 EL FIX DE LA MATRIOSKA (Desenvolver los datos si están doblemente anidados al cargar backups)
-      let rawData = data?.data;
-      if (rawData && typeof rawData === 'object' && 'data' in rawData && !rawData.banco) {
-         console.warn("⚠️ Efecto Matrioska detectado al LEER. Desenvolviendo JSON...");
-         rawData = rawData.data; 
-      }
+      // Aplicamos las herramientas de limpieza y saneamiento
+      const sanitizedData = unwrapData(data?.data);
       
+      // 💾 SHADOW BACKUP: Guardamos una copia local al descargar por si perdemos internet
+      try { localStorage.setItem('arume_shadow_backup', JSON.stringify(sanitizedData)); } catch (e) {}
+
       return { 
-        data: rawData as AppData, 
+        data: sanitizedData, 
         meta: { updated_at: data?.updated_at, version: data?.version } 
       };
     };
@@ -94,6 +121,16 @@ export async function fetchArumeData(retries = 3): Promise<{ data: AppData | nul
 
   } catch (error: any) {
     console.error("❌ Error conectando a Supabase (fetch):", error?.message || error);
+    
+    // Si falla Supabase, intentamos rescatar el Shadow Backup
+    try {
+      const shadow = localStorage.getItem('arume_shadow_backup');
+      if (shadow) {
+        console.warn("🛡️ Rescatando datos desde el Shadow Backup local...");
+        return { data: unwrapData(JSON.parse(shadow)) };
+      }
+    } catch (e) {}
+
     return { data: null };
   }
 }
@@ -102,17 +139,15 @@ export async function saveArumeData(
   data: AppData,
   opts?: { lastKnownUpdatedAt?: string; lastKnownVersion?: number; silent?: boolean; retries?: number }
 ): Promise<{ ok: boolean; conflict?: boolean; error?: string; newMeta?: { updated_at?: string; version?: number } }> {
-  const { lastKnownUpdatedAt, lastKnownVersion, silent = false, retries = 3 } = (opts || {});
+  const { lastKnownUpdatedAt, silent = false, retries = 3 } = (opts || {});
 
   try {
-    // 🚀 EL FIX DE LA MATRIOSKA AL GUARDAR
-    let cleanData = data;
-    if (cleanData && typeof cleanData === 'object' && 'data' in cleanData && !(cleanData as any).banco) {
-       console.warn("⚠️ Efecto Matrioska detectado al GUARDAR. Limpiando JSON...");
-       cleanData = (cleanData as any).data;
-    }
-
+    // Limpiamos la matrioska y aplicamos el esquema estricto antes de subir a la nube
+    const cleanData = unwrapData(data);
     const payload: AppData = { ...cleanData, lastSync: Date.now() };
+
+    // 💾 SHADOW BACKUP: Guardamos en local justo antes de subir
+    try { localStorage.setItem('arume_shadow_backup', JSON.stringify(payload)); } catch (e) {}
 
     const readMeta = async () => {
       const { data: curr, error: e } = await supabase
@@ -147,16 +182,13 @@ export async function saveArumeData(
     return { ok: true, newMeta: { updated_at: up?.updated_at, version: up?.version } };
 
   } catch (error: any) {
-    if (!silent) alert("⚠️ Problema de conexión. No se ha podido guardar en la nube.");
+    if (!silent) alert("⚠️ Problema de conexión. No se ha podido guardar en la nube (pero tienes copia local).");
     return { ok: false, error: error.message };
   }
 }
 
 // ================== Funciones Secundarias: IMAP / Gmail =====================
 
-/**
- * Recupera los correos nuevos con adjuntos de la tabla inbox_gmail
- */
 export async function fetchNewEmails(): Promise<EmailDraft[]> {
   try {
     const exec = async () => {
@@ -188,9 +220,6 @@ export async function fetchNewEmails(): Promise<EmailDraft[]> {
   }
 }
 
-/**
- * Marca un correo como procesado para que no vuelva a aparecer
- */
 export async function markEmailAsParsed(emailId: string): Promise<boolean> {
   try {
     const exec = async () => {
