@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import { GoogleGenAI } from "@google/genai";
 import { AppData, BankMovement, FacturaExtended } from '../types';
-import { Num, DateUtil } from '../services/engine';
+import { Num, DateUtil } from '../services/engine'; 
 import { cn } from '../lib/utils';
 import { useColumnDetector } from '../hooks/useColumnDetector';
 
@@ -26,22 +26,21 @@ interface ImportViewProps {
 export type ImportMode = 'tpv' | 'albaranes_excel' | 'ia_auto' | 'banco_excel';
 
 /* =======================================================
- * 🛡️ MOTOR DE RECONCILIACIÓN MATEMÁTICA Y LÓGICA
+ * 🛡️ MOTOR DE RECONCILIACIÓN MATEMÁTICA Y LÓGICA (DUAL IVA)
  * ======================================================= */
-type LineaIA = { qty: number; name: string; unit: string; unit_price: number; tax_rate: 4 | 10 | 21; total: number; };
+type LineaIA = { qty: any; name: string; unit: string; unit_price: any; tax_rate: any; total: any; };
 type AlbaranIA = { proveedor: string; fecha: string; num: string; unidad?: 'REST' | 'SHOP'; lineas: LineaIA[]; sum_base?: number; sum_tax?: number; sum_total?: number; };
 type DocumentoIA = { 
   tipo_documento: 'factura' | 'albaran' | 'ticket_simplificado';
   proveedor: string; nif?: string; fecha: string; num: string; 
-  total: number; base: number; iva: number;
+  total: any; base: any; iva: any;
   metodo_pago: 'efectivo' | 'tarjeta' | 'pendiente' | 'banco';
   referencias_albaranes?: string[];
   lineas?: LineaIA[]; 
 };
 
-const TOL = 0.01;
-const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
-const asNum = (v: any, d = 0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
+const TOL = 0.05; 
+const round2 = (n: number) => Num.round2(n); 
 
 const normalizeDate = (s?: string) => {
   const v = String(s ?? '').trim();
@@ -50,41 +49,110 @@ const normalizeDate = (s?: string) => {
   return m ? `${m[3]}-${m[2]}-${m[1]}` : new Date().toLocaleDateString('sv-SE');
 };
 
+// 🚀 RECONCILIACIÓN PREDICTIVA BLINDADA
 function reconcileAlbaran(ai: DocumentoIA) {
-  const lines = (ai.lineas || []).map(l => {
-    const rate = (l.tax_rate ?? 10) as 4|10|21;
-    const total = round2(Number(l.total) || 0);
-    const base  = round2(total / (1 + rate / 100));
-    const tax   = round2(total - base);
-    return { ...l, tax_rate: rate, total, base, tax };
-  });
+  let declared_total = Num.parse(ai.total);
+  const rawLines = Array.isArray(ai.lineas) ? ai.lineas : [];
 
-  const base4  = round2(lines.filter(l => l.tax_rate === 4).reduce((a, l) => a + l.base, 0));
-  const base10 = round2(lines.filter(l => l.tax_rate === 10).reduce((a, l) => a + l.base, 0));
-  const base21 = round2(lines.filter(l => l.tax_rate === 21).reduce((a, l) => a + l.base, 0));
-  const tax4   = round2(lines.filter(l => l.tax_rate === 4).reduce((a, l) => a + l.tax, 0));
-  const tax10  = round2(lines.filter(l => l.tax_rate === 10).reduce((a, l) => a + l.tax, 0));
-  const tax21  = round2(lines.filter(l => l.tax_rate === 21).reduce((a, l) => a + l.tax, 0));
+  const buildLines = (isIvaIncluded: boolean) => {
+    const out: any[] = [];
+    let b4=0, i4=0, b10=0, i10=0, b21=0, i21=0, grandTotal=0;
 
-  const sum_base = round2(base4 + base10 + base21);
-  const sum_tax  = round2(tax4 + tax10 + tax21);
-  const sum_total_calc = round2(lines.reduce((a, l) => a + l.total, 0));
+    for (const l of rawLines) {
+      // Saneamiento estricto de la IA
+      const parsedRate = Num.parse(l.tax_rate);
+      const rate = [4, 10, 21].includes(parsedRate) ? parsedRate : 10; // Fallback al 10% si se inventa un IVA
+      const rawNum = Num.parse(l.total); 
+      const qty = Num.parse(l.qty) || 1;
+      
+      let base, tax, total, unitPriceBruto;
 
-  const declared_total = Number(ai.total ?? sum_total_calc);
-  const diff = round2(sum_total_calc - declared_total);
-  const cuadra = Math.abs(diff) <= TOL;
+      if (isIvaIncluded) {
+        total = rawNum;
+        base = round2(total / (1 + rate/100));
+        tax = round2(total - base);
+        unitPriceBruto = qty > 0 ? total / qty : total;
+      } else {
+        base = rawNum;
+        tax = round2(base * (rate/100));
+        total = round2(base + tax);
+        unitPriceBruto = qty > 0 ? base / qty : base;
+      }
 
-  return { ...ai, lineas: lines, sum_base, sum_tax, sum_total: sum_total_calc, by_rate: { 4: { base: base4, tax: tax4 }, 10: { base: base10, tax: tax10 }, 21: { base: base21, tax: tax21 } }, diff, cuadra };
+      grandTotal += total;
+      if (rate === 4) { b4 += base; i4 += tax; }
+      else if (rate === 21) { b21 += base; i21 += tax; }
+      else { b10 += base; i10 += tax; }
+
+      out.push({ q: qty, n: String(l.name || 'Articulo'), u: String(l.unit || 'uds'), rate, total: round2(total), base: round2(base), tax: round2(tax), unitPrice: round2(unitPriceBruto) });
+    }
+
+    return { lines: out, sumTotal: round2(grandTotal), base4: b4, base10: b10, base21: b21, tax4: i4, tax10: i10, tax21: i21 };
+  };
+
+  const calcInc = buildLines(true);
+  const calcExc = buildLines(false);
+
+  let chosenCalc = calcInc;
+  
+  // Si la IA no encontró el total, asumimos que la suma de líneas (con IVA incluido) es la verdad absoluta
+  if (declared_total <= 0 && rawLines.length > 0) {
+    declared_total = calcInc.sumTotal; 
+  }
+
+  if (declared_total > 0) {
+    const diffInc = Math.abs(calcInc.sumTotal - declared_total);
+    const diffExc = Math.abs(calcExc.sumTotal - declared_total);
+    if (diffExc < diffInc && diffExc <= 5) chosenCalc = calcExc;
+  }
+
+  // Auto-Sanación de Redondeo (Inyectamos céntimos si cuadra casi perfecto)
+  let rounding = 0;
+  if (declared_total > 0) {
+     const diff = round2(declared_total - chosenCalc.sumTotal);
+     if (diff !== 0 && Math.abs(diff) <= TOL) {
+        rounding = diff;
+        chosenCalc.sumTotal = round2(chosenCalc.sumTotal + rounding);
+     }
+  }
+
+  const finalDiff = declared_total > 0 ? round2(chosenCalc.sumTotal - declared_total) : 0;
+  const cuadra = declared_total > 0 ? Math.abs(finalDiff) === 0 : true;
+
+  const sum_base = round2(chosenCalc.base4 + chosenCalc.base10 + chosenCalc.base21);
+  const sum_tax  = round2(chosenCalc.tax4 + chosenCalc.tax10 + chosenCalc.tax21);
+
+  return { 
+    ...ai, 
+    lineasProcesadas: chosenCalc.lines, 
+    sum_base, 
+    sum_tax, 
+    sum_total: chosenCalc.sumTotal, 
+    by_rate: { 
+      4: { base: round2(chosenCalc.base4), tax: round2(chosenCalc.tax4) }, 
+      10: { base: round2(chosenCalc.base10), tax: round2(chosenCalc.tax10) }, 
+      21: { base: round2(chosenCalc.base21), tax: round2(chosenCalc.tax21) } 
+    }, 
+    diff: finalDiff, 
+    cuadra,
+    roundingAdjustment: rounding
+  };
 }
 
+// 🛡️ EXTRACTOR JSON BLINDADO ANTI-MARKDOWN
 const extractJSON = (rawText: string) => {
   try {
     if (!rawText) return {};
-    const clean = rawText.replace(/(?:json)?/gi, '').replace(/\uFEFF/g, '').trim();
-    const start = clean.indexOf('{'); const end = clean.lastIndexOf('}');
+    // Limpiamos los bloques de código que suele meter Gemini
+    let clean = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const start = clean.indexOf('{'); 
+    const end = clean.lastIndexOf('}');
     if (start === -1 || end === -1) return {};
     return JSON.parse(clean.substring(start, end + 1));
-  } catch { return {}; }
+  } catch (e) { 
+    console.error("Error parseando JSON de Gemini:", e);
+    return {}; 
+  }
 };
 
 const compressImage = async (file: File | Blob): Promise<string> => {
@@ -128,17 +196,15 @@ const analyzeWithRetry = async (mimeType: string, base64Data: string, prompt: st
         config: { responseMimeType: "application/json", temperature: 0.1 }
       });
       const raw = response.text || "";
-      return raw.includes('{') ? JSON.parse(raw) : extractJSON(raw);
+      return extractJSON(raw);
     } catch (error: any) {
       const isRateLimit = error?.message?.includes('429') || error?.message?.includes('quota');
-      const isTimeout = error?.message?.includes('fetch') || error?.message?.includes('503');
       
       if (attempt === maxRetries) {
         if (isRateLimit) throw new Error("Límite de Google alcanzado. Intenta subir lotes más pequeños.");
         throw new Error("Imagen borrosa, cortada o servidor saturado.");
       }
       
-      // Auto-Retry: Espera exponencial (2s, 4s...)
       console.warn(`Intento ${attempt} fallido. Reintentando...`);
       await delay(attempt * 2000); 
     }
@@ -146,24 +212,25 @@ const analyzeWithRetry = async (mimeType: string, base64Data: string, prompt: st
   throw new Error("Error desconocido tras múltiples intentos.");
 };
 
-const PROMPT_OMNI_IA = `Eres un Auditor Contable Experto para Hostelería.
-Analiza la imagen/documento adjunto y extrae los datos. 
-IMPORTANTE: Lee el documento cuidadosamente para descubrir si está PAGADO (busca textos como "Pagado", "Efectivo", "Tarjeta", "Entregado", "Visa", "Pagado por banco").
+// 💡 PROMPT OMNI-IA A PRUEBA DE BALAS
+const PROMPT_OMNI_IA = `Eres un Auditor Contable Experto. Analiza la imagen y extrae los datos al milímetro.
+IMPORTANTE 1: ¿Está PAGADO? Busca: "Pagado", "Efectivo", "Tarjeta", "Entregado", "Visa", "Transferencia".
+IMPORTANTE 2: Los importes numéricos NO deben llevar símbolo de moneda. Usa el punto (.) para decimales. (Ej: 1500.50).
 
-Devuelve SOLO un JSON estricto sin comentarios usando esta estructura exacta:
+Devuelve SOLO un JSON estricto sin comentarios usando esta estructura:
 {
-  "tipo_documento": "factura", // Puede ser: factura, albaran o ticket_simplificado
-  "proveedor": "Nombre de la empresa",
-  "nif": "NIF o CIF si existe",
-  "num": "Número de factura o albaran (S/N si no hay)",
+  "tipo_documento": "factura", // Valores: factura, albaran, ticket_simplificado
+  "proveedor": "Nombre empresa",
+  "nif": "NIF o CIF",
+  "num": "Nº factura/albaran",
   "fecha": "YYYY-MM-DD",
-  "total": 0,
+  "total": 0, // TOTAL FINAL A PAGAR DEL DOCUMENTO
   "base": 0,
   "iva": 0,
-  "metodo_pago": "pendiente", // Valores: efectivo, tarjeta, banco, o pendiente
-  "referencias_albaranes": ["Si es factura, arrays de numeros de albaran incluidos"],
+  "metodo_pago": "pendiente", // Valores: efectivo, tarjeta, banco, pendiente
+  "referencias_albaranes": [],
   "lineas": [
-    {"qty": 1, "name": "Producto", "unit": "ud", "unit_price": 0, "tax_rate": 10, "total": 0}
+    {"qty": 1, "name": "Producto A", "unit": "ud", "unit_price": 10.50, "tax_rate": 10, "total": 10.50}
   ]
 }`;
 
@@ -185,7 +252,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     currentThumb: string | null, isCoolingDown?: boolean
   } | null>(null);
 
-  // 💡 NUEVO: Panel de Reporte de Auditoría
   const [batchReport, setBatchReport] = useState<{
     total: number, success: number, errors: { name: string, reason: string }[]
   } | null>(null);
@@ -198,7 +264,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { analyzeColumns, saveProfile } = useColumnDetector();
 
-  // 💣 PANEL DE RESETEO QUIRÚRGICO
   const [deleteMonth, setDeleteMonth] = useState(String(new Date().getMonth() + 1).padStart(2, '0'));
   const [deleteYear, setDeleteYear] = useState(String(new Date().getFullYear()));
 
@@ -251,8 +316,11 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     }
   };
 
-  // 🚀 LÓGICA OMNI-IA (CON AUTO-RETRY Y REPORTE)
+  // 🚀 LÓGICA OMNI-IA 
   const procesarLoteIA = async (files: File[]) => {
+    const apiK = sessionStorage.getItem('gemini_api_key') || localStorage.getItem('gemini_api_key');
+    if (!apiK) return alert("⚠️ Configura la clave API de Gemini en Ajustes antes de continuar.");
+
     setIsScanning(true);
     setBatchReport(null);
     setBatchProgress({ current: 0, total: files.length, success: 0, fails: 0, currentThumb: null });
@@ -284,15 +352,14 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
           throw new Error("Formato de archivo no soportado. Usa PDF o Imagen.");
         }
 
-        // Llamada blindada con 3 reintentos
         const datosIA = await analyzeWithRetry(mimeType, base64Data, PROMPT_OMNI_IA);
 
-        const estaPagado = datosIA.metodo_pago === 'efectivo' || datosIA.metodo_pago === 'tarjeta' || datosIA.metodo_pago === 'banco';
+        const estaPagado = ['efectivo', 'tarjeta', 'banco'].includes(String(datosIA.metodo_pago).toLowerCase());
 
         if (datosIA.tipo_documento === 'factura' || datosIA.tipo_documento === 'ticket_simplificado') {
-          const totalPdf = asNum(datosIA.total) || 0; 
-          const baseNum = asNum(datosIA.base) || Number((totalPdf / 1.10).toFixed(2)); 
-          const ivaNum = asNum(datosIA.iva) || Number((totalPdf - baseNum).toFixed(2));
+          const totalPdf = Num.parse(datosIA.total); 
+          const baseNum = Num.parse(datosIA.base) || Num.round2(totalPdf / 1.10); 
+          const ivaNum = Num.parse(datosIA.iva) || Num.round2(totalPdf - baseNum);
 
           nuevasFacturas.push({
             id: `fac-ia-${Date.now()}-${i}`, 
@@ -304,17 +371,19 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
             paid: estaPagado, reconciled: false, source: 'ia-auto', status: 'approved', unidad_negocio: 'REST'
           });
         } else {
-          const al: AlbaranIA = {
-            proveedor: datosIA.proveedor || "Desconocido", fecha: normalizeDate(datosIA.fecha), num: datosIA.num || "S/N",
-            unidad: 'REST', lineas: Array.isArray(datosIA.lineas) ? datosIA.lineas : [], sum_total: asNum(datosIA.total),
-          };
-          const rec = reconcileAlbaran(al);
+          const rec = reconcileAlbaran(datosIA);
+          
+          const finalItems = [...rec.lineasProcesadas];
+          if (rec.roundingAdjustment !== 0) {
+            finalItems.push({ q: 1, n: "AJUSTE REDONDEO IA", u: 'uds', t: rec.roundingAdjustment, rate: 0, base: rec.roundingAdjustment, tax: 0, unitPrice: rec.roundingAdjustment });
+          }
+
           nuevosAlbaranes.push({
-            id: `alb-ia-${Date.now()}-${i}`, prov: rec.proveedor, date: rec.fecha, num: rec.num, socio: "Arume",
-            notes: rec.cuadra ? "IA OK" : `IA WARNING (diff=${rec.diff})`,
-            items: rec.lineas.map(l => ({ q: l.qty, n: l.name, unit: l.unit, t: l.total, rate: l.tax_rate, base: l.base, tax: l.tax, unitPrice: l.unit_price ?? (l.qty ? round2(l.total / l.qty) : l.total) })),
+            id: `alb-ia-${Date.now()}-${i}`, prov: rec.proveedor || "Desconocido", date: rec.fecha, num: rec.num || "S/N", socio: "Arume",
+            notes: rec.cuadra ? "IA Lote OK" : `IA WARNING (Dif: ${Num.fmt(rec.diff)})`,
+            items: finalItems,
             total: String(rec.sum_total), base: String(rec.sum_base), taxes: String(rec.sum_tax), 
-            invoiced: false, paid: estaPagado, reconciled: false, status: rec.cuadra ? 'ok' : 'warning', unitId: rec.unidad || 'REST', by_rate: rec.by_rate,
+            invoiced: false, paid: estaPagado, reconciled: false, status: rec.cuadra ? 'ok' : 'warning', unitId: 'REST', by_rate: rec.by_rate,
           });
         }
         
@@ -323,11 +392,10 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
 
       } catch (e: any) {
         console.error(`Fallo final en ${fileName}:`, e.message);
-        errorDetails.push({ name: fileName, reason: e.message || "Error desconocido de IA" });
+        errorDetails.push({ name: fileName, reason: e.message || "Error de procesado" });
         setBatchProgress(p => p ? { ...p, fails: errorDetails.length } : null);
       }
 
-      // Enfriamiento dinámico para cuidar la API y la Memoria RAM
       if (i < files.length - 1) {
         if ((i + 1) % 15 === 0) {
           setBatchProgress(p => p ? { ...p, isCoolingDown: true } : null);
@@ -338,7 +406,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         }
       }
       
-      // Limpiar RAM del navegador para evitar crasheos por Blob gigantes
       if (thumbUrl && thumbUrl !== 'pdf-icon') URL.revokeObjectURL(thumbUrl);
     }
 
@@ -349,7 +416,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       await onSave(newData);
     } 
 
-    // Mostrar reporte final
     setBatchReport({ total: files.length, success: successCount, errors: errorDetails });
     setIsScanning(false);
     setBatchProgress(null);
@@ -457,7 +523,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         if (name.length > 1 && sold > 0 && sold < 5000) {
           totalVentaDelDia += (price * sold);
           let plato = newPlatos.find(p => p.name.toLowerCase().trim() === name.toLowerCase().trim());
-          if (!plato) { plato = { id: 'p-' + Date.now() + Math.random(), name, category: categorizeItem(name), price, cost: 0 }; newPlatos.push(plato); }
+          if (!plato) { plato = { id: 'p-' + Date.now() + Math.random(), name, category: 'varios', price, cost: 0 }; newPlatos.push(plato); }
           else if (price > 0 && plato.price !== price) plato.price = price;
           const existing = newVentas.find(v => v.date === date && v.id === plato!.id);
           if (existing) existing.qty += sold; else newVentas.push({ date, id: plato!.id, qty: sold });
@@ -500,7 +566,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
           <ModuleButton active={importMode === 'tpv'} onClick={() => { setImportMode('tpv'); setProcessedData(null); setBatchReport(null); }} icon={Grid} title="TPV Madis" subtitle="Excel Cajas" color="amber" />
         </div>
 
-        {/* PANEL DE AUDITORÍA POST-LOTE (Sustituye a la molesta Alerta) */}
+        {/* PANEL DE AUDITORÍA POST-LOTE */}
         {batchReport ? (
           <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-slate-50 border border-slate-200 rounded-[2rem] p-8 text-center relative overflow-hidden shadow-inner">
             <div className="flex justify-center mb-4">
@@ -542,7 +608,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
               </div>
             )}
 
-            <button onClick={() => { setBatchReport(null); onNavigate('facturas'); }} className="bg-indigo-600 text-white font-black uppercase text-xs px-8 py-4 rounded-xl shadow-lg hover:bg-indigo-700 transition">
+            <button onClick={() => { setBatchReport(null); onNavigate('albaranes'); }} className="bg-indigo-600 text-white font-black uppercase text-xs px-8 py-4 rounded-xl shadow-lg hover:bg-indigo-700 transition">
               Ir a revisar Documentos
             </button>
           </motion.div>
@@ -581,7 +647,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
                          <img src={batchProgress.currentThumb} className="w-full h-full object-cover" alt="Procesando" />
                        )}
                        
-                       {/* LÁSER DE ESCANEO (Animación Dios) */}
+                       {/* LÁSER DE ESCANEO */}
                        {!batchProgress.isCoolingDown && (
                          <motion.div 
                            animate={{ y: ["0%", "400%", "0%"] }}
@@ -630,7 +696,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
                   {importMode === 'ia_auto' && (
                     <div className="flex flex-col items-center gap-2 mt-4">
                       <div className="bg-emerald-50 px-4 py-2 rounded-full border border-emerald-200 shadow-sm text-emerald-700 text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
-                        <Zap className="w-4 h-4 text-emerald-500"/> Detecta Tickets Pagados Automáticamente
+                        <Zap className="w-4 h-4 text-emerald-500"/> Detecta Totales con Extrema Precisión
                       </div>
                       <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-full border border-slate-200 shadow-sm text-slate-500 text-[10px] font-bold uppercase tracking-widest flex-wrap justify-center">
                         <ShieldCheck className="w-3 h-3 text-slate-400"/> IA Multi-Intento
