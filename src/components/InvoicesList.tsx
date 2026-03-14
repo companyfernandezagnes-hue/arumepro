@@ -1,5 +1,8 @@
 import React, { useMemo, useState } from 'react';
-import { FileText, CheckCircle2, Clock, Trash2, Link as LinkIcon, AlertCircle, Sparkles, Package, ChevronDown, ChevronUp } from 'lucide-react';
+import { 
+  FileText, CheckCircle2, Clock, Trash2, Link as LinkIcon, AlertCircle, 
+  Sparkles, Package, ChevronDown, ChevronUp, Edit2 
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 // 🛡️ Tipados importados del padre
 import { FacturaExtended, BusinessUnit } from './InvoicesView'; 
@@ -22,7 +25,6 @@ interface InvoicesListProps {
   onOpenDetail: (factura: FacturaExtended) => void;
   onTogglePago: (id: string) => void;
   onDelete: (id: string) => void;
-  // 💡 AÑADIMOS albaranesSeguros PARA EL INSPECTOR
   albaranesSeguros?: Albaran[]; 
 }
 
@@ -30,7 +32,7 @@ type SortField = 'date' | 'prov' | 'total';
 type SortOrder = 'asc' | 'desc';
 
 /* =======================================================
- * 🧠 HOOK DE FILTRADO Y ORDENACIÓN PRO
+ * 🧠 HOOK DE FILTRADO Y ORDENACIÓN PRO (Intacto + Cajas Z)
  * ======================================================= */
 function useInvoicesFilters(
   facturas: FacturaExtended[], 
@@ -62,7 +64,7 @@ function useInvoicesFilters(
         const unitToCompare = f.unidad_negocio || 'REST';
         if (selectedUnit !== 'ALL' && unitToCompare !== selectedUnit) return false;
         
-        // 🛑 FILTRO MÁGICO APLICADO: Ocultamos Cajas (gastos menores), Banco y Ventas (Cajas Z)
+        // 🛑 FILTRO MÁGICO: Ocultamos Cajas (gastos menores), Banco y Ventas (Cajas Z)
         if (f.tipo === 'caja' || (f as any).tipo === 'banco' || f.tipo === 'venta') return false;
 
         const normCliente = superNorm(f.cliente);
@@ -287,7 +289,7 @@ export const InvoicesList = React.memo(({
                                 <Package className="w-4 h-4 text-indigo-400 mb-1" />
                                 <span className="text-[10px] font-bold text-slate-500">{alb.date}</span>
                                 <span className="font-mono text-xs font-semibold text-slate-800 my-0.5">{alb.num || 'S/N'}</span>
-                                <span className="text-sm font-black text-emerald-600">{Num.fmt(alb.total)}</span>
+                                <span className="text-sm font-black text-emerald-600">{Num.fmt(Num.parse(alb.total || 0))}</span>
                               </div>
                             ))}
                             
