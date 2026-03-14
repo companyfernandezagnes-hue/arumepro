@@ -1,13 +1,13 @@
-import React, { useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useCallback, useState } from 'react';
 import {
   FileText, FileArchive, Package, Zap, X, Calendar, Hash, ShieldCheck, Link as LinkIcon,
-  CheckCircle2, AlertTriangle, Clock, Download, Bot
+  CheckCircle2, AlertTriangle, Clock, Download, Bot, Edit2, Save, RefreshCw, Trash2
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-// 🛡️ Tipos importados correctamente
+// 🛡️ Tipos importados
 import { FacturaExtended, BusinessUnit } from './InvoicesView';
-import { Albaran } from '../types';
-import { Num } from '../services/engine';
+import { Albaran, AppData } from '../types';
+import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
 
 interface BusinessUnitCfg {
@@ -26,9 +26,11 @@ interface InvoiceDetailModalProps {
   onClose: () => void;
   onDownloadFile: (factura: FacturaExtended) => void;
   onTogglePago?: (id: string) => void; 
+  onSaveData?: (newData: AppData) => Promise<void>; // 🚀 NUEVO: Para guardar ediciones
+  fullData?: AppData; // 🚀 NUEVO: Acceso al estado global para guardar
 }
 
-// 🏷️ CHIPS DE ESTADO: Blindado y con mejores copys
+// 🏷️ CHIPS DE ESTADO
 const statusChip = (f: FacturaExtended | undefined | null) => {
   if (!f) return { label: 'DESCONOCIDO', cls: 'bg-slate-50 text-slate-600 border-slate-200' };
   if (f.reconciled) return { label: 'CONCILIADA BANCO', cls: 'bg-blue-50 text-blue-600 border-blue-200' };
@@ -73,22 +75,28 @@ function useFocusTrap(active: boolean) {
 }
 
 export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
-  factura, albaranes, businessUnits, mode, onClose, onDownloadFile, onTogglePago
+  factura, albaranes, businessUnits, mode, onClose, onDownloadFile, onTogglePago, onSaveData, fullData
 }: InvoiceDetailModalProps) {
 
-  // 🛡️ BLOQUEO DE SCROLL DE FONDO 
+  // 🚀 ESTADOS DE EDICIÓN (INNOVACIÓN 1)
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState({
+    num: factura.num || '',
+    date: factura.date || DateUtil.today(),
+    prov: factura.prov || factura.cliente || '',
+  });
+  const [isSaving, setIsSaving] = useState(false);
+
   useEffect(() => {
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = 'unset'; };
   }, []);
 
-  // 🛡️ PARACAÍDAS 1: Factura vacía
   if (!factura || typeof factura !== 'object') return null;
 
-  // ♿ Cierre seguro con tecla ESC y atajo Ctrl+P
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { 
-      if (e.key === 'Escape') onClose(); 
+      if (e.key === 'Escape' && !isEditing) onClose(); 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
         e.preventDefault();
         if (factura.file_base64) onDownloadFile(factura);
@@ -96,11 +104,10 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose, onDownloadFile, factura]);
+  }, [onClose, onDownloadFile, factura, isEditing]);
 
   const trapRef = useFocusTrap(true);
 
-  // 🛡️ PARACAÍDAS 2: Arrays siempre seguros
   const safeBusinessUnits = Array.isArray(businessUnits) ? businessUnits : [];
   const safeAlbaranes = Array.isArray(albaranes) ? albaranes : [];
 
@@ -112,7 +119,6 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
     return map;
   }, [safeBusinessUnits]);
 
-  // 🛡️ PARACAÍDAS 3: Saneamiento extremo de cadenas (Evitar errores si llega null)
   const titular = useMemo(() => {
     const raw = mode === 'socio' ? (factura.cliente || factura.prov) : (factura.prov || factura.cliente);
     return typeof raw === 'string' ? raw.trim().toUpperCase() : 'DESCONOCIDO';
@@ -122,34 +128,106 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
   const dateStr = String(factura.date || 'S/F');
   const isIA = factura.source === 'gmail-sync' || factura.source === 'dropzone' || factura.source === 'email-ia' || factura.source === 'ia-auto';
 
-  // 🛡️ PARACAÍDAS 4: Filtrado de Albaranes Seguro
   const albaranesVinculados = useMemo(() => {
     const ids = Array.isArray(factura.albaranIdsArr) ? factura.albaranIdsArr : [];
     if (ids.length === 0) return [];
-    
     const setIds = new Set(ids);
-    // Devuelve los albaranes que sí existen (por si alguno se borró de la DB)
     return safeAlbaranes.filter(a => a && a.id && setIds.has(a.id));
   }, [factura.albaranIdsArr, safeAlbaranes]);
 
-  // 🛡️ PARACAÍDAS 5: Matemáticas Blindadas con absolutos
   const sumaAlbaranes = useMemo(() => {
     return albaranesVinculados.reduce((acc, a) => acc + Math.abs(Num.parse(a.total) || 0), 0);
   }, [albaranesVinculados]);
 
+  // Totales extraídos de forma segura
   const total = Math.abs(Num.parse(factura.total) || 0);
   const base  = Math.abs(Num.parse(factura.base)  || Num.round2(total / 1.10));
   const iva   = Math.abs(Num.parse(factura.tax)   || Num.round2(total - base));
 
-  // 💡 CÁLCULOS INNOVACIÓN: Barra de Progreso y Descuadre
   const diferencia = Num.round2(sumaAlbaranes - total);
   const diffAbsoluta = Math.abs(diferencia);
-  const isPerfectMatch = diffAbsoluta <= Math.max(0.50, total * 0.005); // Tolerancia 0.5% o 50 céntimos
+  const isPerfectMatch = diffAbsoluta <= Math.max(0.50, total * 0.005); 
   
-  // Lógica barra asimétrica
   const matchPercentage = total > 0 ? Math.min((sumaAlbaranes / total) * 100, 100) : 0;
 
   const chip = statusChip(factura);
+
+  // 🚀 LÓGICA DE EDICIÓN Y SINCRONIZACIÓN (INNOVACIÓN 1 y 2)
+  const handleSaveEdits = async () => {
+    if (!onSaveData || !fullData) return;
+    setIsSaving(true);
+    try {
+      const newData = JSON.parse(JSON.stringify(fullData)) as AppData;
+      const idx = newData.facturas?.findIndex(f => f.id === factura.id);
+      
+      if (idx !== undefined && idx > -1 && newData.facturas) {
+        newData.facturas[idx] = {
+          ...newData.facturas[idx],
+          num: editForm.num,
+          date: editForm.date,
+          prov: mode === 'proveedor' ? editForm.prov : newData.facturas[idx].prov,
+          cliente: mode === 'socio' ? editForm.prov : newData.facturas[idx].cliente,
+        };
+        await onSaveData(newData);
+        setIsEditing(false);
+      }
+    } catch (error) {
+      alert("Error al guardar los cambios.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSyncTotals = async () => {
+    if (!onSaveData || !fullData) return;
+    if (!window.confirm(`⚠️ Se sobreescribirá el total de la factura (${Num.fmt(total)}) con la suma matemática de los albaranes (${Num.fmt(sumaAlbaranes)}).\n\n¿Proceder?`)) return;
+    
+    setIsSaving(true);
+    try {
+      const newData = JSON.parse(JSON.stringify(fullData)) as AppData;
+      const idx = newData.facturas?.findIndex(f => f.id === factura.id);
+      
+      if (idx !== undefined && idx > -1 && newData.facturas) {
+        const newTotal = sumaAlbaranes;
+        const newBase = Num.round2(newTotal / 1.10); // Asumiendo IVA 10% por defecto general
+        const newTax = Num.round2(newTotal - newBase);
+
+        newData.facturas[idx] = {
+          ...newData.facturas[idx],
+          total: String(newTotal),
+          base: String(newBase),
+          tax: String(newTax)
+        };
+        await onSaveData(newData);
+      }
+    } catch (error) {
+      alert("Error al sincronizar totales.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleRemoveAttachment = async () => {
+    if (!onSaveData || !fullData) return;
+    if (!window.confirm(`⚠️ ¿Desvincular y eliminar el PDF adjunto de esta factura?`)) return;
+    
+    setIsSaving(true);
+    try {
+      const newData = JSON.parse(JSON.stringify(fullData)) as AppData;
+      const idx = newData.facturas?.findIndex(f => f.id === factura.id);
+      
+      if (idx !== undefined && idx > -1 && newData.facturas) {
+        newData.facturas[idx].file_base64 = undefined;
+        newData.facturas[idx].attachmentSha = undefined;
+        await onSaveData(newData);
+        onClose(); // Cerramos el modal para refrescar estado
+      }
+    } catch (error) {
+      alert("Error al eliminar el adjunto.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const handleDownload = useCallback(() => {
     if (onDownloadFile && typeof onDownloadFile === 'function') onDownloadFile(factura);
@@ -170,7 +248,6 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
       aria-labelledby="invoice-title"
       aria-describedby="invoice-desc"
     >
-      {/* 🌑 INNOVACIÓN: Fondo Glassmorphism Reactivo */}
       <motion.div
         initial={{ opacity: 0 }} 
         animate={{ opacity: 1 }} 
@@ -185,104 +262,132 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
         {!isPerfectMatch && <div className="absolute inset-0 bg-rose-500/10 mix-blend-overlay"></div>}
       </motion.div>
 
-      {/* 🚀 Contenedor Modal */}
       <motion.div
         ref={trapRef}
         initial={{ y: 100, opacity: 0, scale: 0.98 }} 
         animate={{ y: 0, opacity: 1, scale: 1 }} 
         exit={{ y: 100, opacity: 0, scale: 0.98 }}
         transition={{ type: 'spring', damping: 25, stiffness: 250 }}
-        className="bg-[#F8FAFC] w-full max-w-2xl rounded-t-[2.5rem] md:rounded-[2.5rem] shadow-2xl relative z-10 flex flex-col h-[85dvh] md:h-auto md:max-h-[85dvh] overflow-hidden focus:outline-none"
+        className="bg-[#F8FAFC] w-full max-w-2xl rounded-t-[2.5rem] md:rounded-[2.5rem] shadow-2xl relative z-10 flex flex-col h-[85dvh] md:h-auto md:max-h-[90dvh] overflow-hidden focus:outline-none"
         onClick={(e) => e.stopPropagation()} 
       >
-        {/* 📌 Header */}
-        <div className="p-6 border-b border-slate-200 bg-white flex justify-between items-center relative z-20 shrink-0">
-          <div className="flex items-center gap-4 min-w-0">
+        {/* 📌 Header Editable */}
+        <div className="p-6 border-b border-slate-200 bg-white flex justify-between items-start md:items-center relative z-20 shrink-0 flex-col md:flex-row gap-4">
+          <div className="flex items-center gap-4 min-w-0 w-full">
             <div className={cn("w-12 h-12 rounded-full flex items-center justify-center shrink-0 shadow-sm border", isPerfectMatch ? "bg-indigo-50 text-indigo-600 border-indigo-100" : "bg-rose-50 text-rose-600 border-rose-100")}>
               <FileText className="w-6 h-6" aria-hidden="true" />
             </div>
-            <div className="min-w-0">
-              <h3 id="invoice-title" className="text-lg md:text-xl font-black text-slate-800 leading-tight truncate pr-2">
-                {titular}
-              </h3>
-              <p id="invoice-desc" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1 flex items-center gap-2">
-                <span className="bg-slate-100 px-2 py-0.5 rounded text-indigo-500 font-mono">REF: {refStr}</span>
-                {isIA && <span className="bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded flex items-center gap-1 border border-purple-100"><Bot className="w-3 h-3"/> IA</span>}
-              </p>
+            <div className="min-w-0 flex-1">
+              {isEditing ? (
+                <div className="space-y-2 w-full pr-4">
+                  <input 
+                    type="text" 
+                    value={editForm.prov} 
+                    onChange={(e) => setEditForm({...editForm, prov: e.target.value.toUpperCase()})}
+                    className="w-full text-lg md:text-xl font-black text-slate-800 border-b-2 border-indigo-300 outline-none bg-indigo-50/50 px-2 py-1 rounded-t-lg"
+                    placeholder="Nombre Titular"
+                  />
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      value={editForm.num} 
+                      onChange={(e) => setEditForm({...editForm, num: e.target.value})}
+                      className="w-1/2 text-[10px] font-mono uppercase bg-indigo-50/50 border-b-2 border-indigo-300 outline-none px-2 py-1"
+                      placeholder="Ref / Nº Factura"
+                    />
+                    <input 
+                      type="date" 
+                      value={editForm.date} 
+                      onChange={(e) => setEditForm({...editForm, date: e.target.value})}
+                      className="w-1/2 text-[10px] font-bold uppercase bg-indigo-50/50 border-b-2 border-indigo-300 outline-none px-2 py-1"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <h3 id="invoice-title" className="text-lg md:text-xl font-black text-slate-800 leading-tight truncate pr-2 flex items-center gap-2">
+                    {titular}
+                    {onSaveData && !factura.reconciled && (
+                      <button onClick={() => setIsEditing(true)} className="p-1.5 bg-slate-100 text-slate-400 hover:text-indigo-600 rounded-md transition-colors"><Edit2 className="w-3 h-3"/></button>
+                    )}
+                  </h3>
+                  <p id="invoice-desc" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1 flex items-center gap-2">
+                    <span className="bg-slate-100 px-2 py-0.5 rounded text-indigo-500 font-mono">REF: {refStr}</span>
+                    <span className="flex items-center gap-1"><Calendar className="w-3 h-3"/> {dateStr}</span>
+                    {isIA && <span className="bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded flex items-center gap-1 border border-purple-100"><Bot className="w-3 h-3"/> IA</span>}
+                  </p>
+                </>
+              )}
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className={cn('text-[9px] font-black px-2.5 py-1 rounded-full border shadow-sm', chip.cls)} title="Estado de la factura">
-              {chip.label}
-            </span>
-
-            <button
-              type="button"
-              onClick={handleClose}
-              className="p-2.5 bg-slate-50 text-slate-400 rounded-full hover:bg-slate-200 hover:text-slate-700 transition-colors shrink-0"
-              aria-label="Cerrar modal"
-            >
-              <X className="w-5 h-5" aria-hidden="true" />
-            </button>
+          <div className="flex items-center gap-2 self-end md:self-auto w-full md:w-auto justify-end">
+            {isEditing ? (
+              <div className="flex gap-2">
+                <button onClick={() => setIsEditing(false)} className="px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-lg">Cancelar</button>
+                <button onClick={handleSaveEdits} disabled={isSaving} className="px-4 py-1.5 text-xs font-black bg-indigo-600 text-white rounded-lg shadow-md flex items-center gap-2">
+                  {isSaving ? <Loader2 className="w-3 h-3 animate-spin"/> : <Save className="w-3 h-3"/>} Guardar
+                </button>
+              </div>
+            ) : (
+              <>
+                <span className={cn('text-[9px] font-black px-2.5 py-1 rounded-full border shadow-sm hidden sm:inline-block', chip.cls)} title="Estado de la factura">{chip.label}</span>
+                <button type="button" onClick={handleClose} className="p-2.5 bg-slate-50 text-slate-400 rounded-full hover:bg-slate-200 hover:text-slate-700 transition-colors shrink-0"><X className="w-5 h-5" /></button>
+              </>
+            )}
           </div>
         </div>
 
         {/* 📜 Body (Scrollable) */}
         <div className="flex-1 overflow-y-auto p-6 custom-scrollbar space-y-6" style={{ WebkitOverflowScrolling: 'touch' }}>
           
-          {/* Info general */}
-          <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-[10px] font-black text-slate-400 uppercase flex items-center gap-1.5">
-                <Calendar className="w-3 h-3" aria-hidden="true" /> Fecha Emisión
-              </span>
-              <span className="text-xs font-black text-slate-700 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100">
-                {dateStr}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Info Unidad y Origen */}
+            <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex flex-col justify-center">
+              <span className="text-[10px] font-black text-slate-400 uppercase mb-2">Unidad Asignada</span>
+              <span className={cn('text-[11px] font-black px-3 py-1.5 rounded-lg border uppercase tracking-wider shadow-sm inline-flex items-center gap-2 w-max', unit?.color || 'text-slate-600', unit?.bg || 'bg-slate-100', 'border-current opacity-90')}>
+                <UnitIcon className="w-4 h-4"/> {unit?.name || 'Restaurante'}
               </span>
             </div>
 
-            <div className="flex justify-between items-center border-t border-slate-50 pt-4">
-              <span className="text-[10px] font-black text-slate-400 uppercase">Unidad Asignada</span>
-              <span
-                className={cn(
-                  'text-[9px] font-black px-2.5 py-1 rounded-md border uppercase tracking-wider shadow-sm flex items-center gap-1.5',
-                  unit?.color || 'text-slate-600',
-                  unit?.bg || 'bg-slate-100',
-                  'border-current opacity-90'
-                )}
-              >
-                <UnitIcon className="w-3 h-3"/> {unit?.name || 'Restaurante'}
-              </span>
+            {/* 📎 INNOVACIÓN 3: Gestión Visual del Adjunto (PDF) */}
+            <div className={cn("p-5 rounded-3xl border shadow-sm flex flex-col justify-between", factura.file_base64 ? "bg-indigo-50/50 border-indigo-100" : "bg-slate-50 border-slate-100 border-dashed")}>
+               {factura.file_base64 ? (
+                 <>
+                   <div className="flex justify-between items-start mb-2">
+                     <span className="text-[10px] font-black text-indigo-400 uppercase flex items-center gap-1.5"><FileArchive className="w-3 h-3"/> Doc. Original</span>
+                     {onSaveData && <button onClick={handleRemoveAttachment} className="text-rose-400 hover:text-rose-600 transition"><Trash2 className="w-3.5 h-3.5"/></button>}
+                   </div>
+                   <button onClick={handleDownload} className="w-full bg-white border border-indigo-200 text-indigo-600 font-black text-[10px] uppercase py-2 rounded-xl shadow-sm hover:bg-indigo-600 hover:text-white transition flex justify-center items-center gap-2">
+                     <Download className="w-3.5 h-3.5"/> Descargar PDF
+                   </button>
+                 </>
+               ) : (
+                 <div className="text-center h-full flex flex-col items-center justify-center opacity-60">
+                   <FileText className="w-5 h-5 text-slate-400 mb-1" />
+                   <p className="text-[9px] font-black uppercase text-slate-500">Sin archivo adjunto</p>
+                 </div>
+               )}
             </div>
-
-            {/* Email Meta (Blindado) */}
-            {factura.emailMeta && typeof factura.emailMeta === 'object' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border-t border-slate-50 pt-4">
-                <div className="text-[10px] text-slate-500">
-                  <span className="font-black uppercase block mb-1">Correo Origen</span>
-                  <span className="text-xs font-mono text-slate-700 break-all">{String(factura.emailMeta.from || '—')}</span>
-                </div>
-                <div className="text-[10px] text-slate-500">
-                  <span className="font-black uppercase block mb-1">Asunto</span>
-                  <span className="text-xs text-slate-700 break-words line-clamp-2">{String(factura.emailMeta.subject || '—')}</span>
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* ⚖️ INNOVACIÓN 1: Cuadro 3-Way Match con Barra de Progreso Asimétrica */}
+          {/* ⚖️ Cuadro 3-Way Match con Barra de Progreso */}
           <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
               <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest flex items-center gap-1.5">
                 <ShieldCheck className="w-3 h-3"/> Auditoría 3‑Way Match
               </p>
-              <span className={cn(
-                'text-[10px] font-black px-2.5 py-1 rounded-full border shadow-sm',
-                isPerfectMatch ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-amber-50 text-amber-600 border-amber-200'
-              )}>
-                {isPerfectMatch ? 'CUADRA PERFECTO' : 'DIFERENCIA DETECTADA'}
-              </span>
+              <div className="flex items-center gap-2">
+                {/* 🚀 INNOVACIÓN 2: Botón de Auto-Corrección Matemática */}
+                {!isPerfectMatch && onSaveData && !factura.reconciled && (
+                   <button onClick={handleSyncTotals} disabled={isSaving} className="text-[9px] font-black px-2 py-1 rounded bg-amber-100 text-amber-700 hover:bg-amber-200 transition shadow-sm flex items-center gap-1">
+                     {isSaving ? <Loader2 className="w-3 h-3 animate-spin"/> : <RefreshCw className="w-3 h-3"/>} Sincronizar Totales
+                   </button>
+                )}
+                <span className={cn('text-[10px] font-black px-2.5 py-1 rounded-full border shadow-sm', isPerfectMatch ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-amber-50 text-amber-600 border-amber-200')}>
+                  {isPerfectMatch ? 'CUADRA PERFECTO' : 'DIFERENCIA DETECTADA'}
+                </span>
+              </div>
             </div>
 
             <div className="grid grid-cols-3 gap-3 text-center">
@@ -290,7 +395,7 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Albaranes</p>
                 <p className="text-lg font-black text-slate-800 mt-1">{Num.fmt(sumaAlbaranes)}</p>
               </div>
-              <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100">
+              <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100 relative group overflow-hidden">
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Factura</p>
                 <p className="text-lg font-black text-slate-800 mt-1">{Num.fmt(total)}</p>
               </div>
@@ -310,7 +415,7 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
 
             {/* Lista de albaranes o fallback */}
             {albaranesVinculados.length > 0 ? (
-              <div className="space-y-2 mt-4 pt-4 border-t border-slate-100">
+              <div className="space-y-2 mt-4 pt-4 border-t border-slate-100 max-h-48 overflow-y-auto custom-scrollbar pr-2">
                 {albaranesVinculados.map(alb => (
                   <div key={alb.id} className="flex justify-between items-center text-xs py-3 px-4 bg-slate-50 border border-slate-100 rounded-xl text-slate-600 hover:bg-white hover:shadow-sm transition-colors group">
                     <div className="flex items-center gap-3">
@@ -336,7 +441,7 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
           </div>
         </div>
 
-        {/* 📌 Footer: Desglose y Botones de Acción (Modo Noche) */}
+        {/* 📌 Footer: Desglose y Botones de Acción */}
         <div className="bg-slate-900 text-white shrink-0 relative z-20 shadow-[0_-10px_30px_rgba(0,0,0,0.15)] rounded-t-3xl md:rounded-t-none">
           <div className="p-6 md:p-8 pb-safe">
             
