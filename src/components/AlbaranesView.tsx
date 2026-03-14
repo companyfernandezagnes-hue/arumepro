@@ -3,7 +3,7 @@ import {
   Search, Plus, Download, Package, AlertTriangle, Check, 
   Building2, ShoppingBag, ListPlus, Users, Hotel, Layers, 
   XCircle, LineChart as LineChartIcon, FileSpreadsheet, Mic, Square, Camera, Loader2, Smartphone,
-  Calculator, Sparkles // Nuevos iconos
+  Calculator, Sparkles, ArrowUp, ArrowDown, ArrowUpDown // 1. Añadidos los iconos de flechas
 } from 'lucide-react';
 import { AppData, Albaran } from '../types';
 import { Num, ArumeEngine, DateUtil } from '../services/engine';
@@ -145,7 +145,7 @@ function upsertFacturaFromAlbaran(data: AppData, alb: Albaran) {
 }
 
 /* =======================================================
- * 🧠 2. MOTOR DE PARSEO V2 INTEGRADO (AQUÍ ESTÁ LA MAGIA)
+ * 🧠 2. MOTOR DE PARSEO V2 INTEGRADO CON MODO DUAL DE IVA
  * ======================================================= */
 type IvaMode = 'AUTO' | 'INC' | 'EXC';
 
@@ -156,7 +156,6 @@ function useAlbaranEnginePRO(text: string, expectedTotal: number | null, ivaMode
     const lines = text.replace(/\t/g,' ').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
     const rawData = [];
 
-    // 1. Extraemos los números puros
     for (const original of lines) {
       let line = original.replace(/[€$]/g,'').replace(/,/g,'.').replace(/\s{2,}/g,' ').trim();
       if (line.length < 3) continue;
@@ -189,7 +188,6 @@ function useAlbaranEnginePRO(text: string, expectedTotal: number | null, ivaMode
       rawData.push({ q, name, rawNumber, rate, u });
     }
 
-    // 2. Función constructora de líneas
     const buildLines = (isIvaIncluded: boolean) => {
       const out = [];
       let grandTotal = 0, b4=0, i4=0, b10=0, i10=0, b21=0, i21=0;
@@ -203,10 +201,10 @@ function useAlbaranEnginePRO(text: string, expectedTotal: number | null, ivaMode
           tax = Num.round2(total - base);
           unitPriceBruto = raw.q > 0 ? total / raw.q : total;
         } else {
-          base = raw.rawNumber; // El número de la línea ES la base imponible
+          base = raw.rawNumber; 
           tax = Num.round2(base * (raw.rate/100));
           total = Num.round2(base + tax);
-          unitPriceBruto = raw.q > 0 ? base / raw.q : base; // Unitario se muestra como NETO
+          unitPriceBruto = raw.q > 0 ? base / raw.q : base; 
         }
 
         grandTotal += total;
@@ -227,7 +225,6 @@ function useAlbaranEnginePRO(text: string, expectedTotal: number | null, ivaMode
       };
     };
 
-    // 3. Evaluar ambos escenarios si está en AUTO
     let calcInc = buildLines(true);
     let calcExc = buildLines(false);
     
@@ -237,7 +234,6 @@ function useAlbaranEnginePRO(text: string, expectedTotal: number | null, ivaMode
     if (ivaMode === 'INC') { chosenCalc = calcInc; finalMode = 'INC'; }
     else if (ivaMode === 'EXC') { chosenCalc = calcExc; finalMode = 'EXC'; }
     else if (expectedTotal && expectedTotal > 0) {
-      // Magia IA: Elegimos el que esté más cerca del total escaneado
       const diffInc = Math.abs(calcInc.sumTotal - expectedTotal);
       const diffExc = Math.abs(calcExc.sumTotal - expectedTotal);
       
@@ -246,13 +242,11 @@ function useAlbaranEnginePRO(text: string, expectedTotal: number | null, ivaMode
       }
     }
 
-    // INNOVACIÓN 1: Auto-Sanación de Redondeo (±0.05€ de tolerancia para inyectar)
     let rounding = 0;
     if (expectedTotal && expectedTotal > 0) {
        const diff = Num.round2(expectedTotal - chosenCalc.sumTotal);
        if (diff !== 0 && Math.abs(diff) <= 0.05) {
           rounding = diff;
-          // Ajustar directamente en los totales
           chosenCalc.totals.grandTotal = Num.round2(chosenCalc.totals.grandTotal + rounding);
        }
     }
@@ -417,14 +411,15 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const [showInspector, setShowInspector] = useState(false);
   const [inspectorDefaults, setInspectorDefaults] = useState<{prov?:string; item?:string}>({});
   
-  // AÑADIDO: expectedTotal (extraido de Gemini) y Modo de Control de IVA
+  // 🆕 ESTADO DE ORDENACIÓN
+  const [sortConfig, setSortConfig] = useState<{ key: 'date' | 'prov' | 'total', asc: boolean }>({ key: 'date', asc: false });
+  
   const [form, setForm] = useState({ prov: '', date: DateUtil.today(), num: '', socio: 'Arume', notes: '', text: '', paid: false, unitId: 'REST' as BusinessUnit, expectedTotal: null as number | null });
   const [ivaMode, setIvaMode] = useState<IvaMode>('AUTO');
   
   const [quickCalc, setQuickCalc] = useState({ name: '', total: '', iva: 10 });
   const [editForm, setEditForm] = useState<Albaran | null>(null);
 
-  // Estados de IA, Vosk y Telegram
   const [isScanning, setIsScanning] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -433,10 +428,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const [isSyncingTelegram, setIsSyncingTelegram] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // INVOCAR AL CEREBRO DE IVA DUAL
   const { analyzedItems, liveTotals, decidedMode, roundingAdjustment } = useAlbaranEnginePRO(form.text, form.expectedTotal, ivaMode);
-
-  // Para el feedback visual de la tarjeta de total
   const isTotalMatching = form.expectedTotal ? Math.abs(liveTotals.grandTotal - form.expectedTotal) <= TOLERANCIA : true;
 
   const inRange = (iso: string, from?: string, to?: string) => {
@@ -506,7 +498,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     }
   };
 
-  // 🤖 MOTOR OCR LOCAL - AHORA EXTRAE TOTAL_FACTURA
   const processLocalFile = async (file: File) => {
     const apiKey = localStorage.getItem('gemini_api_key');
     if (!apiKey) return alert("⚠️ Configura tu clave de Gemini API en los ajustes primero.");
@@ -517,7 +508,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       const soloBase64 = fileBase64.split(',')[1];
 
       const ai = new GoogleGenAI({ apiKey });
-      // PROMPT MEJORADO para pedir el total escaneado
       const prompt = `Analiza este albarán. Devuelve SOLO un JSON estricto: { "proveedor": "Nombre", "num": "Nº", "fecha": "YYYY-MM-DD", "total_factura": 0, "lineas": [ {"q": 1, "n": "Producto", "t": 10.50, "rate": 10, "u": "kg"} ] }`;
       
       const response = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: [{ role: "user", parts: [{ text: prompt }, { inlineData: { data: soloBase64, mimeType: file.type } }] }], config: { responseMimeType: "application/json", temperature: 0.1 } });
@@ -570,7 +560,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const handleQuickAdd = () => {
     const t = Num.parse(quickCalc.total);
     if (t > 0 && quickCalc.name) {
-      // Al inyectar manual, inyectamos siempre asumiendo el precio como viene. El motor decidirá.
       const newLine = `1x ${quickCalc.name} ${quickCalc.iva}% ${t.toFixed(2)}`;
       setForm(prev => ({ ...prev, text: prev.text ? `${prev.text}\n${newLine}` : newLine }));
       setQuickCalc({ name: '', total: '', iva: 10 });
@@ -608,14 +597,13 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         const robustId = `alb-${form.date.replace(/-/g,'')}-${Date.now().toString().slice(-6)}-${form.unitId}`;
         let alerts: string[] = [];
         
-        // INNOVACIÓN 1: Inyectar línea de ajuste si existía redondeo
         const finalItems = [...analyzedItems];
         if (roundingAdjustment !== 0) {
             finalItems.push({ q: 1, n: "AJUSTE REDONDEO IA", t: roundingAdjustment, rate: 0, base: roundingAdjustment, tax: 0, unitPrice: roundingAdjustment, u: 'uds' } as any);
         }
 
         for (const it of finalItems as any[]) {
-          if (it.n === "AJUSTE REDONDEO IA") continue; // No trackeamos el ajuste en el historial
+          if (it.n === "AJUSTE REDONDEO IA") continue; 
 
           const provN = form.prov.trim().toUpperCase();
           const itemN = it.n.trim().toUpperCase();
@@ -669,6 +657,9 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         detachFromPreviousFacturaIfMoved(newData, before, sanitizedAlbaran);
         upsertFacturaFromAlbaran(newData, sanitizedAlbaran);
 
+        // 🛠️ TRUCO REACT: Clonar el array principal para forzar a la tabla a re-dibujarse sí o sí
+        newData.albaranes = [...newData.albaranes]; 
+
         await onSave(newData);
         setEditForm(null); 
     } finally {
@@ -695,9 +686,36 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     }
   };
 
+  // 🧠 CEREBRO DE FILTRADO Y ORDENACIÓN APLICADO
   const filteredForList = useMemo(() => {
-    return albaranesSeguros.filter(a => (selectedUnit==='ALL' ? true : a.unitId === selectedUnit)).filter(a => (!dateFrom && !dateTo) ? true : inRange(a.date||'', dateFrom, dateTo)).filter(a => !deferredSearch || filterByQuery(a, deferredSearch));
-  }, [albaranesSeguros, selectedUnit, dateFrom, dateTo, deferredSearch]);
+    // 1. Primero filtramos como siempre
+    let result = albaranesSeguros
+      .filter(a => (selectedUnit === 'ALL' ? true : a.unitId === selectedUnit))
+      .filter(a => (!dateFrom && !dateTo) ? true : inRange(a.date || '', dateFrom, dateTo))
+      .filter(a => !deferredSearch || filterByQuery(a, deferredSearch));
+
+    // 2. Luego ORDENAMOS la lista final según las flechas
+    result.sort((a, b) => {
+      let valA: any, valB: any;
+
+      if (sortConfig.key === 'date') {
+        valA = a.date || '';
+        valB = b.date || '';
+      } else if (sortConfig.key === 'prov') {
+        valA = (a.prov || '').toLowerCase();
+        valB = (b.prov || '').toLowerCase();
+      } else if (sortConfig.key === 'total') {
+        valA = Num.parse(a.total) || 0;
+        valB = Num.parse(b.total) || 0;
+      }
+
+      if (valA < valB) return sortConfig.asc ? -1 : 1;
+      if (valA > valB) return sortConfig.asc ? 1 : -1;
+      return 0;
+    });
+
+    return result;
+  }, [albaranesSeguros, selectedUnit, dateFrom, dateTo, deferredSearch, sortConfig]);
 
   const sumFiltered = useMemo(() => filteredForList.reduce((acc, a) => acc + (Num.parse(a.total) || 0), 0), [filteredForList]);
 
@@ -742,7 +760,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     XLSX.writeFile(wb, `Albaranes_${dateFrom || 'ALL'}.xlsx`);
   };
 
-  // Función de filtro seguro
   function filterByQuery(a: Albaran, q: string) {
     const term = basicNorm(q);
     if (basicNorm(a.prov).includes(term)) return true;
@@ -948,7 +965,36 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         </aside>
 
         <section className="lg:col-span-8">
-          {/* 🧩 LLAMAMOS A LA LISTA */}
+          
+          {/* 🆕 BARRA DE ORDENACIÓN VISUAL */}
+          <div className="flex items-center gap-2 mb-4 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm overflow-x-auto custom-scrollbar">
+            <span className="text-[10px] font-black uppercase text-slate-400 ml-2 tracking-widest flex items-center gap-1 shrink-0">
+              <ArrowUpDown className="w-3 h-3" /> Ordenar por:
+            </span>
+            
+            <button 
+              onClick={() => setSortConfig({ key: 'date', asc: sortConfig.key === 'date' ? !sortConfig.asc : false })}
+              className={cn("px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 shrink-0", sortConfig.key === 'date' ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-50")}
+            >
+              Fecha {sortConfig.key === 'date' && (sortConfig.asc ? <ArrowUp className="w-3 h-3"/> : <ArrowDown className="w-3 h-3"/>)}
+            </button>
+
+            <button 
+              onClick={() => setSortConfig({ key: 'prov', asc: sortConfig.key === 'prov' ? !sortConfig.asc : true })}
+              className={cn("px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 shrink-0", sortConfig.key === 'prov' ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-50")}
+            >
+              Proveedor {sortConfig.key === 'prov' && (sortConfig.asc ? <ArrowUp className="w-3 h-3"/> : <ArrowDown className="w-3 h-3"/>)}
+            </button>
+
+            <button 
+              onClick={() => setSortConfig({ key: 'total', asc: sortConfig.key === 'total' ? !sortConfig.asc : false })}
+              className={cn("px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 shrink-0", sortConfig.key === 'total' ? "bg-indigo-50 text-indigo-700" : "text-slate-500 hover:bg-slate-50")}
+            >
+              Total {sortConfig.key === 'total' && (sortConfig.asc ? <ArrowUp className="w-3 h-3"/> : <ArrowDown className="w-3 h-3"/>)}
+            </button>
+          </div>
+
+          {/* 🧩 LLAMAMOS A LA LISTA ORDENADA */}
           <AlbaranesList 
             albaranes={filteredForList} 
             searchQ={deferredSearch} 
