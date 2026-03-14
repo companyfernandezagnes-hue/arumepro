@@ -2,14 +2,14 @@ import React, { useMemo, useState } from 'react';
 import { 
   FileText, CheckCircle2, Clock, Trash2, Link as LinkIcon, 
   AlertCircle, Sparkles, Package, ChevronDown, ChevronUp, Edit2, Zap,
-  ArrowUp, ArrowDown, ArrowUpDown // 🆕 Iconos para ordenación
+  ArrowUp, ArrowDown, ArrowUpDown 
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-// 🛡️ Tipados importados del padre
-import { FacturaExtended, BusinessUnit } from './InvoicesView'; 
+
+// 🛡️ EL FIX QUE TE DEBÍA: Ahora apunta a la "ley" (types.ts), no a la vista.
+import { Albaran, FacturaExtended, BusinessUnit } from '../types'; 
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
-import { Albaran } from '../types';
 
 interface InvoicesListProps {
   facturas: FacturaExtended[];
@@ -46,7 +46,7 @@ const highlight = (text: string, q: string, superNormFn: Function) => {
   );
 };
 
-// 🛡️ PARSER DE FECHA SEGURO PARA SUPABASE
+// 🛡️ PARSER DE FECHA SEGURO
 const extractYearSafe = (dateStr: string | undefined) => {
   if (!dateStr) return '';
   if (dateStr.includes('/')) {
@@ -83,7 +83,6 @@ function useInvoicesFilters(
         if (!f || typeof f !== 'object') return false;
         if (f.status === 'draft') return false; 
 
-        // 🛡️ MEJORA 1: Filtro de fecha a prueba de fallos
         const fYear = extractYearSafe(f.date);
         if (yearStr && fYear !== yearStr) return false;
 
@@ -92,7 +91,6 @@ function useInvoicesFilters(
         
         // 🛑 FILTRO MÁGICO: Ocultamos Cajas (gastos menores), Banco y Ventas (Cajas Z)
         if (f.tipo === 'caja' || (f as any).tipo === 'banco' || f.tipo === 'venta') return false;
-        // Cortafuegos extra para evitar Cajas Z despistadas
         if (f.cliente === 'Z DIARIO' || String(f.num || '').toUpperCase().startsWith('Z') || String(f.num || '').toUpperCase().startsWith('CAJA')) return false;
 
         const normCliente = superNorm(String(f.cliente || ''));
@@ -116,7 +114,6 @@ function useInvoicesFilters(
         return true;
       });
 
-      // ORDENACIÓN DINÁMICA SEGURA
       return list.sort((a, b) => {
         let valA, valB;
         if (sortField === 'date') {
@@ -160,7 +157,7 @@ export const InvoicesList = React.memo(({
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
     } else {
       setSortField(field);
-      setSortOrder(field === 'prov' ? 'asc' : 'desc'); // Letras empiezan A-Z, números y fechas de mayor a menor
+      setSortOrder(field === 'prov' ? 'asc' : 'desc'); 
     }
   };
 
@@ -178,7 +175,6 @@ export const InvoicesList = React.memo(({
     }, { base: 0, iva: 0, total: 0 });
   }, [historyList]);
 
-  /* ----------------------- CABECERA ORDENADORA (ZOHO STYLE) ----------------------- */
   const SortableHeader = ({ title, sortKey, align = 'left' }: { title: string, sortKey: SortField, align?: 'left'|'center'|'right' }) => {
     const isActive = sortField === sortKey;
     return (
@@ -210,7 +206,6 @@ export const InvoicesList = React.memo(({
       <div className="overflow-x-auto custom-scrollbar flex-1 pb-6">
         <table className="w-full text-left border-collapse whitespace-nowrap min-w-[950px]">
           
-          {/* CABECERA FIJA ESTILO PREMIUM */}
           <thead className="sticky top-0 bg-white/95 backdrop-blur-sm z-20 shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
             <tr className="text-[10px] uppercase tracking-widest select-none border-b border-slate-200">
               <th className="p-3 w-10 text-center text-slate-400">#</th>
@@ -226,7 +221,6 @@ export const InvoicesList = React.memo(({
             </tr>
           </thead>
           
-          {/* FILAS */}
           <tbody className="text-[11px] font-medium text-slate-700 relative">
             <AnimatePresence mode="popLayout">
               {historyList.map(f => {
@@ -245,7 +239,6 @@ export const InvoicesList = React.memo(({
 
                 return (
                   <React.Fragment key={f.id}>
-                    {/* FILA PRINCIPAL */}
                     <motion.tr 
                       layout
                       initial={{ opacity: 0, x: -10 }} 
@@ -307,7 +300,6 @@ export const InvoicesList = React.memo(({
                       </td>
                     </motion.tr>
 
-                    {/* 💡 FILA EXPANDIDA: ARBOL DE ALBARANES */}
                     {isExpanded && hasAlbaranes && (
                       <motion.tr 
                         initial={{ opacity: 0, height: 0 }} 
@@ -318,12 +310,10 @@ export const InvoicesList = React.memo(({
                         <td colSpan={10} className="p-0">
                           <div className="py-5 px-14 relative flex items-start gap-4 overflow-x-auto custom-scrollbar">
                             
-                            {/* Línea conectora visual tipo "Tree" */}
                             <div className="absolute left-7 top-0 bottom-6 w-0.5 bg-indigo-200/50 rounded-b-full"></div>
 
                             {albaranesVinculados.map((alb) => (
                               <div key={alb.id} className="relative z-10 flex flex-col items-center bg-white p-3 rounded-xl border border-slate-200 shadow-sm min-w-[150px] hover:border-indigo-400 transition-all cursor-default group/alb">
-                                {/* Flechita que apunta al albarán */}
                                 <div className="absolute -left-6 top-1/2 w-6 h-0.5 bg-indigo-200/50"></div>
                                 <div className="absolute -left-7 top-1/2 w-2 h-2 rounded-full bg-indigo-300 -translate-y-1/2 border-2 border-slate-50"></div>
                                 
@@ -336,7 +326,6 @@ export const InvoicesList = React.memo(({
                               </div>
                             ))}
                             
-                            {/* Resumen de Suma de Albaranes */}
                             <div className="relative z-10 flex flex-col justify-center h-full ml-4">
                                <div className="bg-indigo-50 border border-indigo-100 px-4 py-3 rounded-2xl text-center shadow-inner">
                                  <p className="text-[9px] font-black uppercase text-indigo-400 tracking-widest mb-1">Suma Total Albaranes</p>
@@ -356,7 +345,6 @@ export const InvoicesList = React.memo(({
             </AnimatePresence>
           </tbody>
           
-          {/* 🛡️ FILA DE TOTALES FIJA ABAJO (BLINDADA CONTRA RE-RENDERS) */}
           <tfoot className="sticky bottom-0 bg-slate-900 text-white z-30 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.1)]">
             <tr className="text-xs font-bold uppercase tracking-widest">
               <td className="p-4" colSpan={5}>TOTALES ({historyList.length} documentos)</td>
