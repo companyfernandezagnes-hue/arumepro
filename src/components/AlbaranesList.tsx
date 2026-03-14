@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { Truck, CheckCircle2, Clock, Link as LinkIcon, Package } from 'lucide-react';
+import { Truck, CheckCircle2, Clock, Link as LinkIcon, Package, ChevronDown, ChevronUp, Edit2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Albaran } from '../types';
 import { Num } from '../services/engine';
@@ -68,6 +68,14 @@ export const AlbaranesList = React.memo(({
   /* ----------------------- AGRUPACIÓN DATOS --------------------- */
   const groups = useMemo(() => groupByDateKey(filtered), [filtered]);
 
+  /* ----------------------- ESTADO PARA EXPANDIR LÍNEAS ----------------------- */
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const toggleExpand = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    setExpandedId(expandedId === id ? null : id);
+  };
+
   /* ----------------------- PAGINACIÓN SUAVE ----------------------- */
   const pageSize = 100;
   const [page, setPage] = useState(1);
@@ -82,7 +90,6 @@ export const AlbaranesList = React.memo(({
     return () => window.removeEventListener('scroll', onScroll);
   }, [filtered.length]);
 
-  // Aplanamos las keys agrupadas pero solo mostramos hasta el límite de página actual
   const visibleGroups = useMemo(() => {
     const result = new Map<string, Albaran[]>();
     let count = 0;
@@ -111,101 +118,143 @@ export const AlbaranesList = React.memo(({
     );
   }
 
-  /* ----------------------- RENDER LISTA ------------------------- */
+  /* ----------------------- RENDER LISTA ESTILO EXCEL ------------------------- */
   return (
-    <div className="space-y-6 pb-20">
-      <AnimatePresence mode="popLayout">
-        {[...visibleGroups.entries()].map(([key, list]) => (
-          <motion.section 
-            key={key} 
-            initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
-            className="space-y-3"
-          >
-            {/* Header de grupo (HOY, AYER, FECHA) */}
-            <div className="px-2 text-[10px] font-black text-indigo-500 uppercase tracking-widest border-b border-slate-100 pb-1">
-              {key}
-            </div>
-
-            {list.map(a => {
-              const unitConfig = businessUnits.find(u => u.id === (a.unitId || 'REST'));
-
-              return (
-                <motion.div 
-                  layout 
-                  initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
-                  key={a.id} 
-                  role="button" tabIndex={0}
-                  onClick={() => onOpenEdit(a)} 
-                  onKeyDown={(e) => { if (e.key === 'Enter') onOpenEdit(a); }}
-                  aria-label={`Albarán ${a.num} de ${a.prov}, Total ${a.total} euros`}
-                  className={cn(
-                    "bg-white p-4 md:p-5 rounded-[2rem] border shadow-sm hover:shadow-lg transition-all duration-300 cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4 group focus:ring-2 ring-indigo-500/50 outline-none",
-                    a.reconciled ? "border-emerald-200 bg-emerald-50/10" : "border-slate-100 hover:border-indigo-100"
-                  )}
-                >
-                  <div className="flex-1 min-w-0">
-                    
-                    {/* 🏷️ CHIPS DE ESTADO */}
-                    <div className="flex flex-wrap items-center gap-2 mb-2">
-                      <span className="text-[10px] font-black text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full uppercase tracking-tighter border border-slate-200">
-                        {a.date}
-                      </span>
-                      
-                      {unitConfig && (
-                        <span className={cn("text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider flex items-center gap-1 shadow-sm", unitConfig.color, unitConfig.bg)}>
-                          <unitConfig.icon className="w-3 h-3" /> {unitConfig.name.split(' ')[0]}
-                        </span>
-                      )}
-
-                      {a.reconciled && (
-                        <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full flex items-center gap-1 shadow-sm">
-                          <LinkIcon className="w-3 h-3" /> CONCILIADO
-                        </span>
-                      )}
-                      
-                      {a.notes && (
-                        <span className="text-[9px] font-black text-indigo-500 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full flex items-center gap-1">
-                          📝 NOTA
-                        </span>
-                      )}
-                    </div>
-
-                    {/* 🏢 PROVEEDOR Y REF */}
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-slate-50 rounded-xl hidden md:block border border-slate-100">
-                        <Package className="w-5 h-5 text-slate-400" />
-                      </div>
-                      <div className="min-w-0">
-                        <h4 className="font-black text-slate-800 text-lg md:text-xl leading-none truncate group-hover:text-indigo-600 transition">
-                          {highlight(a.prov || 'Desconocido', searchQ)}
-                        </h4>
-                        <p className="text-[10px] text-slate-400 font-bold font-mono mt-1 uppercase tracking-widest">
-                          REF: {highlight(a.num || 'S/N', searchQ)}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
+    <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col max-h-[75vh] mb-20">
+      <div className="overflow-x-auto custom-scrollbar flex-1">
+        <table className="w-full text-left border-collapse whitespace-nowrap min-w-[900px]">
+          
+          {/* CABECERA FIJA */}
+          <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 z-20 shadow-sm">
+            <tr className="text-[10px] font-bold text-slate-500 uppercase tracking-widest select-none">
+              <th className="p-3 w-8 text-center"></th>
+              <th className="p-3">Fecha</th>
+              <th className="p-3">Ref</th>
+              <th className="p-3">Proveedor</th>
+              <th className="p-3 text-center">Unidad</th>
+              <th className="p-3 text-right">Total</th>
+              <th className="p-3 text-center">Estado</th>
+              <th className="p-3 text-center">Acciones</th>
+            </tr>
+          </thead>
+          
+          <tbody className="divide-y divide-slate-100 text-[11px] font-medium text-slate-700 relative">
+            <AnimatePresence mode="popLayout">
+              {[...visibleGroups.entries()].map(([key, list]) => (
+                <React.Fragment key={key}>
                   
-                  {/* 💰 TOTALES Y PAGO */}
-                  <div className="text-left md:text-right shrink-0 border-t md:border-t-0 pt-3 md:pt-0 border-slate-100 flex md:flex-col justify-between items-center md:items-end">
-                    <p className="font-black text-slate-900 text-2xl tracking-tighter leading-none">
-                      {Num.fmt(a.total)}
-                    </p>
-                    <div className={cn(
-                      "mt-2 px-3 py-1.5 rounded-lg text-[9px] font-black uppercase flex items-center gap-1.5 shadow-sm",
-                      a.paid ? 'bg-emerald-500 text-white shadow-emerald-500/20' : 'bg-slate-100 text-slate-500'
-                    )}>
-                      {a.paid ? <><CheckCircle2 className="w-3 h-3"/> PAGADO</> : <><Clock className="w-3 h-3"/> PENDIENTE</>}
-                    </div>
-                  </div>
+                  {/* FILA DE AGRUPACIÓN (HOY, AYER, FECHA) */}
+                  <tr>
+                    <td colSpan={8} className="bg-slate-50/80 px-4 py-2 text-[10px] font-black text-indigo-500 uppercase tracking-widest border-y border-slate-200">
+                      {key}
+                    </td>
+                  </tr>
 
-                </motion.div>
-              );
-            })}
+                  {list.map(a => {
+                    const unitConfig = businessUnits.find(u => u.id === (a.unitId || 'REST'));
+                    const isExpanded = expandedId === a.id;
+                    const hasItems = a.items && a.items.length > 0;
 
-          </motion.section>
-        ))}
-      </AnimatePresence>
+                    return (
+                      <React.Fragment key={a.id}>
+                        {/* FILA PRINCIPAL DEL ALBARÁN */}
+                        <motion.tr 
+                          layout 
+                          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                          onClick={() => onOpenEdit(a)} 
+                          className={cn("hover:bg-indigo-50/40 cursor-pointer transition-colors group z-10 relative", isExpanded ? "bg-indigo-50/30" : "")}
+                        >
+                          <td className="p-3 text-center" onClick={(e) => hasItems ? toggleExpand(e, a.id) : null}>
+                            {hasItems ? (
+                              <button className={cn("p-1 rounded-md transition-colors", isExpanded ? "bg-indigo-100 text-indigo-600" : "text-slate-400 hover:bg-slate-100 hover:text-slate-600")}>
+                                {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                              </button>
+                            ) : (
+                              <span className="w-3.5 h-3.5 inline-block"></span>
+                            )}
+                          </td>
+                          <td className="p-3 font-semibold text-slate-800">{a.date}</td>
+                          <td className="p-3 font-mono text-[10px] text-slate-500">{highlight(a.num || 'S/N', searchQ)}</td>
+                          <td className="p-3 font-bold text-slate-900 truncate max-w-[200px]" title={a.prov}>
+                            <div className="flex items-center gap-1.5">
+                              <span className="truncate">{highlight(a.prov || 'Desconocido', searchQ)}</span>
+                              {hasItems && <span className="ml-1 px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[8px] font-bold border border-slate-200">{a.items?.length || 0} lin</span>}
+                            </div>
+                          </td>
+                          <td className="p-3 text-center">
+                            {unitConfig && <span className={cn("text-[9px] px-1.5 py-0.5 rounded font-bold uppercase", unitConfig.bg, unitConfig.color)}>{unitConfig.name.split(' ')[0]}</span>}
+                          </td>
+                          <td className="p-3 text-right font-black text-slate-900 text-sm">{Num.fmt(a.total)}</td>
+                          
+                          <td className="p-3 text-center">
+                            {a.reconciled ? (
+                              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200"><LinkIcon className="w-3 h-3" /> CONCILIADO</span>
+                            ) : a.paid ? (
+                              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200"><CheckCircle2 className="w-3 h-3" /> PAGADO</span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200"><Clock className="w-3 h-3" /> PENDIENTE</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button type="button" onClick={(e) => { e.stopPropagation(); onOpenEdit(a); }} className="p-1.5 rounded text-indigo-500 hover:bg-indigo-100 transition" title="Editar">
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </motion.tr>
+
+                        {/* DESGLOSE DE PRODUCTOS AL EXPANDIR (ESTILO EXCEL) */}
+                        {isExpanded && hasItems && (
+                          <motion.tr 
+                            initial={{ opacity: 0, height: 0 }} 
+                            animate={{ opacity: 1, height: 'auto' }} 
+                            exit={{ opacity: 0, height: 0 }}
+                            className="bg-slate-50/50 relative overflow-hidden"
+                          >
+                            <td colSpan={8} className="p-0 border-b border-slate-200">
+                              <div className="py-4 px-12 relative">
+                                <div className="absolute left-6 top-0 bottom-0 w-0.5 bg-indigo-100"></div>
+                                <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden ml-6">
+                                  <table className="w-full text-left text-[10px]">
+                                    <thead className="bg-slate-100 text-slate-500 font-bold uppercase">
+                                      <tr>
+                                        <th className="px-3 py-2 w-16 text-center">Cant</th>
+                                        <th className="px-3 py-2 w-12 text-center">Ud</th>
+                                        <th className="px-3 py-2">Producto</th>
+                                        <th className="px-3 py-2 w-16 text-center">% IVA</th>
+                                        <th className="px-3 py-2 w-24 text-right">Precio Ud.</th>
+                                        <th className="px-3 py-2 w-24 text-right">Total</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                      {a.items?.map((it: any, idx: number) => (
+                                        <tr key={idx} className="hover:bg-slate-50">
+                                          <td className="px-3 py-2 text-center font-bold text-slate-700">{it.q}</td>
+                                          <td className="px-3 py-2 text-center text-slate-500">{it.u}</td>
+                                          <td className="px-3 py-2 font-medium text-slate-800">{it.n}</td>
+                                          <td className="px-3 py-2 text-center text-slate-500">{it.rate}%</td>
+                                          <td className="px-3 py-2 text-right text-slate-500">{Num.fmt(it.unitPrice)}</td>
+                                          <td className="px-3 py-2 text-right font-bold text-indigo-600">{Num.fmt(it.t)}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            </td>
+                          </motion.tr>
+                        )}
+
+                      </React.Fragment>
+                    );
+                  })}
+                </React.Fragment>
+              ))}
+            </AnimatePresence>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 });
