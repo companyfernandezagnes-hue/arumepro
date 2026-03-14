@@ -13,8 +13,8 @@ import { proxyFetch } from '../services/api';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import * as XLSX from 'xlsx';
 
-// 🚀 IMPORTAMOS EL CEREBRO Y EL SWIPE RECONCILER PARA MANTENER EL CÓDIGO LIMPIO
-import { findMatches, executeLink, isSuspicious, normalizeDesc, fingerprint, daysBetween } from '../services/bancoLogic';
+// 🚀 IMPORTAMOS EL CEREBRO ÚNICO (Con la ruta corregida a la raíz de 'src')
+import { findMatches, executeLink, isSuspicious, normalizeDesc, fingerprint, daysBetween } from '../bancoLogic';
 import { SwipeReconciler } from './SwipeReconciler';
 
 interface BancoViewProps {
@@ -103,7 +103,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
     return result;
   }, [data.banco]);
 
-  // 📉 WIDGETS FINANCIEROS (Aprovechamos tu código antiguo para mostrar previsiones)
+  // 📉 WIDGETS FINANCIEROS
   const pendingCajas = useMemo(() => {
     return (data.cierres || []).filter((c: any) => {
       const isCardMatched = (data.banco || []).some((b: any) => 
@@ -305,9 +305,9 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
           item.status = 'matched'; item.category = mov.categoriaAsignada || 'IA';
           count++;
         }
-        await onSave(newData); alert(`✨ Inteligencia Artificial ha conciliado ${count} movimientos.`);
+        await onSave(newData); alert(`✨ IA ha conciliado ${count} movimientos automáticamente.`);
       }
-    } catch (err) { alert("Error conectando con la IA de N8N."); } finally { setIsMagicLoading(false); }
+    } catch (err) { alert("Error conectando con N8N/IA."); } finally { setIsMagicLoading(false); }
   };
 
   const handleAutoCleanup = async () => {
@@ -363,8 +363,6 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
 
   return (
     <div className="animate-fade-in space-y-6 pb-24 max-w-[1600px] mx-auto">
-      
-      {/* HEADER DE COMANDOS PREMIUM */}
       <header className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 relative overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center relative z-10 gap-4">
           <div>
@@ -387,16 +385,16 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
           </div>
         </div>
 
-        {/* 🎛️ BARRA DE HERRAMIENTAS */}
+        {/* 🎛️ BARRA DE HERRAMIENTAS PREMIUM */}
         <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 pt-6">
           <div className="flex flex-wrap gap-2">
-            <button onClick={() => setActiveTab('list')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-1.5", activeTab === 'list' ? "bg-slate-800 text-white" : "bg-slate-50 text-slate-500 hover:bg-slate-100")}><List className="w-3.5 h-3.5"/> Reconciliación</button>
-            <button onClick={() => setActiveTab('insights')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-1.5", activeTab === 'insights' ? "bg-slate-800 text-white" : "bg-slate-50 text-slate-500 hover:bg-slate-100")}><BarChart3 className="w-3.5 h-3.5"/> Insights Financieros</button>
+            <button onClick={() => setActiveTab('list')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-1.5", activeTab === 'list' ? "bg-slate-800 text-white" : "bg-slate-50 text-slate-500 hover:bg-slate-100")}><List className="w-3.5 h-3.5"/> Lista</button>
+            <button onClick={() => setActiveTab('insights')} className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-1.5", activeTab === 'insights' ? "bg-slate-800 text-white" : "bg-slate-50 text-slate-500 hover:bg-slate-100")}><BarChart3 className="w-3.5 h-3.5"/> Insights Wave</button>
           </div>
 
           <div className="flex flex-wrap gap-2">
             <button onClick={() => fileInputRef.current?.click()} className="bg-white border border-slate-200 text-slate-600 px-4 py-2 rounded-xl text-[10px] font-black hover:bg-slate-50 transition shadow-sm flex items-center gap-2">
-              <Upload className="w-3.5 h-3.5" /> CSV
+              <Upload className="w-3.5 h-3.5" /> EXCEL/CSV
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" accept=".xlsx,.xls,.csv" />
             </button>
             <button onClick={handleApiSync} disabled={isApiSyncing} className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-[10px] font-black hover:bg-indigo-700 transition shadow-md flex items-center gap-2 border border-indigo-500">
@@ -419,85 +417,52 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
         </div>
       </header>
 
-      {/* 📊 PESTAÑA INSIGHTS (ESTILO WAVE) CON WIDGETS FINANCIEROS */}
+      {/* 📊 PESTAÑA INSIGHTS (WAVE STYLE) */}
       {activeTab === 'insights' && (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* WIDGET: Cajas Pendientes de Ingresar */}
-            <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100">
-               <h3 className="text-sm font-black text-slate-800 mb-1 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-emerald-500"/> Cajas Pendientes (Ingresos Esperados)</h3>
-               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-4">Dinero de TPVs que aún no ha llegado al banco</p>
-               {pendingCajas.length > 0 ? (
-                 <div className="space-y-2">
-                   {pendingCajas.map((c: any, i: number) => (
-                     <div key={i} className="flex justify-between items-center bg-slate-50 p-3 rounded-xl border border-slate-100">
-                       <span className="text-xs font-bold text-slate-600">Cierre {c.date}</span>
-                       <span className="text-sm font-black text-emerald-600">{Num.fmt(c.tarjeta)}</span>
-                     </div>
-                   ))}
-                 </div>
-               ) : (
-                 <p className="text-xs text-slate-400 text-center py-6">No hay ingresos de tarjeta pendientes.</p>
-               )}
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-white p-8 rounded-[3rem] shadow-sm border border-slate-100">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h3 className="text-xl font-black text-slate-800">CashFlow (Últimos 30 Días)</h3>
+              <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mt-1">Evolución de la liquidez</p>
             </div>
-
-            {/* WIDGET: Próximos Pagos Fijos */}
-            <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col justify-center items-center text-center">
-               <h3 className="text-sm font-black text-slate-800 mb-1 flex items-center gap-2 justify-center"><TrendingDown className="w-4 h-4 text-rose-500"/> Previsión a 7 Días</h3>
-               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-4">Pagos recurrentes próximos (Nóminas, Alquiler)</p>
-               <span className="text-5xl font-black text-rose-500 tracking-tighter">{Num.fmt(prevPagos)}</span>
-               <p className="text-xs font-bold text-slate-500 mt-2">Saldo estimado post-pagos: <span className="text-slate-800">{Num.fmt(stats.saldo - prevPagos)}</span></p>
+            <div className="flex gap-4">
+              <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-emerald-400"></div><span className="text-[10px] font-black uppercase text-slate-500">Ingresos</span></div>
+              <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-rose-400"></div><span className="text-[10px] font-black uppercase text-slate-500">Gastos</span></div>
             </div>
           </div>
-
-          {/* EL GRÁFICO PRINCIPAL */}
-          <div className="bg-white p-8 rounded-[3rem] shadow-sm border border-slate-100">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h3 className="text-xl font-black text-slate-800">CashFlow en Banco (Últimos 30 Días)</h3>
-                <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mt-1">Evolución de la liquidez real</p>
-              </div>
-              <div className="flex gap-4">
-                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-emerald-400"></div><span className="text-[10px] font-black uppercase text-slate-500">Ingresos</span></div>
-                <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-rose-400"></div><span className="text-[10px] font-black uppercase text-slate-500">Gastos</span></div>
-              </div>
-            </div>
-            
-            <div className="h-[400px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={cashFlowData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="colorInc" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#34d399" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#34d399" stopOpacity={0}/>
-                    </linearGradient>
-                    <linearGradient id="colorExp" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#fb7185" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#fb7185" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 'bold' }} axisLine={false} tickLine={false} tickMargin={10} />
-                  <YAxis tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 'bold' }} axisLine={false} tickLine={false} tickFormatter={(v)=>`${v/1000}k`} />
-                  <Tooltip 
-                    contentStyle={{ borderRadius: '1rem', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
-                    formatter={(val: number) => Num.fmt(val)}
-                    labelStyle={{ fontWeight: 'black', color: '#1e293b', marginBottom: '4px' }}
-                  />
-                  <Area type="monotone" dataKey="ingresos" stroke="#34d399" strokeWidth={3} fillOpacity={1} fill="url(#colorInc)" activeDot={{ r: 6, strokeWidth: 0 }} />
-                  <Area type="monotone" dataKey="gastos" stroke="#fb7185" strokeWidth={3} fillOpacity={1} fill="url(#colorExp)" activeDot={{ r: 6, strokeWidth: 0 }} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
+          
+          <div className="h-[400px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={cashFlowData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorInc" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#34d399" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#34d399" stopOpacity={0}/>
+                  </linearGradient>
+                  <linearGradient id="colorExp" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#fb7185" stopOpacity={0.3}/>
+                    <stop offset="95%" stopColor="#fb7185" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 'bold' }} axisLine={false} tickLine={false} tickMargin={10} />
+                <YAxis tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 'bold' }} axisLine={false} tickLine={false} tickFormatter={(v)=>`${v/1000}k`} />
+                <Tooltip 
+                  contentStyle={{ borderRadius: '1rem', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+                  formatter={(val: number) => Num.fmt(val)}
+                  labelStyle={{ fontWeight: 'black', color: '#1e293b', marginBottom: '4px' }}
+                />
+                <Area type="monotone" dataKey="ingresos" stroke="#34d399" strokeWidth={3} fillOpacity={1} fill="url(#colorInc)" activeDot={{ r: 6, strokeWidth: 0 }} />
+                <Area type="monotone" dataKey="gastos" stroke="#fb7185" strokeWidth={3} fillOpacity={1} fill="url(#colorExp)" activeDot={{ r: 6, strokeWidth: 0 }} />
+              </AreaChart>
+            </ResponsiveContainer>
           </div>
         </motion.div>
       )}
 
-      {/* 🧾 PESTAÑA LISTA (VISTA DIVIDIDA TIPO HOLDED) */}
+      {/* 🧾 PESTAÑA LISTA */}
       {activeTab === 'list' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          
-          {/* LISTADO DE MOVIMIENTOS */}
           <div className="lg:col-span-5 space-y-4">
             <div className="bg-white p-2 rounded-[1.5rem] border border-slate-200 flex items-center gap-2 shadow-sm sticky top-0 z-10">
               <Search className="w-4 h-4 text-slate-400 ml-3" />
@@ -522,30 +487,27 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
             </div>
           </div>
 
-          {/* DETALLE DEL MOVIMIENTO Y SUGERENCIAS */}
           <div className="lg:col-span-7">
-            <div className="bg-white p-8 md:p-10 rounded-[3rem] border border-slate-100 h-[680px] flex flex-col shadow-xl relative overflow-hidden">
+            <div className="bg-white p-10 rounded-[3rem] border border-slate-100 h-[680px] flex flex-col shadow-xl relative overflow-hidden">
               <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 to-purple-500"></div>
-              
               <AnimatePresence mode="wait">
                 {selectedItem ? (
                   <motion.div key={selectedItem.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="flex-1 flex flex-col">
-                    
                     <div className="border-b border-slate-100 pb-8 mb-8 relative">
                       <span className={cn("text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest", Num.parse(selectedItem.amount) > 0 ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700")}>
                         {Num.parse(selectedItem.amount) > 0 ? 'INGRESO DETECTADO' : 'GASTO DETECTADO'}
                       </span>
-                      <h3 className="font-black text-2xl md:text-3xl mt-5 leading-tight text-slate-800 tracking-tighter line-clamp-2">{selectedItem.desc}</h3>
-                      <p id={`bank-preview-${selectedItem.id}`} className={cn("text-4xl md:text-5xl font-black mt-3 tracking-tighter inline-block relative z-10", Num.parse(selectedItem.amount) > 0 ? "text-emerald-500" : "text-slate-900")}>
+                      <h3 className="font-black text-3xl mt-5 leading-tight text-slate-800 tracking-tighter">{selectedItem.desc}</h3>
+                      <p id={`bank-preview-${selectedItem.id}`} className={cn("text-5xl font-black mt-3 tracking-tighter inline-block", Num.parse(selectedItem.amount) > 0 ? "text-emerald-500" : "text-slate-900")}>
                         {Num.fmt(selectedItem.amount)}
                       </p>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 mb-6 relative">
+                    <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 mb-6">
                       {matches.length > 0 && selectedItem.status === 'pending' ? (
                         <div className="space-y-4">
                           <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-5 flex items-center gap-2">
-                            <Sparkles className="w-4 h-4 text-indigo-500" /> Sugerencias Inteligentes
+                            <Sparkles className="w-4 h-4 text-indigo-500" /> Sugerencias IA
                           </p>
                           {matches.slice(0, 3).map((m: any, idx: number) => {
                             const matchIdStr = `match-card-desk-${m.id}`;
@@ -553,7 +515,6 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
                             
                             return (
                               <div key={idx} className="relative">
-                                {/* 🚀 EL FAMOSO RAYO LÁSER RECUPERADO PARA ESCRITORIO */}
                                 <EnergyBeam sourceId={`bank-preview-${selectedItem.id}`} targetId={matchIdStr} isActive={isHovered} />
                                 
                                 <div 
@@ -597,7 +558,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
                         )
                       )}
 
-                      {/* ⚡ ACCIONES RÁPIDAS (TUS BOTONES ORIGINALES INTACTOS) */}
+                      {/* ⚡ ACCIONES RÁPIDAS */}
                       {selectedItem.status === 'pending' && (
                         <div className="mt-10 pb-4">
                           <h4 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-5 flex items-center gap-2">
@@ -631,7 +592,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
         </div>
       )}
 
-      {/* 🚀 MODAL SWIPE INTEGRADO (El Tinder Bancario) */}
+      {/* 🚀 MODAL SWIPE INTEGRADO */}
       <AnimatePresence>
         {isSwipeMode && (
           <SwipeReconciler 
