@@ -1,7 +1,7 @@
 import { AppData, GastoFijo, Activo, Albaran, Factura, Cierre } from "../types";
 
 /* ===========================
- * 🔢 NUMÉRICAS ROBUSTAS 
+ * 🔢 NUMÉRICAS ROBUSTAS (NUEVO MOTOR A PRUEBA DE BALAS)
  * =========================== */
 export const Num = {
   parse: (val: unknown): number => {
@@ -9,40 +9,47 @@ export const Num = {
     if (typeof val === "number" && Number.isFinite(val)) return val;
 
     let s = String(val).trim();
+    
+    // 1. Detectar si es negativo (ej: "-100" o "(100)")
+    let isNegative = s.includes("-") || (s.startsWith("(") && s.endsWith(")"));
+    
+    // 2. Limpiar TODO lo que no sea dígito, punto o coma (Adiós €, $, letras, espacios)
+    s = s.replace(/[^\d.,]/g, "");
+    if (!s) return 0;
 
-    // Soporte para paréntesis contables (100) -> -100
-    let negative = false;
-    if (s.startsWith("(") && s.endsWith(")")) {
-      negative = true;
-      s = s.slice(1, -1);
-    }
-
-    // Limpieza de caracteres no numéricos
-    s = s.replace(/[^\d.,\-+]/g, "").replace(/[\s']/g, "");
-
-    const sign = s.includes("-") ? -1 : 1;
-    s = s.replace(/[+-]/g, "");
-
+    // 3. Encontrar la última coma y el último punto
     const lastDot = s.lastIndexOf(".");
     const lastComma = s.lastIndexOf(",");
-    let decimalSep: "." | "," | null = null;
 
-    if (lastDot >= 0 || lastComma >= 0) {
-      if (lastDot > lastComma) decimalSep = ".";
-      else if (lastComma > lastDot) decimalSep = ",";
+    let integerPart = s;
+    let decimalPart = "00";
+
+    if (lastDot > -1 && lastComma > -1) {
+      // Si tiene AMBOS (ej: 1.500,20 o 1,500.20), el que esté más a la derecha es el decimal.
+      const decimalSep = lastDot > lastComma ? lastDot : lastComma;
+      integerPart = s.substring(0, decimalSep).replace(/[.,]/g, "");
+      decimalPart = s.substring(decimalSep + 1).replace(/[.,]/g, ""); 
+    } else if (lastDot > -1 || lastComma > -1) {
+      // Si solo tiene UNO de los dos
+      const sepIndex = Math.max(lastDot, lastComma);
+      const afterSep = s.substring(sepIndex + 1);
+
+      // MAGIA: Si tras el separador hay EXACTAMENTE 3 números, asumimos que es separador de miles (ej: 1.500 -> 1500)
+      if (afterSep.length === 3) {
+        integerPart = s.replace(/[.,]/g, "");
+        decimalPart = "00";
+      } else {
+        // En cualquier otro caso (ej: 1.5, 1.50, 1.5000), es un decimal
+        integerPart = s.substring(0, sepIndex).replace(/[.,]/g, "");
+        decimalPart = afterSep;
+      }
     }
 
-    if (decimalSep === ",") {
-      s = s.replace(/\./g, "").replace(",", ".");
-    } else if (decimalSep === ".") {
-      s = s.replace(/,/g, "");
-    } else {
-      s = s.replace(/[.,]/g, "");
-    }
-
-    const n = parseFloat(s);
-    const final = (negative ? -1 : 1) * sign * (Number.isFinite(n) ? n : 0);
-    return isNaN(final) ? 0 : final;
+    // 4. Ensamblar y convertir
+    const finalNum = parseFloat(`${integerPart}.${decimalPart}`);
+    const result = isNaN(finalNum) ? 0 : finalNum;
+    
+    return isNegative ? -result : result;
   },
 
   fmt: (val: number): string =>
@@ -62,7 +69,6 @@ export const DateUtil = {
   today: (): string => new Date().toISOString().split("T")[0],
 
   getMonthBounds: (month: number, year: number) => {
-    // month viene de 1 a 12
     const start = new Date(year, month - 1, 1, 0, 0, 0, 0);
     const end = new Date(year, month, 0, 23, 59, 59, 999);
     return { start, end };
@@ -72,7 +78,6 @@ export const DateUtil = {
     if (!d) return new Date();
     if (d instanceof Date) return d;
     const s = String(d).trim();
-    // Soporte ISO y formato DD/MM/YYYY
     if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(s)) {
       const [dd, mm, yyyy] = s.split("/");
       return new Date(Number(yyyy), Number(mm) - 1, Number(dd));
@@ -86,6 +91,7 @@ export const DateUtil = {
  * 📈 CÁLCULOS ERP
  * =========================== */
 export function calcularAmortizacionMensual(activos: Activo[] = []): number {
+  if (!activos || !Array.isArray(activos)) return 0; // Blindaje
   const hoy = new Date();
   let total = 0;
   for (const a of activos) {
@@ -115,6 +121,8 @@ export const ArumeEngine = {
   },
 
   getProfit: (data: AppData, month: number, year: number) => {
+    if (!data) return { ingresos: { total: 0, caja: 0, b2b: 0 }, gastos: { total: 0, comida: 0, bebida: 0, personal: 0, estructura: 0, amortizacion: 0 }, neto: 0, unitBreakdown: {}, ratios: { foodCost: 0, staffCost: 0, primeCost: 0 } };
+
     const { start, end } = DateUtil.getMonthBounds(month, year);
     const sMs = start.getTime();
     const eMs = end.getTime();
@@ -126,7 +134,7 @@ export const ArumeEngine = {
       CORP: { income: 0, expenses: 0, profit: 0 },
     };
 
-    // 1. INGRESOS (Z + Facturas)
+    // 1. INGRESOS
     let cajaZ = 0, facturasB2B = 0;
 
     (data.cierres || []).forEach(c => {
@@ -146,7 +154,7 @@ export const ArumeEngine = {
       const isZ = String(f.num || "").toUpperCase().startsWith("Z");
       const u = (f as any).unidad_negocio || 'REST';
 
-      if (!isZ && f.cliente !== 'Z DIARIO') {
+      if (!isZ && f.cliente !== 'Z DIARIO' && f.tipo === 'venta') {
         if (u === 'DLV') facturasB2B += val;
         if (unitBreakdown[u]) unitBreakdown[u].income += val;
       }
