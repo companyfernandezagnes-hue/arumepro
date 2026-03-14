@@ -14,12 +14,12 @@ interface AlbaranEditModalProps {
   onClose: () => void;
   onSave: (e?: React.MouseEvent) => void;
   onDelete: (id: string) => void;
-  recordingMode?: 'new' | 'edit' | null; // 🛡️ RECUPERADO
-  startVoiceRecording?: (mode: 'new' | 'edit') => void; // 🛡️ RECUPERADO
+  recordingMode?: 'new' | 'edit' | null; // 🛡️ INTACTO
+  startVoiceRecording?: (mode: 'new' | 'edit') => void; // 🛡️ INTACTO
 }
 
 /* =======================================================
- * 🧠 MOTOR DE APRENDIZAJE DE IVA (AI LEARNING)
+ * 🧠 MOTOR DE APRENDIZAJE DE IVA (AI LEARNING) - INTACTO
  * ======================================================= */
 const GLOBAL_VAT_CATALOG = {
   alcohol: [/CERVEZA/i, /VINO/i, /CAVA/i, /CHAMP/i, /WHISKY/i, /WHISKEY/i, /RON/i, /GINEBRA/i, /GIN/i, /LICOR/i, /VERMUT/i, /ALCOHOL/i],
@@ -114,7 +114,7 @@ export const AlbaranEditModal = ({
     setEditForm(prev => {
       if (!prev) return prev;
       pushUndo(prev);
-      const newItems = [...(prev.items || []), { q: 1, n: 'Nuevo Producto', u: 'uds', unitPrice: 0, t: 0, rate: 10, base: 0, tax: 0 }];
+      const newItems = [...(prev.items || []), { q: 1, n: '', u: 'uds', unitPrice: 0, t: 0, rate: 10, base: 0, tax: 0 }];
       return { ...prev, items: newItems };
     });
   };
