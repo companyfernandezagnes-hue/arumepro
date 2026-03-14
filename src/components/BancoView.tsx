@@ -13,8 +13,8 @@ import { proxyFetch } from '../services/api';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import * as XLSX from 'xlsx';
 
-// 🚀 IMPORTAMOS EL CEREBRO ÚNICO (Con la ruta corregida a la raíz de 'src')
-import { findMatches, executeLink, isSuspicious, normalizeDesc, fingerprint, daysBetween } from '../bancoLogic';
+// 🚀 FIX CRÍTICO DE RUTA: Apuntamos correctamente a la carpeta services/
+import { findMatches, executeLink, isSuspicious, normalizeDesc, fingerprint, daysBetween } from '../services/bancoLogic';
 import { SwipeReconciler } from './SwipeReconciler';
 
 interface BancoViewProps {
@@ -152,7 +152,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
 
   const selectedItem = useMemo(() => data.banco?.find((b: any) => b.id === selectedBankId), [data.banco, selectedBankId]);
   
-  // 🧠 USAMOS EL CEREBRO GLOBAL IMPORTADO (Para que aplique el Scoring y Multi-Albarán)
+  // 🧠 USAMOS EL CEREBRO GLOBAL IMPORTADO
   const matches = useMemo(() => {
     if (!selectedItem) return [];
     return findMatches(selectedItem, data).slice(0, 3); // Top 3 coincidencias
@@ -591,17 +591,6 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
           </div>
         </div>
       )}
-
-      {/* 🚀 MODAL SWIPE INTEGRADO */}
-      <AnimatePresence>
-        {isSwipeMode && (
-          <SwipeReconciler 
-            data={data} 
-            onSave={onSave} 
-            onClose={() => setIsSwipeMode(false)} 
-          />
-        )}
-      </AnimatePresence>
     </div>
   );
 };
