@@ -1,11 +1,11 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { AppData, EmailDraft } from '../types';
 
-// 1. NUEVA CONEXIÓN: Apuntando a las variables de entorno (.env)
+// 1. CONEXIÓN (Variables de entorno)
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://bgtelulbiaugawyrhvwt.supabase.co";
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_jagYegyG8gGMijzpLEY9BQ_iWfL1MU4";
 
-// 🛡️ FIX: PATRÓN SINGLETON PARA EVITAR MÚLTIPLES INSTANCIAS
+// 🛡️ SINGLETON PARA EVITAR MÚLTIPLES INSTANCIAS
 let supabaseInstance: SupabaseClient | null = null;
 
 export const supabase = (() => {
@@ -59,7 +59,6 @@ async function withTimeout<T>(p: Promise<T>, ms = 15000): Promise<T> {
 }
 
 // 🚀 INNOVACIÓN 1: Saneamiento estricto del esquema de datos
-// Esto garantiza que NUNCA desaparezcan los Socios ni las tablas principales
 const enforceSchema = (d: any): AppData => {
   const safeData = d || {};
   return {
@@ -79,16 +78,27 @@ const enforceSchema = (d: any): AppData => {
   };
 };
 
-// 🚀 INNOVACIÓN 2: Desenvolvedor Recursivo Anti-Matrioska
+// 🚀 INNOVACIÓN 2: Desenvolvedor Recursivo Anti-Stringification
 const unwrapData = (rawData: any) => {
   let cleanData = rawData;
+
+  // 🚨 EL FIX VITAL: Si Supabase nos devuelve un texto con un JSON dentro, lo convertimos a Objeto
+  if (typeof cleanData === 'string') {
+    try {
+      cleanData = JSON.parse(cleanData);
+    } catch (e) {
+      console.error("⚠️ Error crítico: El texto de la base de datos no es un JSON válido", e);
+      return enforceSchema({}); // Si está corrupto, devolvemos un esquema en blanco para no crashear
+    }
+  }
+
   let iterations = 0;
-  // Mientras esté envuelto en "data" y no tenga las tablas principales, lo desenvolvemos
+  // Mientras esté envuelto en "data" (Efecto Matrioska), lo desenvolvemos
   while (cleanData && typeof cleanData === 'object' && 'data' in cleanData && !cleanData.banco && iterations < 5) {
-    console.warn("⚠️ Efecto Matrioska detectado. Desenvolviendo capa...");
     cleanData = cleanData.data;
     iterations++;
   }
+  
   return enforceSchema(cleanData);
 };
 
@@ -170,6 +180,7 @@ export async function saveArumeData(
     const execUpsert = async () => {
       const { data: up, error } = await supabase
         .from('arume_data')
+        // Supabase guarda el payload. Si la columna data es de texto, se stringificará automáticamente por la librería de Supabase
         .upsert({ id: 1, data: payload }, { onConflict: 'id' })
         .select('updated_at, version')
         .single();
