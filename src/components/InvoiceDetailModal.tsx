@@ -4,9 +4,8 @@ import {
   CheckCircle2, AlertTriangle, Clock, Download, Bot, Edit2, Save, RefreshCw, Trash2
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-// 🛡️ Tipos importados
-import { FacturaExtended, BusinessUnit } from './InvoicesView';
-import { Albaran, AppData } from '../types';
+// 🛡️ IMPORTACIONES CORREGIDAS (Apunta a types.ts, NO a InvoicesView)
+import { Albaran, AppData, FacturaExtended, BusinessUnit } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
 
@@ -26,8 +25,8 @@ interface InvoiceDetailModalProps {
   onClose: () => void;
   onDownloadFile: (factura: FacturaExtended) => void;
   onTogglePago?: (id: string) => void; 
-  onSaveData?: (newData: AppData) => Promise<void>; // 🚀 NUEVO: Para guardar ediciones
-  fullData?: AppData; // 🚀 NUEVO: Acceso al estado global para guardar
+  onSaveData?: (newData: AppData) => Promise<void>; // 🚀 Para guardar ediciones
+  fullData?: AppData; // 🚀 Acceso al estado global para guardar
 }
 
 // 🏷️ CHIPS DE ESTADO
@@ -78,12 +77,12 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
   factura, albaranes, businessUnits, mode, onClose, onDownloadFile, onTogglePago, onSaveData, fullData
 }: InvoiceDetailModalProps) {
 
-  // 🚀 ESTADOS DE EDICIÓN (INNOVACIÓN 1)
+  // 🚀 ESTADOS DE EDICIÓN
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState({
-    num: factura.num || '',
-    date: factura.date || DateUtil.today(),
-    prov: factura.prov || factura.cliente || '',
+    num: factura?.num || '',
+    date: factura?.date || DateUtil.today(),
+    prov: factura?.prov || factura?.cliente || '',
   });
   const [isSaving, setIsSaving] = useState(false);
 
@@ -92,14 +91,12 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
     return () => { document.body.style.overflow = 'unset'; };
   }, []);
 
-  if (!factura || typeof factura !== 'object') return null;
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { 
       if (e.key === 'Escape' && !isEditing) onClose(); 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
         e.preventDefault();
-        if (factura.file_base64) onDownloadFile(factura);
+        if (factura?.file_base64) onDownloadFile(factura);
       }
     };
     document.addEventListener('keydown', onKey);
@@ -107,6 +104,8 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
   }, [onClose, onDownloadFile, factura, isEditing]);
 
   const trapRef = useFocusTrap(true);
+
+  if (!factura || typeof factura !== 'object') return null;
 
   const safeBusinessUnits = Array.isArray(businessUnits) ? businessUnits : [];
   const safeAlbaranes = Array.isArray(albaranes) ? albaranes : [];
@@ -139,7 +138,6 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
     return albaranesVinculados.reduce((acc, a) => acc + Math.abs(Num.parse(a.total) || 0), 0);
   }, [albaranesVinculados]);
 
-  // Totales extraídos de forma segura
   const total = Math.abs(Num.parse(factura.total) || 0);
   const base  = Math.abs(Num.parse(factura.base)  || Num.round2(total / 1.10));
   const iva   = Math.abs(Num.parse(factura.tax)   || Num.round2(total - base));
@@ -152,7 +150,7 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
 
   const chip = statusChip(factura);
 
-  // 🚀 LÓGICA DE EDICIÓN Y SINCRONIZACIÓN (INNOVACIÓN 1 y 2)
+  // 🚀 LÓGICA DE EDICIÓN Y SINCRONIZACIÓN
   const handleSaveEdits = async () => {
     if (!onSaveData || !fullData) return;
     setIsSaving(true);
@@ -189,7 +187,7 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
       
       if (idx !== undefined && idx > -1 && newData.facturas) {
         const newTotal = sumaAlbaranes;
-        const newBase = Num.round2(newTotal / 1.10); // Asumiendo IVA 10% por defecto general
+        const newBase = Num.round2(newTotal / 1.10); 
         const newTax = Num.round2(newTotal - newBase);
 
         newData.facturas[idx] = {
@@ -220,7 +218,7 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
         newData.facturas[idx].file_base64 = undefined;
         newData.facturas[idx].attachmentSha = undefined;
         await onSaveData(newData);
-        onClose(); // Cerramos el modal para refrescar estado
+        onClose(); 
       }
     } catch (error) {
       alert("Error al eliminar el adjunto.");
@@ -271,7 +269,6 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
         className="bg-[#F8FAFC] w-full max-w-2xl rounded-t-[2.5rem] md:rounded-[2.5rem] shadow-2xl relative z-10 flex flex-col h-[85dvh] md:h-auto md:max-h-[90dvh] overflow-hidden focus:outline-none"
         onClick={(e) => e.stopPropagation()} 
       >
-        {/* 📌 Header Editable */}
         <div className="p-6 border-b border-slate-200 bg-white flex justify-between items-start md:items-center relative z-20 shrink-0 flex-col md:flex-row gap-4">
           <div className="flex items-center gap-4 min-w-0 w-full">
             <div className={cn("w-12 h-12 rounded-full flex items-center justify-center shrink-0 shadow-sm border", isPerfectMatch ? "bg-indigo-50 text-indigo-600 border-indigo-100" : "bg-rose-50 text-rose-600 border-rose-100")}>
@@ -338,11 +335,9 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
           </div>
         </div>
 
-        {/* 📜 Body (Scrollable) */}
         <div className="flex-1 overflow-y-auto p-6 custom-scrollbar space-y-6" style={{ WebkitOverflowScrolling: 'touch' }}>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Info Unidad y Origen */}
             <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex flex-col justify-center">
               <span className="text-[10px] font-black text-slate-400 uppercase mb-2">Unidad Asignada</span>
               <span className={cn('text-[11px] font-black px-3 py-1.5 rounded-lg border uppercase tracking-wider shadow-sm inline-flex items-center gap-2 w-max', unit?.color || 'text-slate-600', unit?.bg || 'bg-slate-100', 'border-current opacity-90')}>
@@ -350,7 +345,6 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
               </span>
             </div>
 
-            {/* 📎 INNOVACIÓN 3: Gestión Visual del Adjunto (PDF) */}
             <div className={cn("p-5 rounded-3xl border shadow-sm flex flex-col justify-between", factura.file_base64 ? "bg-indigo-50/50 border-indigo-100" : "bg-slate-50 border-slate-100 border-dashed")}>
                {factura.file_base64 ? (
                  <>
@@ -371,14 +365,12 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
             </div>
           </div>
 
-          {/* ⚖️ Cuadro 3-Way Match con Barra de Progreso */}
           <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
               <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest flex items-center gap-1.5">
                 <ShieldCheck className="w-3 h-3"/> Auditoría 3‑Way Match
               </p>
               <div className="flex items-center gap-2">
-                {/* 🚀 INNOVACIÓN 2: Botón de Auto-Corrección Matemática */}
                 {!isPerfectMatch && onSaveData && !factura.reconciled && (
                    <button onClick={handleSyncTotals} disabled={isSaving} className="text-[9px] font-black px-2 py-1 rounded bg-amber-100 text-amber-700 hover:bg-amber-200 transition shadow-sm flex items-center gap-1">
                      {isSaving ? <Loader2 className="w-3 h-3 animate-spin"/> : <RefreshCw className="w-3 h-3"/>} Sincronizar Totales
@@ -407,13 +399,11 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
               </div>
             </div>
 
-            {/* Barra de progreso visual */}
             <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden flex shadow-inner mt-2">
               <motion.div initial={{ width: 0 }} animate={{ width: `${matchPercentage}%` }} transition={{ duration: 0.8 }} className="h-full bg-emerald-400" />
               {!isPerfectMatch && <motion.div initial={{ width: 0 }} animate={{ width: `${100 - matchPercentage}%` }} transition={{ duration: 0.8, delay: 0.4 }} className={cn("h-full", diferencia < 0 ? "bg-rose-400" : "bg-amber-400")} />}
             </div>
 
-            {/* Lista de albaranes o fallback */}
             {albaranesVinculados.length > 0 ? (
               <div className="space-y-2 mt-4 pt-4 border-t border-slate-100 max-h-48 overflow-y-auto custom-scrollbar pr-2">
                 {albaranesVinculados.map(alb => (
@@ -441,7 +431,6 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
           </div>
         </div>
 
-        {/* 📌 Footer: Desglose y Botones de Acción */}
         <div className="bg-slate-900 text-white shrink-0 relative z-20 shadow-[0_-10px_30px_rgba(0,0,0,0.15)] rounded-t-3xl md:rounded-t-none">
           <div className="p-6 md:p-8 pb-safe">
             
@@ -481,7 +470,6 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
                 </span>
               </div>
 
-              {/* Botones Dinámicos Inteligentes Haptic */}
               <div className="flex w-full md:w-auto gap-3 mt-2 md:mt-0">
                 {onTogglePago && !factura.paid && !factura.reconciled && (
                   <button onClick={() => onTogglePago(factura.id)} className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white py-3.5 px-6 rounded-xl font-black text-[10px] uppercase tracking-widest transition-colors flex items-center justify-center gap-2 shadow-lg active:scale-95 border border-emerald-400">
