@@ -2,7 +2,6 @@ import React, { useMemo, useState, useCallback } from 'react';
 import { AppData, Albaran, Factura } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
-// 🛡️ EL FIX: He añadido 'Loader2' a la lista de iconos importados
 import { Wallet, ArrowUpRight, ArrowDownRight, AlertCircle, CheckCircle2, TrendingUp, TrendingDown, Clock, Building2, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -70,16 +69,18 @@ export const TesoreriaView: React.FC<TesoreriaViewProps> = ({ data, onSave }) =>
       .filter(a => !a.paid)
       .sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime());
 
-    const totalCobrar = pendientesCobrar.reduce((t, f) => t + Num.parse(f.total), 0);
-    const totalPagar = pendientesPagar.reduce((t, a) => t + Num.parse(a.total), 0);
-    const posicionNeta = Num.round(totalCobrar - totalPagar);
+    const totalCobrar = pendientesCobrar.reduce((t, f) => t + Num.parse(f.total || 0), 0);
+    const totalPagar = pendientesPagar.reduce((t, a) => t + Num.parse(a.total || 0), 0);
+    
+    // 🔥 EL FIX DE COPILOT: Usamos Num.round2 en lugar del inexistente Num.round
+    const posicionNeta = Num.round2(totalCobrar - totalPagar);
 
     // 🧮 Riesgo (vencimiento) robusto
     const getRiesgo = (fecha: string) => {
       if (!fecha) return { label: 'Sin fecha', cls: 'text-slate-300', icon: <Clock className="w-3.5 h-3.5" /> };
       const d = DateUtil.parse(fecha);
       if (isNaN(d.getTime())) return { label: 'Fecha inválida', cls: 'text-slate-300', icon: <AlertCircle className="w-3.5 h-3.5" /> };
-      const diff = daysDiffLocal(today, d); // positivo: falta, negativo: vencido
+      const diff = daysDiffLocal(today, d); 
       
       if (diff < 0) return { label: `Vencido hace ${Math.abs(diff)} días`, cls: 'text-rose-600 font-black animate-pulse bg-rose-50 px-2 py-0.5 rounded-md border border-rose-100', icon: <AlertCircle className="w-3.5 h-3.5 text-rose-500" /> };
       if (diff === 0) return { label: `Vence HOY`, cls: 'text-orange-500 font-black bg-orange-50 px-2 py-0.5 rounded-md border border-orange-100', icon: <AlertCircle className="w-3.5 h-3.5 text-orange-500" /> };
@@ -93,8 +94,9 @@ export const TesoreriaView: React.FC<TesoreriaViewProps> = ({ data, onSave }) =>
     pendientesPagar.forEach(a => {
       const key = a.prov || 'Varios';
       if (!mapaProveedores[key]) mapaProveedores[key] = { total: 0, count: 0, urgencias: [] };
-      const tot = Num.parse(a.total);
-      mapaProveedores[key].total = Num.round(mapaProveedores[key].total + tot);
+      const tot = Num.parse(a.total || 0);
+      // 🔥 EL FIX DE COPILOT: Num.round2
+      mapaProveedores[key].total = Num.round2(mapaProveedores[key].total + tot);
       mapaProveedores[key].count++;
       mapaProveedores[key].urgencias.push(getRiesgo(a.dueDate!));
     });
@@ -106,8 +108,8 @@ export const TesoreriaView: React.FC<TesoreriaViewProps> = ({ data, onSave }) =>
     return {
       pendientesCobrar,
       pendientesPagar,
-      totalCobrar: Num.round(totalCobrar),
-      totalPagar: Num.round(totalPagar),
+      totalCobrar: Num.round2(totalCobrar),
+      totalPagar: Num.round2(totalPagar),
       posicionNeta,
       proveedoresOrdenados,
       getRiesgo
@@ -125,10 +127,10 @@ export const TesoreriaView: React.FC<TesoreriaViewProps> = ({ data, onSave }) =>
   }, [data.banco]);
 
   const handleCobrar = async (id: string) => {
-    const fac = data.facturas.find(x => x.id === id);
+    const fac = (data.facturas || []).find(x => x.id === id);
     if (!fac) return;
 
-    const amount = Num.parse(fac.total);
+    const amount = Num.parse(fac.total || 0);
     if (!confirm(`¿Confirmas COBRAR factura ${fac.num} por ${Num.fmt(amount)}?\n\nSe creará un ingreso en el Banco (si no existe ya).`)) return;
 
     try {
@@ -152,7 +154,7 @@ export const TesoreriaView: React.FC<TesoreriaViewProps> = ({ data, onSave }) =>
           id: newId('mov'),
           date: safeISODateLocal(new Date()),
           desc: `Cobro factura ${fac.num} (${fac.cliente || fac.prov || 'Cliente'})`,
-          amount: Num.round(amount),
+          amount: Num.round2(amount),
           status: 'matched',
           linkType: 'FACTURA',
           linkId: fac.id,
@@ -167,10 +169,10 @@ export const TesoreriaView: React.FC<TesoreriaViewProps> = ({ data, onSave }) =>
   };
 
   const handlePagar = async (id: string) => {
-    const alb = data.albaranes.find(x => x.id === id);
+    const alb = (data.albaranes || []).find(x => x.id === id);
     if (!alb) return;
 
-    const amount = -Math.abs(Num.parse(alb.total));
+    const amount = -Math.abs(Num.parse(alb.total || 0));
     if (!confirm(`¿Confirmas PAGAR albarán de ${alb.prov} por ${Num.fmt(Math.abs(amount))}?\n\nSe descontará del Banco (si no existe ya).`)) return;
 
     try {
@@ -193,7 +195,7 @@ export const TesoreriaView: React.FC<TesoreriaViewProps> = ({ data, onSave }) =>
           id: newId('mov'),
           date: safeISODateLocal(new Date()),
           desc: `Pago proveedor ${alb.prov} (Ref: ${alb.num})`,
-          amount: Num.round(amount),
+          amount: Num.round2(amount),
           status: 'matched',
           linkType: 'ALBARAN',
           linkId: alb.id,
