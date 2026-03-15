@@ -1,13 +1,16 @@
 import React, { useEffect, useMemo, useRef, useCallback, useState } from 'react';
 import {
   FileText, FileArchive, Package, Zap, X, Calendar, Hash, ShieldCheck, Link as LinkIcon,
-  CheckCircle2, AlertTriangle, Clock, Download, Bot, Edit2, Save, RefreshCw, Trash2
+  CheckCircle2, AlertTriangle, Clock, Download, Bot, Edit2, Save, RefreshCw, Trash2, Loader2 // 🛡️ FIX CRÍTICO: ¡Faltaba Loader2!
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+
 // 🛡️ IMPORTACIONES CORREGIDAS (Apunta a types.ts, NO a InvoicesView)
 import { Albaran, AppData, FacturaExtended, BusinessUnit } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
+// 🚀 IMPORTAMOS EL MOTOR CENTRAL DE FACTURACIÓN
+import { recomputeFacturaFromAlbaranes } from '../services/invoicing';
 
 interface BusinessUnitCfg {
   id: BusinessUnit;
@@ -25,8 +28,8 @@ interface InvoiceDetailModalProps {
   onClose: () => void;
   onDownloadFile: (factura: FacturaExtended) => void;
   onTogglePago?: (id: string) => void; 
-  onSaveData?: (newData: AppData) => Promise<void>; // 🚀 Para guardar ediciones
-  fullData?: AppData; // 🚀 Acceso al estado global para guardar
+  onSaveData?: (newData: AppData) => Promise<void>; 
+  fullData?: AppData; 
 }
 
 // 🏷️ CHIPS DE ESTADO
@@ -183,21 +186,11 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
     setIsSaving(true);
     try {
       const newData = JSON.parse(JSON.stringify(fullData)) as AppData;
-      const idx = newData.facturas?.findIndex(f => f.id === factura.id);
       
-      if (idx !== undefined && idx > -1 && newData.facturas) {
-        const newTotal = sumaAlbaranes;
-        const newBase = Num.round2(newTotal / 1.10); 
-        const newTax = Num.round2(newTotal - newBase);
-
-        newData.facturas[idx] = {
-          ...newData.facturas[idx],
-          total: String(newTotal),
-          base: String(newBase),
-          tax: String(newTax)
-        };
-        await onSaveData(newData);
-      }
+      // 🚀 MAGIA APLICADA: En lugar de matemáticas manuales, llamamos a nuestro Motor Central
+      recomputeFacturaFromAlbaranes(newData, factura.id, { strategy: 'useAlbTotals' });
+      
+      await onSaveData(newData);
     } catch (error) {
       alert("Error al sincronizar totales.");
     } finally {
