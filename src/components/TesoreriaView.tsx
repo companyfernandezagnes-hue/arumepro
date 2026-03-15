@@ -2,7 +2,8 @@ import React, { useMemo, useState, useCallback } from 'react';
 import { AppData, Albaran, Factura } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
-import { Wallet, ArrowUpRight, ArrowDownRight, AlertCircle, CheckCircle2, TrendingUp, TrendingDown, Clock, Building2 } from 'lucide-react';
+// 🛡️ EL FIX: He añadido 'Loader2' a la lista de iconos importados
+import { Wallet, ArrowUpRight, ArrowDownRight, AlertCircle, CheckCircle2, TrendingUp, TrendingDown, Clock, Building2, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface TesoreriaViewProps {
@@ -10,7 +11,7 @@ interface TesoreriaViewProps {
   onSave: (newData: AppData) => Promise<void>;
 }
 
-// 🛡️ FECHAS SEGURAS (Previene saltos por Zona Horaria - Aporte de Copilot)
+// 🛡️ FECHAS SEGURAS (Previene saltos por Zona Horaria)
 const startOfLocalDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 const daysDiffLocal = (from: Date, to: Date) => {
   const A = startOfLocalDay(from).getTime();
@@ -53,7 +54,7 @@ export const TesoreriaView: React.FC<TesoreriaViewProps> = ({ data, onSave }) =>
       paid: !!f.paid,
     }));
 
-    // 🛡️ Filtro operativo adaptado a NUESTROS estados (No solo 'posted' como decía Copilot)
+    // 🛡️ Filtro operativo adaptado a NUESTROS estados
     const isOperative = (doc: any) => {
       if (!('status' in doc)) return true; // Si no tiene status, asumimos que es antiguo/válido
       return doc.status !== 'draft' && doc.status !== 'mismatch'; 
@@ -133,7 +134,7 @@ export const TesoreriaView: React.FC<TesoreriaViewProps> = ({ data, onSave }) =>
     try {
       setSavingId(id);
 
-      // 🔒 Clonado inmutable PROFUNDO para evitar bugs de renderizado
+      // 🔒 Clonado inmutable PROFUNDO
       const newData: AppData = {
         ...data,
         facturas: [...(data.facturas || [])],
@@ -200,10 +201,8 @@ export const TesoreriaView: React.FC<TesoreriaViewProps> = ({ data, onSave }) =>
         } as any);
       }
 
-      // Si el albarán pertenece a una factura, intentamos marcar la factura como pagada también si procede
       const facVinculada = newData.facturas.find(f => f.albaranIdsArr?.includes(id));
       if (facVinculada && !facVinculada.paid) {
-        // Comprobamos si todos los albaranes de esa factura están pagados
         const allPaid = facVinculada.albaranIdsArr?.every(aId => {
           const a = newData.albaranes?.find(al => al.id === aId);
           return a?.paid;
