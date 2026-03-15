@@ -17,7 +17,7 @@ type ChatMessage = {
   isQueue?: boolean;
 };
 
-// 🛡️ FIX CRÍTICO: Formateador a prueba de balas
+// 🛡️ FIX CRÍTICO: Formateador a prueba de balas (Evita el pantallazo azul)
 const formatMarkdown = (text?: string) => {
   if (!text) return null;
   try {
@@ -78,10 +78,35 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
 
   const addSystemMessage = (text: string, type: 'system' | 'ai' = 'system') => {
     if (!text) return;
-    const msgId = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString() + Math.random();
+    const msgId = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString() + Math.random().toString();
     setHistory(prev => [...prev, { id: msgId, text, sender: type, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }]);
   };
 
+  /* =======================================================
+   * 📡 INNOVACIÓN: ESCUCHA DE ALERTAS GLOBALES DE LA APP
+   * ======================================================= */
+  useEffect(() => {
+    const handleAppAlert = async (e: any) => {
+      const alerta = e.detail;
+      if (alerta && telegramToken && chatId) {
+        try {
+          addSystemMessage(`🔔 Alerta detectada: ${alerta}`, 'system');
+          await fetchWithTimeout(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, text: `🚨 *ALERTA ARUME*\n\n${alerta}`, parse_mode: 'Markdown' })
+          }, { timeout: 5000 });
+        } catch (err) {
+          console.warn("No se pudo enviar la alerta automática a Telegram.");
+        }
+      }
+    };
+
+    window.addEventListener('arume-bot-alert', handleAppAlert);
+    return () => window.removeEventListener('arume-bot-alert', handleAppAlert);
+  }, [telegramToken, chatId]);
+
+  // Reconexión y cola offline
   useEffect(() => {
     const onOnline = async () => {
       if (pendingQueue.length > 0) {
@@ -98,6 +123,9 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
     return () => window.removeEventListener('online', onOnline);
   }, [pendingQueue]);
 
+  /* =======================================================
+   * 🎤 RECONOCIMIENTO DE VOZ WEB
+   * ======================================================= */
   const toggleVoiceRecord = () => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       return alert("Tu navegador no soporta dictado por voz.");
@@ -116,16 +144,18 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
   };
 
   /* =======================================================
-   * 🧠 CEREBRO DEL BOT (AHORA CON ACCIONES REALES)
+   * 🧠 CEREBRO DEL BOT (ACCIONES REALES Y BLINDADO)
    * ======================================================= */
   const processInteraction = async (texto: string) => {
     const msgId = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString();
-    setHistory(prev => [...prev, { id: msgId, text, sender: 'user', time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }]);
+    
+    // 🛡️ EL FIX PRINCIPAL: Usamos "text: texto" para evitar el ReferenceError
+    setHistory(prev => [...prev, { id: msgId, text: texto, sender: 'user', time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }]);
     setMessage(''); 
     
     const cmd = texto.toLowerCase().trim();
 
-    // 🚀 COMANDOS LOCALES REALES (La IA ejecuta acciones, no solo charla)
+    // 🚀 COMANDOS LOCALES REALES
     if (cmd === '/diagnostico' || cmd.includes('verifica el estado')) {
       addSystemMessage("🔍 Auditando bases de datos y conexiones...", 'system');
       setTimeout(() => {
@@ -143,7 +173,6 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
     if (cmd === '/sync_correos' || cmd.includes('sincroniza los correos')) {
       addSystemMessage("📧 Conectando con el buzón IMAP de facturas...", 'system');
       setTimeout(() => {
-        // Simulamos el disparo a la vista de facturación
         window.dispatchEvent(new CustomEvent('arume-bot-command', { detail: { cmd: 'sync_emails' } }));
         addSystemMessage("✅ Orden enviada. Si hay PDFs nuevos, aparecerán en Facturación.", 'ai');
         setIsSending(false);
@@ -212,10 +241,14 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
       }
     } catch (error) {
       addSystemMessage(telegramSuccess ? "✅ Enviado a tu móvil (Groq tardó en responder)." : "⚠️ Error general.", 'system');
+    } finally {
+      setIsSending(false);
+      isProcessingRef.current = false;
+      setTimeout(() => inputRef.current?.focus(), 100);
     }
   };
 
-  // 🛡️ EL ESCUDO: Evita que al mantener el Enter pulsado se bloquee la app
+  // 🛡️ EL ESCUDO: Evita el cuelgue por spam
   const safeSend = async (texto: string) => {
     if (!texto.trim() || isProcessingRef.current) return;
     isProcessingRef.current = true;
@@ -225,7 +258,8 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
       if (!navigator.onLine) {
         setPendingQueue(q => [...q, texto]);
         const msgId = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString();
-        setHistory(prev => [...prev, { id: msgId, text, sender: 'user', time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), isQueue: true }]);
+        // 🛡️ FIX CRÍTICO: text: texto
+        setHistory(prev => [...prev, { id: msgId, text: texto, sender: 'user', time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), isQueue: true }]);
         addSystemMessage('📥 Sin conexión. Encolado.', 'system');
         setMessage('');
         return;
@@ -306,9 +340,9 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
                       msg.isQueue ? "opacity-70 border-dashed border border-white" : ""
                     )}
                   >
-                    <p className={cn("leading-relaxed", msg.sender === 'system' ? "text-[10px] uppercase tracking-wider font-bold" : "text-[13px] font-medium")}>
+                    <div className={cn("leading-relaxed", msg.sender === 'system' ? "text-[10px] uppercase tracking-wider font-bold" : "text-[13px] font-medium")}>
                       {msg.sender === 'ai' ? formatMarkdown(msg.text) : msg.text}
-                    </p>
+                    </div>
                   </motion.div>
                 ))
               )}
