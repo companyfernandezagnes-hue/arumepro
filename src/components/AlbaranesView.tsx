@@ -4,7 +4,7 @@ import {
   Building2, ShoppingBag, ListPlus, Users, Hotel, Layers, 
   XCircle, LineChart as LineChartIcon, FileSpreadsheet, Mic, Square, Camera, Loader2, Smartphone,
   Calculator, Sparkles, ArrowUp, ArrowDown, ArrowUpDown,
-  ChevronLeft, ChevronRight // 🛡️ FIX CRÍTICO: Añadidos para evitar el Pantallazo Rojo
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { AppData, Albaran } from '../types';
 import { Num, ArumeEngine, DateUtil } from '../services/engine';
@@ -213,12 +213,11 @@ function useAlbaranEnginePRO(text: string, expectedTotal: number | null, ivaMode
         else if (raw.rate === 21) { b21 += base; i21 += tax; }
         else { b10 += base; i10 += tax; }
 
-        // 🛡️ EL FIX DE LOS 0,00€ PARA ALBARANES MANUALES: Generamos `t` y `total`
         out.push({ 
           q: raw.q, 
           n: raw.name, 
           t: Num.round2(total), 
-          total: Num.round2(total), // <-- Compatibilidad añadida
+          total: Num.round2(total), 
           rate: raw.rate, 
           base: Num.round2(base), 
           tax: Num.round2(tax), 
@@ -423,7 +422,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const [showInspector, setShowInspector] = useState(false);
   const [inspectorDefaults, setInspectorDefaults] = useState<{prov?:string; item?:string}>({});
   
-  // 🆕 ESTADO DE ORDENACIÓN
   const [sortConfig, setSortConfig] = useState<{ key: 'date' | 'prov' | 'total', asc: boolean }>({ key: 'date', asc: false });
   
   const [form, setForm] = useState({ prov: '', date: DateUtil.today(), num: '', socio: 'Arume', notes: '', text: '', paid: false, unitId: 'REST' as BusinessUnit, expectedTotal: null as number | null });
@@ -439,6 +437,19 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSyncingTelegram, setIsSyncingTelegram] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // 🚀 MAGIA BOT: EL AUDÍFONO (Escucha comandos de TelegramWidget)
+  useEffect(() => {
+    const handleBotCommand = (e: any) => {
+      const { cmd, q } = e.detail || {};
+      if (cmd === 'buscar' && q) {
+        setSearchQ(q);
+        window.scrollTo({ top: 0, behavior: 'smooth' }); // Te lleva a los resultados
+      }
+    };
+    window.addEventListener('arume-bot-command', handleBotCommand);
+    return () => window.removeEventListener('arume-bot-command', handleBotCommand);
+  }, []);
 
   const { analyzedItems, liveTotals, decidedMode, roundingAdjustment } = useAlbaranEnginePRO(form.text, form.expectedTotal, ivaMode);
   const isTotalMatching = form.expectedTotal ? Math.abs(liveTotals.grandTotal - form.expectedTotal) <= TOLERANCIA : true;
@@ -611,7 +622,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         
         const finalItems = [...analyzedItems];
         
-        // 🛡️ FIX REDONDEO: Aseguramos que el ajuste tenga 'total'
         if (roundingAdjustment !== 0) {
             finalItems.push({ q: 1, n: "AJUSTE REDONDEO IA", t: roundingAdjustment, total: roundingAdjustment, rate: 0, base: roundingAdjustment, tax: 0, unitPrice: roundingAdjustment, u: 'uds' } as any);
         }
@@ -625,7 +635,11 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
           const increase = detectPriceIncrease(newData.priceHistory, provN, itemN, normalizedPrice);
           if (increase.isIncrease) {
-            alerts.push(`📈 [${provN}] ${itemN} ha subido un +${increase.pct}% (Límite tolerado: ${increase.threshold}%). Antes: ${increase.previous?.unitPrice}€ -> Ahora: ${normalizedPrice}€`);
+            const msg = `📈 [${provN}] ${itemN} ha subido un +${increase.pct}% (Límite tolerado: ${increase.threshold}%). Antes: ${increase.previous?.unitPrice}€ -> Ahora: ${normalizedPrice}€`;
+            alerts.push(msg);
+            
+            // 🚀 MAGIA BOT: EL MEGÁFONO. Envía la alerta directa a Telegram a través del widget.
+            window.dispatchEvent(new CustomEvent('arume-bot-alert', { detail: msg }));
           }
 
           newData.priceHistory.push({ id: "price-" + Date.now() + "-" + Math.random().toString(36).slice(2), prov: provN, item: itemN, unitPrice: normalizedPrice, date: form.date });
@@ -634,7 +648,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         const newAlbaran: Albaran = {
           id: robustId, prov: form.prov.trim().toUpperCase(), date: form.date, num: form.num || "S/N",
           socio: form.socio, notes: form.notes, items: finalItems as any[], 
-          total: String(Num.round2(liveTotals.grandTotal)), // 🛡️ FIX STRINGS
+          total: String(Num.round2(liveTotals.grandTotal)), 
           base: String(Num.round2(liveTotals.baseFinal)), 
           taxes: String(Num.round2(liveTotals.taxFinal)), 
           invoiced: false, paid: form.paid, status: 'ok', reconciled: false, unitId: form.unitId 
@@ -674,7 +688,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         detachFromPreviousFacturaIfMoved(newData, before, sanitizedAlbaran);
         upsertFacturaFromAlbaran(newData, sanitizedAlbaran);
 
-        // 🛠️ TRUCO REACT: Clonar el array principal para forzar a la tabla a re-dibujarse sí o sí
         newData.albaranes = [...newData.albaranes]; 
 
         await onSave(newData);
