@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react'; 
 import { 
   Upload, FileText, CheckCircle2, Database, Building2,
   Sparkles, Loader2, Receipt, Mic, Square, AlertTriangle, X, Edit3, Grid, ListPlus, Trash2, ClipboardPaste, CalendarClock,
@@ -26,10 +26,9 @@ interface ImportViewProps {
 export type ImportMode = 'tpv' | 'albaranes_excel' | 'ia_auto' | 'banco_excel';
 
 /* =======================================================
- * 🛡️ MOTOR DE RECONCILIACIÓN MATEMÁTICA Y LÓGICA (DUAL IVA)
+ * 🛡️ MOTOR DE RECONCILIACIÓN MATEMÁTICA Y LÓGICA (BLINDADO)
  * ======================================================= */
 type LineaIA = { qty: any; name: string; unit: string; unit_price: any; tax_rate: any; total: any; };
-type AlbaranIA = { proveedor: string; fecha: string; num: string; unidad?: 'REST' | 'SHOP'; lineas: LineaIA[]; sum_base?: number; sum_tax?: number; sum_total?: number; };
 type DocumentoIA = { 
   tipo_documento: 'factura' | 'albaran' | 'ticket_simplificado';
   proveedor: string; nif?: string; fecha: string; num: string; 
@@ -49,7 +48,7 @@ const normalizeDate = (s?: string) => {
   return m ? `${m[3]}-${m[2]}-${m[1]}` : new Date().toLocaleDateString('sv-SE');
 };
 
-// 🚀 RECONCILIACIÓN PREDICTIVA BLINDADA
+// 🚀 RECONCILIACIÓN PREDICTIVA BLINDADA (El fix maestro)
 function reconcileAlbaran(ai: DocumentoIA) {
   let declared_total = Num.parse(ai.total);
   const rawLines = Array.isArray(ai.lineas) ? ai.lineas : [];
@@ -61,30 +60,49 @@ function reconcileAlbaran(ai: DocumentoIA) {
     for (const l of rawLines) {
       // Saneamiento estricto de la IA
       const parsedRate = Num.parse(l.tax_rate);
-      const rate = [4, 10, 21].includes(parsedRate) ? parsedRate : 10; // Fallback al 10% si se inventa un IVA
-      const rawNum = Num.parse(l.total); 
+      const rate = [4, 10, 21].includes(parsedRate) ? parsedRate : 10; // Fallback al 10%
       const qty = Num.parse(l.qty) || 1;
+      const unitPrice = Num.parse(l.unit_price);
       
-      let base, tax, total, unitPriceBruto;
-
-      if (isIvaIncluded) {
-        total = rawNum;
-        base = round2(total / (1 + rate/100));
-        tax = round2(total - base);
-        unitPriceBruto = qty > 0 ? total / qty : total;
-      } else {
-        base = rawNum;
-        tax = round2(base * (rate/100));
-        total = round2(base + tax);
-        unitPriceBruto = qty > 0 ? base / qty : base;
+      // 🛡️ EL FIX DE COPILOT: Si la IA no saca el total de la línea, lo calculamos nosotros
+      let lineTotalField = Num.parse(l.total); 
+      const netFromUnit = (isFinite(unitPrice) && unitPrice > 0) ? round2(qty * unitPrice) : 0;
+      
+      // Si la línea viene a 0€, pero tenemos precio unitario, lo usamos. Si no, 0.
+      if (lineTotalField <= 0 && netFromUnit > 0) {
+        lineTotalField = isIvaIncluded ? round2(netFromUnit * (1 + rate / 100)) : netFromUnit;
       }
 
-      grandTotal += total;
-      if (rate === 4) { b4 += base; i4 += tax; }
-      else if (rate === 21) { b21 += base; i21 += tax; }
-      else { b10 += base; i10 += tax; }
+      let base = 0, tax = 0, total = 0, unitPriceBruto = 0;
 
-      out.push({ q: qty, n: String(l.name || 'Articulo'), u: String(l.unit || 'uds'), rate, total: round2(total), base: round2(base), tax: round2(tax), unitPrice: round2(unitPriceBruto) });
+      if (isIvaIncluded) {
+        total = lineTotalField;
+        base = total > 0 ? round2(total / (1 + rate / 100)) : 0;
+        tax = round2(total - base);
+        unitPriceBruto = qty > 0 ? round2(total / qty) : total;
+      } else {
+        base = lineTotalField;
+        tax = round2(base * (rate / 100));
+        total = round2(base + tax);
+        unitPriceBruto = qty > 0 ? round2(base / qty) : base;
+      }
+
+      grandTotal = round2(grandTotal + total);
+
+      if (rate === 4) { b4 = round2(b4 + base); i4 = round2(i4 + tax); }
+      else if (rate === 21) { b21 = round2(b21 + base); i21 = round2(i21 + tax); }
+      else { b10 = round2(b10 + base); i10 = round2(i10 + tax); }
+
+      out.push({ 
+        q: qty, 
+        n: String(l.name || 'Articulo'), 
+        u: String(l.unit || 'uds'), 
+        rate, 
+        total: round2(total),  // 👈 Clave correcta para AlbaranesView
+        base: round2(base), 
+        tax: round2(tax), 
+        unitPrice: round2(unitPriceBruto) 
+      });
     }
 
     return { lines: out, sumTotal: round2(grandTotal), base4: b4, base10: b10, base21: b21, tax4: i4, tax10: i10, tax21: i21 };
@@ -92,14 +110,14 @@ function reconcileAlbaran(ai: DocumentoIA) {
 
   const calcInc = buildLines(true);
   const calcExc = buildLines(false);
-
   let chosenCalc = calcInc;
   
-  // Si la IA no encontró el total, asumimos que la suma de líneas (con IVA incluido) es la verdad absoluta
+  // Si la IA no encontró el total del ticket, asumimos que la suma de líneas (con IVA incluido) es la verdad absoluta
   if (declared_total <= 0 && rawLines.length > 0) {
     declared_total = calcInc.sumTotal; 
   }
 
+  // Elegimos el modo de IVA que más se acerque al total declarado en el ticket
   if (declared_total > 0) {
     const diffInc = Math.abs(calcInc.sumTotal - declared_total);
     const diffExc = Math.abs(calcExc.sumTotal - declared_total);
@@ -118,7 +136,7 @@ function reconcileAlbaran(ai: DocumentoIA) {
 
   const finalDiff = declared_total > 0 ? round2(chosenCalc.sumTotal - declared_total) : 0;
   const cuadra = declared_total > 0 ? Math.abs(finalDiff) === 0 : true;
-
+  
   const sum_base = round2(chosenCalc.base4 + chosenCalc.base10 + chosenCalc.base21);
   const sum_tax  = round2(chosenCalc.tax4 + chosenCalc.tax10 + chosenCalc.tax21);
 
@@ -143,7 +161,6 @@ function reconcileAlbaran(ai: DocumentoIA) {
 const extractJSON = (rawText: string) => {
   try {
     if (!rawText) return {};
-    // Limpiamos los bloques de código que suele meter Gemini
     let clean = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
     const start = clean.indexOf('{'); 
     const end = clean.lastIndexOf('}');
@@ -185,7 +202,6 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const analyzeWithRetry = async (mimeType: string, base64Data: string, prompt: string, maxRetries = 3): Promise<DocumentoIA> => {
   const geminiKey = sessionStorage.getItem('gemini_api_key') || localStorage.getItem('gemini_api_key');
   if (!geminiKey) throw new Error("Falta la clave API de Gemini en Ajustes.");
-
   const genAI = new GoogleGenAI({ apiKey: geminiKey });
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -212,11 +228,9 @@ const analyzeWithRetry = async (mimeType: string, base64Data: string, prompt: st
   throw new Error("Error desconocido tras múltiples intentos.");
 };
 
-// 💡 PROMPT OMNI-IA A PRUEBA DE BALAS
 const PROMPT_OMNI_IA = `Eres un Auditor Contable Experto. Analiza la imagen y extrae los datos al milímetro.
 IMPORTANTE 1: ¿Está PAGADO? Busca: "Pagado", "Efectivo", "Tarjeta", "Entregado", "Visa", "Transferencia".
 IMPORTANTE 2: Los importes numéricos NO deben llevar símbolo de moneda. Usa el punto (.) para decimales. (Ej: 1500.50).
-
 Devuelve SOLO un JSON estricto sin comentarios usando esta estructura:
 {
   "tipo_documento": "factura", // Valores: factura, albaran, ticket_simplificado
@@ -243,7 +257,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
   const safeAlbaranes = Array.isArray(safeData.albaranes) ? safeData.albaranes : [];
   const safePlatos = Array.isArray(safeData.platos) ? safeData.platos : [];
   const safeVentas = Array.isArray(safeData.ventas_menu) ? safeData.ventas_menu : [];
-
+  
   const [importMode, setImportMode] = useState<ImportMode>('ia_auto');
   const [isScanning, setIsScanning] = useState(false);
   
@@ -251,7 +265,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     current: number, total: number, success: number, fails: number, 
     currentThumb: string | null, isCoolingDown?: boolean
   } | null>(null);
-
+  
   const [batchReport, setBatchReport] = useState<{
     total: number, success: number, errors: { name: string, reason: string }[]
   } | null>(null);
@@ -263,7 +277,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { analyzeColumns, saveProfile } = useColumnDetector();
-
+  
   const [deleteMonth, setDeleteMonth] = useState(String(new Date().getMonth() + 1).padStart(2, '0'));
   const [deleteYear, setDeleteYear] = useState(String(new Date().getFullYear()));
 
@@ -295,7 +309,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         const safeBanco = Array.isArray(newData.banco) ? newData.banco : [];
         newData.banco = safeBanco.filter((b:any) => !isTargetMonth(b.date));
       }
-
+      
       await onSave(newData);
       setIsScanning(false);
       alert(`✅ Limpieza de ${mesNombre.toUpperCase()} completada con éxito.`);
@@ -316,11 +330,11 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     }
   };
 
-  // 🚀 LÓGICA OMNI-IA 
+  // 🚀 LÓGICA OMNI-IA (Integrada con corrección de redondeo y fallos)
   const procesarLoteIA = async (files: File[]) => {
     const apiK = sessionStorage.getItem('gemini_api_key') || localStorage.getItem('gemini_api_key');
     if (!apiK) return alert("⚠️ Configura la clave API de Gemini en Ajustes antes de continuar.");
-
+    
     setIsScanning(true);
     setBatchReport(null);
     setBatchProgress({ current: 0, total: files.length, success: 0, fails: 0, currentThumb: null });
@@ -339,10 +353,9 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       else thumbUrl = 'pdf-icon'; 
       
       setBatchProgress(p => p ? { ...p, current: i + 1, currentThumb: thumbUrl } : null);
-
+      
       try {
         let base64Data = ""; let mimeType = file.type;
-
         if (file.type.startsWith('image/')) {
           const compressed = await compressImage(file);
           base64Data = compressed.split(',')[1]; mimeType = "image/jpeg";
@@ -353,11 +366,21 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         }
 
         const datosIA = await analyzeWithRetry(mimeType, base64Data, PROMPT_OMNI_IA);
-
         const estaPagado = ['efectivo', 'tarjeta', 'banco'].includes(String(datosIA.metodo_pago).toLowerCase());
-
+        
         if (datosIA.tipo_documento === 'factura' || datosIA.tipo_documento === 'ticket_simplificado') {
-          const totalPdf = Num.parse(datosIA.total); 
+          // 🛡️ Extraemos totales y evitamos strings nulos
+          let totalPdf = Num.parse(datosIA.total);
+          
+          // Si la IA no saca el total de la factura, sumamos las líneas a la fuerza
+          if (totalPdf <= 0 && Array.isArray(datosIA.lineas)) {
+            totalPdf = datosIA.lineas.reduce((acc, l) => {
+               const lTotal = Num.parse(l.total);
+               const lBase = Num.parse(l.qty) * Num.parse(l.unit_price);
+               return acc + (lTotal > 0 ? lTotal : (lBase > 0 ? lBase * 1.10 : 0));
+            }, 0);
+          }
+
           const baseNum = Num.parse(datosIA.base) || Num.round2(totalPdf / 1.10); 
           const ivaNum = Num.parse(datosIA.iva) || Num.round2(totalPdf - baseNum);
 
@@ -374,12 +397,22 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
           const rec = reconcileAlbaran(datosIA);
           
           const finalItems = [...rec.lineasProcesadas];
+          
+          // 🛡️ EL FIX DE COPILOT: Usamos la clave `total` en lugar de `t`
           if (rec.roundingAdjustment !== 0) {
-            finalItems.push({ q: 1, n: "AJUSTE REDONDEO IA", u: 'uds', t: rec.roundingAdjustment, rate: 0, base: rec.roundingAdjustment, tax: 0, unitPrice: rec.roundingAdjustment });
+            finalItems.push({ 
+              q: 1, n: "AJUSTE REDONDEO IA", u: 'uds', rate: 0, 
+              base: round2(rec.roundingAdjustment), tax: 0, 
+              total: round2(rec.roundingAdjustment), // 👈 Esto arregla el fallo del Albaran
+              unitPrice: round2(rec.roundingAdjustment) 
+            });
           }
 
           nuevosAlbaranes.push({
-            id: `alb-ia-${Date.now()}-${i}`, prov: rec.proveedor || "Desconocido", date: rec.fecha, num: rec.num || "S/N", socio: "Arume",
+            id: `alb-ia-${Date.now()}-${i}`, 
+            prov: rec.proveedor || "Desconocido", 
+            date: normalizeDate(rec.fecha), 
+            num: rec.num || "S/N", socio: "Arume",
             notes: rec.cuadra ? "IA Lote OK" : `IA WARNING (Dif: ${Num.fmt(rec.diff)})`,
             items: finalItems,
             total: String(rec.sum_total), base: String(rec.sum_base), taxes: String(rec.sum_tax), 
@@ -389,13 +422,13 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         
         successCount++;
         setBatchProgress(p => p ? { ...p, success: successCount } : null);
-
       } catch (e: any) {
         console.error(`Fallo final en ${fileName}:`, e.message);
         errorDetails.push({ name: fileName, reason: e.message || "Error de procesado" });
         setBatchProgress(p => p ? { ...p, fails: errorDetails.length } : null);
       }
-
+      
+      // Cooldown Inteligente para no saturar a Gemini API
       if (i < files.length - 1) {
         if ((i + 1) % 15 === 0) {
           setBatchProgress(p => p ? { ...p, isCoolingDown: true } : null);
@@ -415,7 +448,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       newData.albaranes = [...nuevosAlbaranes, ...safeAlbaranes];
       await onSave(newData);
     } 
-
+    
     setBatchReport({ total: files.length, success: successCount, errors: errorDetails });
     setIsScanning(false);
     setBatchProgress(null);
@@ -423,7 +456,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
 
   const processFilesArray = async (files: File[]) => {
     if (files.length === 0) return;
-
     if (importMode === 'ia_auto') { 
        const invalidFiles = files.filter(f => !f.type.includes('pdf') && !f.type.startsWith('image/'));
        if (invalidFiles.length > 0) return alert("⚠️ La IA solo admite archivos PDF o Imágenes (JPG/PNG).");
@@ -431,7 +463,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
        await procesarLoteIA(files);
        return; 
     } 
-
+    
     const file = files[0];
     if (!['.xls', '.xlsx', '.csv'].some(ext => file.name.toLowerCase().endsWith(ext))) {
       return alert("⚠️ Este modo es para archivos Excel (.xlsx) o CSV.");
@@ -442,7 +474,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       try {
         const wb = XLSX.read(evt.target?.result, { type: 'binary' });
         const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 }) as any[][];
-
+        
         if (importMode === 'tpv') {
           const dateInput = prompt(`📅 ¿Fecha de ventas TPV Madis? (YYYY-MM-DD):`, DateUtil.today());
           if (!dateInput) return;
@@ -459,9 +491,8 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
             if (h.includes('concepto') || h.includes('desc') || h.includes('detalle')) descCol = i;
             if (h.includes('importe') || h.includes('cantidad') || h.includes('amount') || h.includes('valor')) amountCol = i;
           });
-
           if (dateCol === -1) dateCol = 0; if (descCol === -1) descCol = 1; if (amountCol === -1) amountCol = 2;
-
+          
           rows.slice(1).forEach((row, i) => {
             const rawAmount = row[amountCol];
             const parsedAmount = typeof rawAmount === 'number' ? rawAmount : Num.parse(String(rawAmount || 0));
@@ -469,7 +500,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
               movimientosBancarios.push({ id: `bnk-${Date.now()}-${i}`, date: normalizeDate(row[dateCol]), desc: String(row[descCol]).trim(), amount: parsedAmount, status: 'pending' });
             }
           });
-
+          
           if (movimientosBancarios.length === 0) return alert("⚠️ No se pudieron extraer movimientos.");
           setProcessedData({ bancoExcel: movimientosBancarios });
         }
@@ -490,6 +521,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     if (e.dataTransfer.files) processFilesArray(Array.from(e.dataTransfer.files));
   };
 
+  // CTRL+V para Pegar Imágenes
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
       if (isScanning) return;
@@ -607,7 +639,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
                 </div>
               </div>
             )}
-
+            
             <button onClick={() => { setBatchReport(null); onNavigate('albaranes'); }} className="bg-indigo-600 text-white font-black uppercase text-xs px-8 py-4 rounded-xl shadow-lg hover:bg-indigo-700 transition">
               Ir a revisar Documentos
             </button>
@@ -655,7 +687,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
                            className="absolute top-0 left-0 w-full h-1 bg-emerald-400 shadow-[0_0_15px_rgba(52,211,153,1)] z-20"
                          />
                        )}
-
                        {batchProgress.isCoolingDown && (
                          <div className="absolute inset-0 bg-slate-900/80 flex items-center justify-center backdrop-blur-sm z-30">
                            <span className="text-[9px] font-black text-white uppercase text-center leading-tight">Cuidando<br/>API...</span>
@@ -718,7 +749,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
                       <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600 flex items-center gap-1.5"><Edit3 className="w-3 h-3"/> Resumen de Importación</span>
                       <button onClick={() => setProcessedData(null)} className="text-slate-400 hover:text-slate-700"><X className="w-4 h-4"/></button>
                     </div>
-
                     <div className="mt-10 space-y-4 mb-6">
                       {importMode === 'banco_excel' && processedData.bancoExcel && (
                         <div className="bg-slate-50 rounded-xl p-4 text-center border border-slate-200">
@@ -736,7 +766,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
                         </div>
                       )}
                     </div>
-
                     <button onClick={handleConfirm} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm py-4 rounded-xl transition-all shadow-lg hover:shadow-indigo-500/30 flex justify-center items-center gap-2">
                       <Database className="w-4 h-4" /> GUARDAR EN ARUME
                     </button>
@@ -744,7 +773,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
                 </motion.div>
               )}
             </AnimatePresence>
-
           </div>
         )}
       </div>
@@ -763,7 +791,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
               </p>
             </div>
           </div>
-
           <div className="flex gap-2 bg-slate-50 p-2 rounded-2xl border border-slate-200">
             <select 
               value={deleteMonth} 
@@ -782,7 +809,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
             />
           </div>
         </div>
-
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-4 border-t border-slate-100">
           <button onClick={() => handleNukeQuirurgico('docs')} disabled={isScanning} className="flex items-center justify-between p-4 bg-white border border-rose-200 hover:bg-rose-50 hover:border-rose-400 transition-all rounded-2xl text-left group disabled:opacity-50">
             <div>
@@ -791,7 +817,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
             </div>
             <Trash2 className="w-5 h-5 text-rose-300 group-hover:text-rose-600 transition-colors" />
           </button>
-
           <button onClick={() => handleNukeQuirurgico('bank')} disabled={isScanning} className="flex items-center justify-between p-4 bg-white border border-blue-200 hover:bg-blue-50 hover:border-blue-400 transition-all rounded-2xl text-left group disabled:opacity-50">
             <div>
               <span className="font-black text-sm text-slate-800 flex items-center gap-2"><Building2 className="w-4 h-4 text-blue-500" /> Banco y Conciliación</span>
@@ -799,7 +824,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
             </div>
             <Trash2 className="w-5 h-5 text-blue-300 group-hover:text-blue-600 transition-colors" />
           </button>
-
           <button onClick={handleNukeDataOps} disabled={isScanning} className="flex items-center justify-between p-4 bg-white border border-amber-200 hover:bg-amber-50 hover:border-amber-400 transition-all rounded-2xl text-left group disabled:opacity-50">
             <div>
               <span className="font-black text-sm text-slate-800 flex items-center gap-2"><Grid className="w-4 h-4 text-amber-500" /> Purgar Platos Carta</span>
@@ -809,7 +833,6 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
           </button>
         </div>
       </div>
-
     </div>
   );
 };
@@ -821,7 +844,6 @@ const ModuleButton = ({ active, onClick, icon: Icon, title, subtitle, color }: a
     blue: active ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-200' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:bg-blue-50',
     amber: active ? 'bg-amber-500 text-white border-amber-500 shadow-md shadow-amber-200' : 'bg-white text-slate-600 border-slate-200 hover:border-amber-300 hover:bg-amber-50',
   };
-
   return (
     <button onClick={onClick} className={cn("p-4 rounded-2xl border transition-all flex flex-col items-center justify-center gap-2 text-center", colors[color as keyof typeof colors])}>
       <Icon className={cn("w-6 h-6", active ? "text-white" : `text-${color}-500`)} />
