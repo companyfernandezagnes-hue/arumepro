@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
-import { Save, Trash2, X, Plus, Mic, Package, AlertCircle, Bot, Wand2, MinusCircle, Calculator, Undo2 } from 'lucide-react';
+import { Save, Trash2, X, Plus, Mic, Package, AlertCircle, Bot, Wand2, MinusCircle, Calculator, Undo2, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Albaran } from '../types';
 import { Num } from '../services/engine';
@@ -39,6 +39,33 @@ const predictVat = (name: string, learnedMemory: Record<string, number>, default
   return { expected: defaultVat, reason: 'IVA General Hostelería' };
 };
 
+/* =======================================================
+ * 🛡️ RECALCULADOR OMNIPOTENTE (El Antídoto contra los 0,00€)
+ * ======================================================= */
+const recalcTotalsSafe = (items: any[]) => {
+  const safeItems = Array.isArray(items) ? items : [];
+  
+  const getLineTotal = (it: any) => {
+    // Busca primero 'total', luego 't', luego 'base+tax', luego 'qty*precio'
+    const rawTotal = Num.parse(it.total ?? it.t ?? 0);
+    if (rawTotal > 0) return rawTotal;
+    
+    const basePlusTax = Num.parse(it.base ?? 0) + Num.parse(it.tax ?? 0);
+    if (basePlusTax > 0) return basePlusTax;
+    
+    return Num.parse(it.q ?? 1) * Num.parse(it.unitPrice ?? it.unit_price ?? 0);
+  };
+
+  const globalTotal = safeItems.reduce((acc, it) => acc + getLineTotal(it), 0);
+  const globalBase  = safeItems.reduce((acc, it) => acc + (Num.parse(it.base) || 0), 0);
+  const globalTax   = safeItems.reduce((acc, it) => acc + (Num.parse(it.tax)  || 0), 0);
+  
+  return { 
+    total: Num.round2(globalTotal), 
+    base: Num.round2(globalBase), 
+    taxes: Num.round2(globalTax) 
+  };
+};
 
 /* =======================================================
  * 📦 COMPONENTE PRINCIPAL
@@ -56,6 +83,41 @@ export const AlbaranEditModal = ({
     try { return JSON.parse(localStorage.getItem('arume_vat_rules') || '{}'); } catch { return {}; }
   });
 
+  // 🛡️ EFECTO SANADOR AL ABRIR: Si el albarán es viejo o le faltan campos, se los inyecta.
+  useEffect(() => {
+    if (!editForm || !Array.isArray(editForm.items)) return;
+    
+    const normItems = editForm.items.map((it: any) => {
+      const q = Num.parse(it.q ?? 1);
+      const unitPrice = Num.round2(Num.parse(it.unitPrice ?? it.unit_price ?? 0));
+      const t_in = Num.parse(it.total ?? it.t ?? (q > 0 ? q * unitPrice : 0));
+      
+      const base = Num.round2(Num.parse(it.base ?? (t_in / (1 + (Number(it.rate ?? 10)/100)))));
+      const tax  = Num.round2(Num.parse(it.tax  ?? (t_in - base)));
+      const finalTotal = Num.round2(t_in);
+      
+      return {
+        ...it,
+        q, n: String(it.n || 'Articulo'), u: String(it.u || 'uds'),
+        rate: Number(it.rate ?? 10),
+        unitPrice,
+        t: finalTotal, total: finalTotal, base, tax
+      };
+    });
+
+    const totals = recalcTotalsSafe(normItems);
+    
+    setEditForm(prev => prev ? ({
+      ...prev,
+      items: normItems,
+      total: String(Num.round2(Num.parse(prev.total || String(totals.total)))),
+      base:  String(Num.round2(Num.parse(prev.base  || String(totals.base)))),
+      taxes: String(Num.round2(Num.parse(prev.taxes || prev.iva || String(totals.taxes)))),
+    }) : prev);
+    
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editForm.id]);
+
   const pushUndo = (state: any) => {
     undoRef.current = [JSON.parse(JSON.stringify(state)), ...undoRef.current].slice(0, 10);
   };
@@ -68,13 +130,6 @@ export const AlbaranEditModal = ({
   /* =======================================================
    * 🧮 FUNCIONES MATEMÁTICAS ESTRICTAS Y DEEP EDIT
    * ======================================================= */
-  const recalcTotals = (items: any[]) => {
-    const globalTotal = items.reduce((acc, it) => acc + (Num.parse(it.t) || 0), 0);
-    const globalBase  = items.reduce((acc, it) => acc + (Num.parse(it.base) || 0), 0);
-    const globalTax   = items.reduce((acc, it) => acc + (Num.parse(it.tax) || 0), 0);
-    return { total: Num.round2(globalTotal), base : Num.round2(globalBase), taxes: Num.round2(globalTax) };
-  };
-
   const handleItemChange = useCallback((index: number, field: string, value: any) => {
     setEditForm(prev => {
       if (!prev || !prev.items) return prev;
@@ -87,13 +142,16 @@ export const AlbaranEditModal = ({
       if (field === 'q') {
         it.q = Num.parse(value);
         it.t = Num.round2(it.q * (Num.parse(it.unitPrice) || 0));
+        it.total = it.t; // Sincronizamos 'total' y 't'
       } 
       else if (field === 'unitPrice') {
         it.unitPrice = Num.parse(value);
         it.t = Num.round2((Num.parse(it.q) || 1) * it.unitPrice);
+        it.total = it.t;
       } 
-      else if (field === 't') {
+      else if (field === 't' || field === 'total') {
         it.t = Num.parse(value);
+        it.total = it.t;
         if (Num.parse(it.q) > 0) it.unitPrice = Num.round2(it.t / Num.parse(it.q));
       } 
       else if (field === 'rate') it.rate = Number(value) as 4 | 10 | 21;
@@ -105,8 +163,14 @@ export const AlbaranEditModal = ({
       it.tax = Num.round2(it.t - it.base);
 
       items[index] = it;
-      const totals = recalcTotals(items);
-      return { ...prev, items, ...totals };
+      const totals = recalcTotalsSafe(items);
+      return { 
+        ...prev, 
+        items, 
+        total: String(totals.total),
+        base: String(totals.base),
+        taxes: String(totals.taxes)
+      };
     });
   }, [setEditForm]);
 
@@ -114,7 +178,7 @@ export const AlbaranEditModal = ({
     setEditForm(prev => {
       if (!prev) return prev;
       pushUndo(prev);
-      const newItems = [...(prev.items || []), { q: 1, n: '', u: 'uds', unitPrice: 0, t: 0, rate: 10, base: 0, tax: 0 }];
+      const newItems = [...(prev.items || []), { q: 1, n: '', u: 'uds', unitPrice: 0, t: 0, total: 0, rate: 10, base: 0, tax: 0 }];
       return { ...prev, items: newItems };
     });
   };
@@ -125,8 +189,14 @@ export const AlbaranEditModal = ({
       pushUndo(prev);
       const newItems = [...prev.items];
       newItems.splice(index, 1);
-      const totals = recalcTotals(newItems);
-      return { ...prev, items: newItems, ...totals };
+      const totals = recalcTotalsSafe(newItems);
+      return { 
+        ...prev, 
+        items: newItems, 
+        total: String(totals.total),
+        base: String(totals.base),
+        taxes: String(totals.taxes) 
+      };
     });
   };
   
@@ -186,8 +256,14 @@ export const AlbaranEditModal = ({
             const items = [...(prev.items||[])];
             const clone = { ...items[idx] };
             items.splice(idx+1, 0, clone);
-            const totals = recalcTotals(items);
-            return { ...prev, items, ...totals };
+            const totals = recalcTotalsSafe(items);
+            return { 
+              ...prev, 
+              items, 
+              total: String(totals.total),
+              base: String(totals.base),
+              taxes: String(totals.taxes) 
+            };
           });
         }
       }
@@ -203,7 +279,7 @@ export const AlbaranEditModal = ({
   // 📊 CÁLCULO DE DESCUADRES Y MAGIA
   // ==========================================
   const sumLineas = useMemo(() => {
-    return (editForm.items || []).reduce((acc, it) => acc + (Num.parse(it.t) || 0), 0);
+    return (editForm.items || []).reduce((acc, it) => acc + (Num.parse(it.t ?? it.total) || 0), 0);
   }, [editForm.items]);
 
   const globalTotal = Num.parse(editForm.total);
@@ -211,15 +287,13 @@ export const AlbaranEditModal = ({
   const hasDescuadre = Math.abs(diff) > 0.05;
 
   const forceSyncTotal = () => {
-    const newTotal = sumLineas;
-    const newBase = (editForm.items || []).reduce((acc, it) => acc + (Num.parse(it.base) || 0), 0);
-    const newTax = (editForm.items || []).reduce((acc, it) => acc + (Num.parse(it.tax) || 0), 0);
+    const newTotals = recalcTotalsSafe(editForm.items || []);
     
     setEditForm({ 
       ...editForm, 
-      total: String(Num.round2(newTotal)),
-      base: String(Num.round2(newBase)),
-      taxes: String(Num.round2(newTax))
+      total: String(newTotals.total),
+      base: String(newTotals.base),
+      taxes: String(newTotals.taxes)
     });
   };
 
@@ -326,7 +400,7 @@ export const AlbaranEditModal = ({
               </div>
 
               <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-                <div className="overflow-x-auto w-full">
+                <div className="overflow-x-auto w-full custom-scrollbar">
                   <table className="w-full text-left whitespace-nowrap min-w-[700px]">
                     <thead className="bg-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 sticky top-0 z-10">
                       <tr>
@@ -343,7 +417,7 @@ export const AlbaranEditModal = ({
                       <AnimatePresence>
                         {(editForm.items || []).map((it: any, i: number) => {
                           const predicted = predictVat(it.n || '', learnedVatRules, 10);
-                          const hasVatMismatch = it.rate !== predicted.expected && (it.n || '').trim() !== '' && Num.parse(it.t) > 0;
+                          const hasVatMismatch = it.rate !== predicted.expected && (it.n || '').trim() !== '' && Num.parse(it.t ?? it.total) > 0;
 
                           return (
                             <motion.tr layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} key={`item-${i}`} className="hover:bg-indigo-50/40 even:bg-slate-50/50 transition-colors group">
@@ -380,7 +454,7 @@ export const AlbaranEditModal = ({
                                 <input data-idx={i} type="number" step="0.0001" inputMode="decimal" value={it.unitPrice ?? 0} onChange={e => handleItemChange(i, 'unitPrice', e.target.value)} className="w-full bg-white border border-slate-200 rounded-lg p-2 font-bold text-right outline-none focus:border-indigo-500 text-xs shadow-sm transition-all" />
                               </td>
                               <td className="p-2 relative group/tooltip">
-                                <input data-idx={i} type="number" step="0.01" inputMode="decimal" value={it.t ?? 0} onChange={e => handleItemChange(i, 't', e.target.value)} className="w-full bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-lg p-2 font-black text-right outline-none focus:border-indigo-500 text-xs shadow-sm transition-all" />
+                                <input data-idx={i} type="number" step="0.01" inputMode="decimal" value={it.t ?? it.total ?? 0} onChange={e => handleItemChange(i, 't', e.target.value)} className="w-full bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-lg p-2 font-black text-right outline-none focus:border-indigo-500 text-xs shadow-sm transition-all" />
                                 {/* Tooltip Base/IVA */}
                                 <div className="absolute bottom-full right-0 mb-1 hidden group-hover/tooltip:block bg-slate-800 text-white text-[9px] font-bold px-2 py-1 rounded whitespace-nowrap shadow-lg z-50">
                                   Base: {Num.fmt(it.base)} + IVA: {Num.fmt(it.tax)}
@@ -388,7 +462,7 @@ export const AlbaranEditModal = ({
                               </td>
                               <td className="p-2 text-center">
                                 <div className="flex justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <button type="button" onClick={() => { pushUndo(editForm); const items = [...(editForm.items||[])]; items.splice(i+1, 0, {...items[i]}); setEditForm({...editForm, items, ...recalcTotals(items)}); }} className="text-slate-400 hover:text-indigo-600 p-1.5 rounded-lg bg-white border border-slate-200 shadow-sm" title="Clonar (Ctrl+D)"><Plus className="w-3 h-3" /></button>
+                                  <button type="button" onClick={() => { pushUndo(editForm); const items = [...(editForm.items||[])]; items.splice(i+1, 0, {...items[i]}); setEditForm({...editForm, items, ...recalcTotalsSafe(items)}); }} className="text-slate-400 hover:text-indigo-600 p-1.5 rounded-lg bg-white border border-slate-200 shadow-sm" title="Clonar (Ctrl+D)"><Plus className="w-3 h-3" /></button>
                                   <button type="button" onClick={() => deleteItemFromEdit(i)} className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg bg-white border border-slate-200 shadow-sm" title="Eliminar"><Trash2 className="w-3 h-3" /></button>
                                 </div>
                               </td>
@@ -417,36 +491,33 @@ export const AlbaranEditModal = ({
           </div>
 
           {/* 💰 FOOTER FIJO OSCURO (MODO NOCHE PARA FOCO) */}
-          <div className="bg-slate-900 shrink-0 relative z-20 pb-safe rounded-b-[2.5rem]">
+          <div className="bg-slate-900 text-white shrink-0 relative z-20 pb-safe rounded-b-[2.5rem]">
             <div className="p-5 md:p-6 flex flex-col md:flex-row justify-between items-center gap-4">
               
-              <div className="flex flex-col md:flex-row gap-6 w-full md:w-auto">
-                  <div className="text-left flex flex-col justify-end">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Base Imponible</p>
-                      <p className="text-xl font-bold text-slate-300">{Num.fmt(editForm.base || 0)}</p>
+              <div className="flex gap-8 w-full md:w-auto">
+                <div>
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Base Imponible</p>
+                  <p className="text-xl font-bold text-slate-300 tabular-nums">{Num.fmt(editForm.base || 0)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Impuestos</p>
+                  <p className="text-xl font-bold text-slate-300 tabular-nums">{Num.fmt(editForm.taxes || 0)}</p>
+                </div>
+                <div className="bg-white/5 px-4 py-2 rounded-2xl border border-white/10">
+                  <div className="flex items-center gap-2 mb-1">
+                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Factura</p>
+                     {hasDescuadre && <button onClick={forceSyncTotal} className="text-[8px] bg-rose-500/20 text-rose-400 border border-rose-500/30 px-1.5 py-0.5 rounded font-bold flex items-center gap-1 animate-pulse hover:bg-rose-500/40 transition-colors" title="Sincronizar con líneas"><Wand2 className="w-2.5 h-2.5"/> Corregir {Num.fmt(diff)}</button>}
                   </div>
-                  <div className="text-left flex flex-col justify-end">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Impuestos</p>
-                      <p className="text-xl font-bold text-slate-300">{Num.fmt(editForm.taxes || 0)}</p>
+                  <div className="flex items-center gap-2">
+                      <input type="number" step="0.01" value={editForm.total} onChange={e => setEditForm({...editForm, total: e.target.value as any})} className={cn("bg-slate-800 border border-slate-700 p-2 rounded-xl text-3xl font-black tracking-tighter outline-none w-40 transition-colors focus:border-indigo-500", hasDescuadre ? "text-rose-400 border-rose-500/50 focus:border-rose-500" : "text-emerald-400")}/>
                   </div>
-                  
-                  <div className="hidden md:block w-px bg-slate-700 h-10 self-center"></div>
-
-                  <div className="text-left relative">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-2">
-                          Total Factura
-                          {hasDescuadre && <button onClick={forceSyncTotal} className="text-rose-400 bg-rose-500/20 px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse hover:bg-rose-500/40 transition-colors" title="Sincronizar con líneas"><Wand2 size={10}/> Corregir {Num.fmt(diff)}</button>}
-                      </p>
-                      <div className="flex items-center gap-2">
-                          <input type="number" step="0.01" value={editForm.total} onChange={e => setEditForm({...editForm, total: e.target.value as any})} className={cn("bg-slate-800 border border-slate-700 p-2 rounded-xl text-3xl font-black tracking-tighter outline-none w-40 transition-colors focus:border-indigo-500", hasDescuadre ? "text-rose-400 border-rose-500/50 focus:border-rose-500" : "text-emerald-400")}/>
-                      </div>
-                  </div>
+                </div>
               </div>
 
               <div className="flex w-full md:w-auto items-center justify-between md:justify-end gap-3 mt-4 md:mt-0">
-                <label className="flex-1 md:flex-none flex items-center justify-center gap-2 cursor-pointer bg-slate-800 px-4 py-3 rounded-xl transition hover:bg-slate-700 border border-slate-700">
+                <label className={cn("flex-1 md:flex-none flex items-center justify-center gap-2 cursor-pointer bg-slate-800 px-4 py-3 rounded-xl transition hover:bg-slate-700 border border-slate-700", editForm.paid ? "bg-emerald-500/20 border-emerald-500/50" : "")}>
                   <input type="checkbox" checked={editForm.paid || false} onChange={e => setEditForm(prev => prev ? {...prev, paid: e.target.checked} : null)} className="w-5 h-5 accent-emerald-500 rounded bg-slate-900 border-slate-600" />
-                  <span className="text-[10px] font-black uppercase tracking-wider text-white">Pagado</span>
+                  <span className={cn("text-[10px] font-black uppercase tracking-wider", editForm.paid ? "text-emerald-400" : "text-white")}>Pagado</span>
                 </label>
                 
                 <button type="button" onClick={() => onDelete(editForm.id)} className="flex items-center justify-center w-12 h-12 bg-rose-500/10 text-rose-500 rounded-xl hover:bg-rose-500 hover:text-white transition" title="Borrar Documento">
@@ -457,7 +528,7 @@ export const AlbaranEditModal = ({
                   type="button" disabled={saving} onClick={onSaveClick}
                   className="flex-1 md:flex-none px-6 py-3 bg-indigo-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-indigo-500 transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20 active:scale-95 disabled:opacity-50"
                 >
-                  {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/> : <Save className="w-4 h-4" />}
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4" />}
                   <span className="hidden sm:inline">{saving ? 'Guardando...' : 'Guardar'}</span>
                 </button>
               </div>
