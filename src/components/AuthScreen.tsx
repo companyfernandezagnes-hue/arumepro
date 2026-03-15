@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ShieldCheck, Lock, AlertCircle, Fingerprint } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { cn } from '../lib/utils'; // 🚨 ¡¡ESTA ERA LA LÍNEA QUE FALTABA Y ROMPÍA TODA LA APP!!
 
 // 🔑 EL PIN MAESTRO DE ACCESO
 const SECRET_PIN = "1414"; 
