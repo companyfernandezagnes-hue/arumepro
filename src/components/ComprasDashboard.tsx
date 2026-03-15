@@ -16,14 +16,15 @@ interface ComprasDashboardProps {
 export const ComprasDashboard = ({ data, onSave }: ComprasDashboardProps) => {
   const [activeSub, setActiveSub] = useState<'albaranes' | 'facturas'>('albaranes');
 
-  // 🧠 Contadores Inteligentes en tiempo real
+  // 🧠 Contadores Inteligentes Blindados (A prueba de datos corruptos)
   const contadores = useMemo(() => {
-    const albs = Array.isArray(data?.albaranes) ? data.albaranes : [];
-    const facs = Array.isArray(data?.facturas) ? data.facturas : [];
+    const safeData = data || {};
+    const albs = Array.isArray(safeData.albaranes) ? safeData.albaranes : [];
+    const facs = Array.isArray(safeData.facturas) ? safeData.facturas : [];
     
     return {
-      albaranesSueltos: albs.filter(a => !a.invoiced).length,
-      facturasBorrador: facs.filter(f => f.status === 'draft').length
+      albaranesSueltos: albs.filter((a: any) => a && typeof a === 'object' && !a.invoiced).length,
+      facturasBorrador: facs.filter((f: any) => f && typeof f === 'object' && f.status === 'draft').length
     };
   }, [data]);
 
