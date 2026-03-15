@@ -2,11 +2,11 @@ import React, { useMemo, useState } from 'react';
 import { 
   FileText, CheckCircle2, Clock, Trash2, Link as LinkIcon, 
   AlertCircle, Sparkles, Package, ChevronDown, ChevronUp, Edit2, Zap,
-  ArrowUp, ArrowDown, ArrowUpDown 
+  ArrowUp, ArrowDown, ArrowUpDown, Lock // 🛡️ FIX CRÍTICO: Faltaba el icono Lock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-// 🛡️ EL FIX QUE TE DEBÍA: Ahora apunta a la "ley" (types.ts), no a la vista.
+// 🛡️ APUNTAMOS A LA RAÍZ PARA EVITAR DEPENDENCIAS CIRCULARES
 import { Albaran, FacturaExtended, BusinessUnit } from '../types'; 
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
@@ -228,9 +228,10 @@ export const InvoicesList = React.memo(({
                 const titularStr = String(mode === 'socio' ? (f.cliente || f.prov || '—') : (f.prov || f.cliente || '—'));
                 const isIA = f.source === 'gmail-sync' || f.source === 'dropzone' || f.source === 'email-ia' || f.source === 'ia-auto';
                 
-                const fTotal = Math.abs(Num.parse(f.total || 0));
-                const fBase = Math.abs(Num.parse(f.base) || Num.round2(fTotal / 1.10));
-                const fTax = Math.abs(Num.parse(f.tax) || Num.round2(fTotal - fBase));
+                // 🛡️ EXTRACCIÓN SEGURA DE TOTALES
+                const fTotal = Math.abs(Num.parse(f.total ?? 0));
+                const fBase = Math.abs(Num.parse(f.base)) || Num.round2(fTotal / 1.10);
+                const fTax = Math.abs(Num.parse(f.tax)) || Num.round2(fTotal - fBase);
                 
                 const hasAlbaranes = Array.isArray(f.albaranIdsArr) && f.albaranIdsArr.length > 0;
                 const isExpanded = expandedId === f.id;
@@ -290,12 +291,18 @@ export const InvoicesList = React.memo(({
 
                       <td className="p-3 text-center pr-5">
                         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0">
-                          <button type="button" onClick={(e) => { e.stopPropagation(); onTogglePago(f.id); }} className={cn("p-1.5 rounded-lg transition-colors shadow-sm", f.paid ? "bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-200" : "bg-white text-slate-400 hover:text-emerald-600 border border-slate-200 hover:border-emerald-300")} title={f.paid ? "Desmarcar Pago" : "Marcar Pagada"}>
-                            <CheckCircle2 className="w-4 h-4" />
-                          </button>
-                          <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(f.id); }} className="p-1.5 rounded-lg bg-white text-slate-400 hover:bg-rose-50 hover:text-rose-600 border border-slate-200 hover:border-rose-200 transition-colors shadow-sm" title="Eliminar Factura">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          {f.reconciled ? (
+                             <button type="button" disabled className="p-2 rounded-lg bg-slate-50 text-slate-300 cursor-not-allowed border border-slate-100" title="Bloqueado por Banco"><Lock className="w-4 h-4"/></button>
+                          ) : (
+                            <>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); onTogglePago(f.id); }} className={cn("p-1.5 rounded-lg transition-colors shadow-sm", f.paid ? "bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-200" : "bg-white text-slate-400 hover:text-emerald-600 border border-slate-200 hover:border-emerald-300")} title={f.paid ? "Desmarcar Pago" : "Marcar Pagada"}>
+                                <CheckCircle2 className="w-4 h-4" />
+                              </button>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(f.id); }} className="p-1.5 rounded-lg bg-white text-slate-400 hover:bg-rose-50 hover:text-rose-600 border border-slate-200 hover:border-rose-200 transition-colors shadow-sm" title="Eliminar Factura">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </motion.tr>
