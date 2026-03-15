@@ -5,7 +5,7 @@ import {
   X, Layers, ShieldCheck, List, Sparkles, ArrowDownLeft,
   Calendar, Wand2, PieChart, ArrowUpRight, ArrowDownRight,
   Eye, Save, MailCheck, Webhook, FileText, Inbox, AlertCircle, Bot,
-  ChevronLeft, ChevronRight, Users
+  ChevronLeft, ChevronRight, Users, Loader2, Smartphone
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
@@ -193,7 +193,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       if (!newData.facturas) newData.facturas = [];
 
       autoGroupPreview.forEach(f => {
-        // 🛡️ MAGIA APLICADA: Inicializamos a 0 y delegamos al motor
         f.total = "0"; f.base = "0"; f.tax = "0";
         newData.facturas.unshift(f);
         linkAlbaranesToFactura(newData, f.id, f.albaranIdsArr || [], { strategy: 'useAlbTotals' });
@@ -222,7 +221,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       };
 
       newData.facturas.unshift(newFactura);
-      // 🛡️ MAGIA APLICADA: El motor vincula y recalcula los totales automáticamente
       linkAlbaranesToFactura(newData, newFacId, modalForm.selectedAlbs, { strategy: 'useAlbTotals' });
       
       newData.facturas = [...newData.facturas]; 
@@ -259,7 +257,6 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     const newData = JSON.parse(JSON.stringify(safeData));
     const idsToFree = fac.albaranIdsArr || [];
     
-    // 🛡️ MAGIA APLICADA: Liberamos los albaranes para que se puedan volver a agrupar
     if (Array.isArray(newData.albaranes)) {
        newData.albaranes.forEach((a: any) => { 
          if (a && idsToFree.includes(a.id)) a.invoiced = false; 
@@ -382,6 +379,25 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     } finally { setIsProcessing(false); }
   };
 
+  // 🚀 MAGIA BOT: EL AUDÍFONO (Escucha comandos de TelegramWidget)
+  useEffect(() => {
+    const handleBotCommand = (e: any) => {
+      const { cmd, q } = e.detail || {};
+      if (cmd === 'buscar' && q) {
+        setSearchQ(q);
+        window.scrollTo({ top: 0, behavior: 'smooth' }); 
+      }
+      if (cmd === 'sync_emails') {
+        // Disparamos la sincronización de correos
+        fetchPendingAudits();
+        // Navegamos suavemente hacia la sección de abajo para ver los resultados
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      }
+    };
+    window.addEventListener('arume-bot-command', handleBotCommand);
+    return () => window.removeEventListener('arume-bot-command', handleBotCommand);
+  }, []);
+
   // Cálculos para la Barra de Progreso Financiero
   const totalFacturadoCalc = facturasBoveda.filter(f => f.tipo === 'compra').reduce((acc, f) => acc + Math.abs(Num.parse(f.total)||0), 0);
   const totalPagadoCalc = facturasBoveda.filter(f => f.tipo === 'compra' && f.paid).reduce((acc, f) => acc + Math.abs(Num.parse(f.total)||0), 0);
@@ -398,7 +414,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.1 }} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center relative overflow-hidden">
                  <div className="flex items-center justify-between mb-1">
                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total Facturado (B2B)</p>
-                   <span className="flex items-center gap-0.5 text-[8px] font-bold text-slate-500 bg-slate-100 px-1 rounded"><ArrowUpRight className="w-2.5 h-2.5"/></span>
+                   <span className="flex items-center gap-0.5 text-[8px] font-bold text-slate-50 bg-slate-100 px-1 rounded"><ArrowUpRight className="w-2.5 h-2.5"/></span>
                  </div>
                  <p className="text-xl font-black text-slate-800">{Num.fmt(totalFacturadoCalc)}</p>
                </motion.div>
