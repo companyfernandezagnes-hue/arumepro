@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Package, Wallet, ChefHat, Users, Settings, Search,
   TrendingUp, X, RefreshCw, FileText, Truck, Scale, Zap, Building2, 
   PieChart, Lock, Import, Sparkles, WifiOff, AlertTriangle, Camera, Loader2,
-  Receipt, Megaphone, Maximize // 🌟 FIX: Añadido Maximize para el botón Fullscreen
+  Receipt, Megaphone, Maximize
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -281,7 +281,7 @@ export default function App() {
     setIsCmdOpen(false);
   }, []);
 
-  // 🌟 INNOVACIÓN: Modo Pantalla Completa (Fullscreen Workspace)
+  // 🌟 INNOVACIÓN: Modo Pantalla Completa
   const toggleFullScreen = () => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(err => {
@@ -518,7 +518,7 @@ export default function App() {
 
   return (
     <AuthScreen>
-      <div id="app-root-container" className="min-h-[100dvh] bg-slate-50 flex flex-col font-sans text-xs text-slate-800 relative overflow-x-hidden pt-safe">
+      <div id="app-root-container" className="min-h-screen bg-slate-50 flex flex-col font-sans text-xs text-slate-800 relative pt-safe">
         
         <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={handlePhotoCapture} className="hidden" />
 
@@ -562,7 +562,7 @@ export default function App() {
         </header>
 
         {/* 🌟 CONTENEDOR PRINCIPAL FLUIDO: Ocupa todo el ancho sin cortes */}
-        <main className="flex-1 flex flex-col overflow-y-auto pb-safe">
+        <main className="flex-1 flex flex-col w-full pb-safe">
           <AnimatePresence mode="wait">
             <motion.div 
               key={activeTab} 
@@ -570,7 +570,7 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }} 
               exit={{ opacity: 0, y: -10 }} 
               transition={{ type: "spring", stiffness: 300, damping: 30 }} 
-              className="p-2 md:p-4 w-full flex-1 pb-16" // 🌟 FIX: Quitado el max-w-[1600px] y bajado el padding inferior para ganar espacio real
+              className="p-2 md:p-4 w-full flex-1 pb-16"
             >
               <ErrorBoundary key={activeTab}>
                 {content}
