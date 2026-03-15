@@ -518,12 +518,13 @@ export default function App() {
 
   return (
     <AuthScreen>
-      <div id="app-root-container" className="min-h-screen bg-slate-50 flex flex-col font-sans text-xs text-slate-800 relative pt-safe">
+      {/* 🚀 FIX CLAVE: Cambiado flex-1 y overflow interno para liberar el scroll al navegador */}
+      <div id="app-root-container" className="min-h-screen w-full bg-slate-50 relative pt-safe">
         
         <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={handlePhotoCapture} className="hidden" />
 
-        {/* 🌟 HEADER CONTABLE REACTIVO (Minimalista y compacto) */}
-        <header className="sticky top-0 z-[110] bg-white/80 backdrop-blur-xl border-b border-slate-200 px-4 py-2 flex justify-between items-center shadow-sm">
+        {/* 🌟 HEADER CONTABLE REACTIVO */}
+        <header className="sticky top-0 z-[110] bg-white/90 backdrop-blur-xl border-b border-slate-200 px-4 py-2 flex justify-between items-center shadow-sm">
           <div className="flex items-center gap-3">
             <h1 className="text-sm font-black text-slate-900 tracking-tight flex items-center gap-1.5">
               ARUME <span className="bg-indigo-600 text-white px-1.5 py-0.5 rounded text-[8px] uppercase tracking-widest">PRO</span>
@@ -561,8 +562,8 @@ export default function App() {
           </div>
         </header>
 
-        {/* 🌟 CONTENEDOR PRINCIPAL FLUIDO: Ocupa todo el ancho sin cortes */}
-        <main className="flex-1 flex flex-col w-full pb-safe">
+        {/* 🌟 CONTENEDOR PRINCIPAL LIBERADO */}
+        <main className="w-full pb-32">
           <AnimatePresence mode="wait">
             <motion.div 
               key={activeTab} 
@@ -570,7 +571,7 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }} 
               exit={{ opacity: 0, y: -10 }} 
               transition={{ type: "spring", stiffness: 300, damping: 30 }} 
-              className="p-2 md:p-4 w-full flex-1 pb-16"
+              className="p-2 md:p-6 w-full"
             >
               <ErrorBoundary key={activeTab}>
                 {content}
