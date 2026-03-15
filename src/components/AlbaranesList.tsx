@@ -2,15 +2,14 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { 
   Truck, CheckCircle2, Clock, Link as LinkIcon, Package, 
   ChevronDown, ChevronUp, Edit2, Loader2, Lock,
-  ArrowUp, ArrowDown, ArrowUpDown // 🆕 Iconos de ordenación añadidos
+  ArrowUp, ArrowDown, ArrowUpDown, Sparkles // 🛡️ FIX: ¡Añadido Sparkles para evitar el pantallazo rojo!
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Albaran } from '../types';
+
+// 🛡️ CORRECCIÓN CRÍTICA: Todo viene de '../types', CERO dependencias de InvoicesView.
+import { Albaran, BusinessUnit } from '../types'; 
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
-
-// 🛡️ CORRECCIÓN: El BusinessUnit viene de InvoicesView o de tu types global.
-import { BusinessUnit } from './InvoicesView'; 
 
 interface AlbaranesListProps {
   albaranes: Albaran[];
@@ -44,6 +43,25 @@ const isYesterday = (d: Date) => {
   return d.toDateString() === y.toDateString();
 };
 
+// 🛡️ EXTRACTOR DE TOTAL SEGURO (Blindaje absoluto contra el bug del 0,00€)
+const getSafeTotal = (a: any) => {
+  if (!a) return 0;
+  // 1. Si el total ya viene bien en la raíz (texto o número)
+  const rootTotal = Num.parse(a.total || 0);
+  if (rootTotal > 0) return rootTotal;
+  
+  // 2. Si la raíz falló, sumamos las líneas a la fuerza
+  const lines = Array.isArray(a.items) ? a.items : (Array.isArray(a.lineas) ? a.lineas : []);
+  const sum = lines.reduce((acc: number, l: any) => {
+    // Busca t, total, o multiplica q * unitPrice
+    const lineTotal = Num.parse(l.t ?? l.total ?? 0);
+    const calculated = Num.parse(l.q || 1) * Num.parse(l.unitPrice || l.unit_price || 0);
+    return acc + (lineTotal > 0 ? lineTotal : calculated);
+  }, 0);
+  
+  return Num.round2(sum);
+};
+
 // 🚀 REACT.MEMO: Evita re-renders innecesarios
 export const AlbaranesList = React.memo(({ 
   albaranes, searchQ, selectedUnit, businessUnits, onOpenEdit 
@@ -61,7 +79,7 @@ export const AlbaranesList = React.memo(({
     }));
   };
 
-  /* ----------------------- FILTRO + ORDENACIÓN ----------------------- */
+  /* ----------------------- FILTRO + ORDENACIÓN BLINDADA ----------------------- */
   const filteredAndSorted = useMemo(() => {
     const q = norm(searchQ);
     // 1. Filtrar
@@ -80,7 +98,8 @@ export const AlbaranesList = React.memo(({
       } else if (sortConfig.key === 'prov') {
         valA = (a.prov || '').toLowerCase(); valB = (b.prov || '').toLowerCase();
       } else if (sortConfig.key === 'total') {
-        valA = Num.parse(a.total) || 0; valB = Num.parse(b.total) || 0;
+        valA = getSafeTotal(a); // 🛡️ Uso del extractor seguro para ordenar correctamente
+        valB = getSafeTotal(b);
       }
 
       if (valA < valB) return sortConfig.asc ? -1 : 1;
@@ -178,6 +197,16 @@ export const AlbaranesList = React.memo(({
     );
   };
 
+  /* ----------------------- CÁLCULO DE TOTALES GLOBALES (SEGURO) ----------------------- */
+  const totales = useMemo(() => {
+    return filteredAndSorted.reduce((acc, a) => {
+      const t = getSafeTotal(a);
+      const b = Math.abs(Num.parse(a.base || 0)) || Num.round2(t / 1.10);
+      const i = Math.abs(Num.parse(a.taxes || a.iva || 0)) || Num.round2(t - b);
+      return { base: acc.base + b, iva: acc.iva + i, total: acc.total + t };
+    }, { base: 0, iva: 0, total: 0 });
+  }, [filteredAndSorted]);
+
   /* ----------------------- EMPTY STATE --------------------------- */
   if (filteredAndSorted.length === 0) {
     return (
@@ -208,8 +237,10 @@ export const AlbaranesList = React.memo(({
               <th className="p-3 text-slate-500 font-bold">Ref / Ticket</th>
               <SortableHeader title="Proveedor" sortKey="prov" />
               <th className="p-3 text-center text-slate-500 font-bold">Negocio</th>
-              <SortableHeader title="Importe" sortKey="total" align="right" />
-              <th className="p-3 text-center text-slate-500 font-bold">Estado Banco</th>
+              <th className="p-3 text-right text-slate-500 font-bold">Base</th>
+              <th className="p-3 text-right text-slate-500 font-bold">IVA</th>
+              <SortableHeader title="Total" sortKey="total" align="right" />
+              <th className="p-3 text-center text-slate-500 font-bold w-28">Estado Banco</th>
               <th className="p-3 text-center text-slate-500 font-bold w-12"></th>
             </tr>
           </thead>
@@ -221,7 +252,7 @@ export const AlbaranesList = React.memo(({
                   
                   {/* FILA DE AGRUPACIÓN INTELIGENTE */}
                   <tr>
-                    <td colSpan={8} className="bg-slate-50/80 px-5 py-2.5 text-[10px] font-black text-slate-800 uppercase tracking-widest border-y border-slate-200 sticky top-10 z-20 backdrop-blur-sm shadow-sm flex items-center gap-2">
+                    <td colSpan={10} className="bg-slate-50/80 px-5 py-2.5 text-[10px] font-black text-slate-800 uppercase tracking-widest border-y border-slate-200 sticky top-10 z-20 backdrop-blur-sm shadow-sm flex items-center gap-2">
                       <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div> {key} <span className="text-slate-400 font-medium normal-case ml-2">({list.length} docs)</span>
                     </td>
                   </tr>
@@ -230,10 +261,17 @@ export const AlbaranesList = React.memo(({
                     const unitConfig = businessUnits.find(u => u.id === (a.unitId || 'REST'));
                     const isExpanded = expandedId === a.id;
                     const hasItems = a.items && a.items.length > 0;
+                    
+                    // 🛡️ CÁLCULO SEGURO PARA LA VISTA DEL ALBARÁN
+                    const aTotal = getSafeTotal(a);
+                    const aBase = Math.abs(Num.parse(a.base || 0)) || Num.round2(aTotal / 1.10);
+                    const aTax = Math.abs(Num.parse(a.taxes || a.iva || 0)) || Num.round2(aTotal - aBase);
+                    
+                    const isIA = a.notes?.includes('IA') || a.source?.includes('ia');
 
                     return (
                       <React.Fragment key={a.id}>
-                        {/* FILA PRINCIPAL DEL ALBARÁN (HOVER EFFECT TIPO HOLDED) */}
+                        {/* FILA PRINCIPAL DEL ALBARÁN */}
                         <motion.tr 
                           layout 
                           onClick={() => onOpenEdit(a)} 
@@ -252,6 +290,7 @@ export const AlbaranesList = React.memo(({
                           <td className="p-3 font-mono text-[10px] text-slate-400 group-hover:text-slate-600 transition-colors">{highlight(a.num || 'S/N', searchQ)}</td>
                           <td className="p-3">
                             <div className="flex items-center gap-2">
+                              {isIA && <Sparkles className="w-3.5 h-3.5 text-purple-400 shrink-0" title="Extraído con IA"/>}
                               <span className="font-black text-slate-800 truncate max-w-[200px]">{highlight(a.prov || 'Desconocido', searchQ)}</span>
                               {hasItems && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-100 text-slate-500 border border-slate-200 group-hover:bg-white group-hover:border-slate-300 transition-colors">{a.items?.length || 0} prod.</span>}
                             </div>
@@ -259,7 +298,11 @@ export const AlbaranesList = React.memo(({
                           <td className="p-3 text-center">
                             {unitConfig && <span className={cn("text-[9px] px-2 py-1 rounded-md font-bold uppercase tracking-wider border", unitConfig.bg, unitConfig.color, `border-${unitConfig.color.split('-')[1]}-200`)}>{unitConfig.name.split(' ')[0]}</span>}
                           </td>
-                          <td className="p-3 text-right font-black text-slate-900 text-[13px]">{Num.fmt(a.total)}</td>
+                          <td className="p-3 text-right text-slate-500 tabular-nums">{Num.fmt(aBase)}</td>
+                          <td className="p-3 text-right text-slate-500 tabular-nums">{Num.fmt(aTax)}</td>
+                          
+                          {/* 🛡️ RENDER SEGURO DEL TOTAL */}
+                          <td className="p-3 text-right font-black text-slate-900 text-[13px]">{Num.fmt(aTotal)}</td>
                           
                           <td className="p-3 text-center">
                             <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }}>
@@ -286,7 +329,7 @@ export const AlbaranesList = React.memo(({
                           </td>
                         </motion.tr>
 
-                        {/* DESGLOSE DE PRODUCTOS AL EXPANDIR (DISEÑO IN-LINE ZOHO BOOKS) */}
+                        {/* DESGLOSE DE PRODUCTOS AL EXPANDIR (ZOHO BOOKS STYLE) */}
                         {isExpanded && hasItems && (
                           <motion.tr 
                             initial={{ opacity: 0, height: 0 }} 
@@ -294,7 +337,7 @@ export const AlbaranesList = React.memo(({
                             exit={{ opacity: 0, height: 0 }}
                             className="bg-indigo-50/20 relative overflow-hidden border-b border-indigo-100/50"
                           >
-                            <td colSpan={8} className="p-0">
+                            <td colSpan={10} className="p-0">
                               <div className="py-4 px-14 relative">
                                 <div className="absolute left-8 top-0 bottom-0 w-0.5 bg-indigo-200/50 rounded-full"></div>
                                 <div className="bg-white border border-indigo-100 rounded-xl shadow-[0_4px_20px_-5px_rgba(0,0,0,0.05)] overflow-hidden ml-4">
@@ -316,8 +359,9 @@ export const AlbaranesList = React.memo(({
                                           <td className="px-2 py-2.5 text-center text-slate-400 font-bold">{it.u}</td>
                                           <td className="px-4 py-2.5 font-bold text-slate-800">{highlight(it.n || '', searchQ)}</td>
                                           <td className="px-4 py-2.5 text-center text-slate-400 font-bold bg-slate-50/50">{it.rate}%</td>
-                                          <td className="px-4 py-2.5 text-right text-slate-500 font-mono">{Num.fmt(it.unitPrice)}</td>
-                                          <td className="px-4 py-2.5 text-right font-black text-indigo-600 bg-indigo-50/20">{Num.fmt(it.t)}</td>
+                                          <td className="px-4 py-2.5 text-right text-slate-500 font-mono">{Num.fmt(it.unitPrice || it.unit_price)}</td>
+                                          {/* 🛡️ LECTURA SEGURA DE LÍNEA */}
+                                          <td className="px-4 py-2.5 text-right font-black text-indigo-600 bg-indigo-50/20">{Num.fmt(Num.parse(it.t ?? it.total ?? 0))}</td>
                                         </tr>
                                       ))}
                                     </tbody>
@@ -335,18 +379,29 @@ export const AlbaranesList = React.memo(({
               ))}
             </AnimatePresence>
           </tbody>
+          
+          <tfoot className="sticky bottom-0 bg-slate-900 text-white z-30 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.1)]">
+            <tr className="text-xs font-bold uppercase tracking-widest">
+              <td className="p-4" colSpan={4}>TOTALES ({filteredAndSorted.length} docs)</td>
+              <td className="p-4 text-right text-slate-300 tabular-nums">{Num.fmt(totales.base)}</td>
+              <td className="p-4 text-right text-slate-300 tabular-nums">{Num.fmt(totales.iva)}</td>
+              <td className="p-4 text-right text-emerald-400 text-base font-black tabular-nums">{Num.fmt(totales.total)}</td>
+              <td className="p-4" colSpan={3}></td>
+            </tr>
+          </tfoot>
+
         </table>
-
-        {/* BADGE DE CARGA INFINITA */}
-        {isLoadingMore && (
-           <div className="flex justify-center py-6 absolute bottom-0 left-0 right-0 bg-gradient-to-t from-white via-white/90 to-transparent">
-               <span className="bg-slate-900 text-white px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-xl border border-slate-700">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin"/> Recuperando registros...
-               </span>
-           </div>
-        )}
-
       </div>
+
+      {/* BADGE DE CARGA INFINITA */}
+      {isLoadingMore && (
+         <div className="flex justify-center py-6 absolute bottom-0 left-0 right-0 bg-gradient-to-t from-white via-white/90 to-transparent">
+             <span className="bg-slate-900 text-white px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-xl border border-slate-700">
+                <Loader2 className="w-3.5 h-3.5 animate-spin"/> Recuperando registros...
+             </span>
+         </div>
+      )}
+
     </div>
   );
 });
