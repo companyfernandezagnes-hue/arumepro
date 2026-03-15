@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Package, Wallet, ChefHat, Users, Settings, Search,
   TrendingUp, X, RefreshCw, FileText, Truck, Scale, Zap, Building2, 
   PieChart, Lock, Import, Sparkles, WifiOff, AlertTriangle, Camera, Loader2,
-  Receipt, Megaphone
+  Receipt, Megaphone, Maximize // 🌟 FIX: Añadido Maximize para el botón Fullscreen
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -34,7 +34,7 @@ import { AuthScreen } from './components/AuthScreen';
 
 // 👑 MÓDULOS MAESTROS
 import { ComprasDashboard } from './components/ComprasDashboard';
-import { MarketingView } from './components/MarketingView'; // 💡 EL ARCHIVO DEBE LLAMARSE EXACTAMENTE ASÍ
+import { MarketingView } from './components/MarketingView'; 
 
 // 🛡️ TIPOS Y CONSTANTES
 type TabKey = 
@@ -260,10 +260,9 @@ function DockButton<T extends string>({ item, active, onClick }: { item: DockIte
 export default function App() {
   const { data: db, loading, saveData, setData, reloadData } = useArumeData();
   
-  // 🚀 MEJORA 1: Hash Routing Saneado
   const [activeTab, setActiveTab] = useState<TabKey>(() => {
     const hash = window.location.hash.replace('#', '') as TabKey;
-    return TAB_LABELS[hash] ? hash : 'dashboard'; // Si es inventado, va a dashboard
+    return TAB_LABELS[hash] ? hash : 'dashboard'; 
   });
 
   const [isConfigOpen, setIsConfigOpen] = useState(false);
@@ -274,14 +273,24 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isProcessingPhoto, setIsProcessingPhoto] = useState(false);
 
-  // MEJORA 2: Cambio de pestaña optimizado y actualización de Título Web
   const handleTabChange = useCallback((tab: TabKey) => {
     if (navigator.vibrate) navigator.vibrate(30); 
     setActiveTab(tab);
     window.location.hash = tab;
-    document.title = `${TAB_LABELS[tab]} - Arume Pro`; // Título dinámico
+    document.title = `${TAB_LABELS[tab]} - Arume Pro`; 
     setIsCmdOpen(false);
   }, []);
+
+  // 🌟 INNOVACIÓN: Modo Pantalla Completa (Fullscreen Workspace)
+  const toggleFullScreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(err => {
+        console.warn(`Error intentando abrir pantalla completa: ${err.message}`);
+      });
+    } else if (document.exitFullscreen) {
+      document.exitFullscreen();
+    }
+  };
 
   useEffect(() => {
     const onOnline = () => setIsOffline(false); const onOffline = () => setIsOffline(true);
@@ -434,7 +443,6 @@ export default function App() {
     return () => document.removeEventListener('keydown', onKey);
   }, [handleTabChange]);
 
-  // 💡 DOCK ACTUALIZADO
   const navItems = useMemo<DockItemDef<TabKey>[]>(() => ([
     { key: 'dashboard',  label: 'Dash',       icon: LayoutDashboard, group: 'main', shortcut: '⌘1' },
     { key: 'ia',         label: 'IA',         icon: Sparkles,        group: 'main' },
@@ -453,14 +461,12 @@ export default function App() {
     { key: 'cierre',     label: 'Cierre',     icon: Lock,            group: 'ops'  },
   ]), []);
 
-  // 💡 ITEMS DEL BUSCADOR (CMD+K)
   const cmdItems = useMemo<CmdItem<string>[]>(() => [
     ...navItems.map(n => ({ key: n.key, label: TAB_LABELS[n.key as TabKey], group: n.group, icon: n.icon, shortcut: n.shortcut, badge: n.key === 'marketing' ? 'Nuevo' : undefined })),
     { key: 'action_scan', label: 'Escanear Ticket o Factura', icon: Camera, isAction: true, shortcut: 'Enter' },
     { key: 'action_settings', label: 'Abrir Configuración (APIs)', icon: Settings, isAction: true }
   ], [navItems]);
 
-  // 🔀 SWITCH DE PANTALLAS
   const content = useMemo(() => {
     const props = { data: db, onSave: handleSave };
     switch (activeTab) {
@@ -508,7 +514,6 @@ export default function App() {
     );
   }
 
-  // Lógica para esconder el botón de cámara en pantallas donde no sirve
   const showCameraButton = !['marketing', 'informes', 'cierre'].includes(activeTab);
 
   return (
@@ -517,7 +522,7 @@ export default function App() {
         
         <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={handlePhotoCapture} className="hidden" />
 
-        {/* HEADER CONTABLE REACTIVO */}
+        {/* 🌟 HEADER CONTABLE REACTIVO (Minimalista y compacto) */}
         <header className="sticky top-0 z-[110] bg-white/80 backdrop-blur-xl border-b border-slate-200 px-4 py-2 flex justify-between items-center shadow-sm">
           <div className="flex items-center gap-3">
             <h1 className="text-sm font-black text-slate-900 tracking-tight flex items-center gap-1.5">
@@ -544,13 +549,20 @@ export default function App() {
                  <span className="text-[9px] text-indigo-600 font-bold uppercase">Guardando</span>
               </div>
             )}
+            
+            {/* 🌟 BOTÓN FULLSCREEN */}
+            <button onClick={toggleFullScreen} aria-label="Pantalla Completa" className="hidden sm:flex w-8 h-8 items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 rounded transition">
+              <Maximize className="w-4 h-4" />
+            </button>
+
             <button onClick={() => setIsConfigOpen(true)} aria-label="Configuración" className="w-8 h-8 flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 rounded transition">
               <Settings className="w-4 h-4" />
             </button>
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto pb-safe">
+        {/* 🌟 CONTENEDOR PRINCIPAL FLUIDO: Ocupa todo el ancho sin cortes */}
+        <main className="flex-1 flex flex-col overflow-y-auto pb-safe">
           <AnimatePresence mode="wait">
             <motion.div 
               key={activeTab} 
@@ -558,7 +570,7 @@ export default function App() {
               animate={{ opacity: 1, y: 0 }} 
               exit={{ opacity: 0, y: -10 }} 
               transition={{ type: "spring", stiffness: 300, damping: 30 }} 
-              className="p-2 md:p-4 max-w-[1600px] mx-auto pb-24"
+              className="p-2 md:p-4 w-full flex-1 pb-16" // 🌟 FIX: Quitado el max-w-[1600px] y bajado el padding inferior para ganar espacio real
             >
               <ErrorBoundary key={activeTab}>
                 {content}
