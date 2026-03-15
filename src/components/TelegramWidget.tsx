@@ -17,21 +17,36 @@ type ChatMessage = {
   isQueue?: boolean;
 };
 
-// Utilidad para renderizar negritas simples en el chat
-const formatMarkdown = (text: string) => {
-  const parts = text.split(/(\*\*.*?\*\*|\*.*?\*)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith('**') && part.endsWith('**')) return <strong key={i} className="font-black text-indigo-900">{part.slice(2, -2)}</strong>;
-    if (part.startsWith('*') && part.endsWith('*')) return <em key={i} className="font-bold text-indigo-800">{part.slice(1, -1)}</em>;
-    return <span key={i}>{part}</span>;
-  });
+// 🛡️ FIX CRÍTICO: Formateador a prueba de balas (Evita el pantallazo azul)
+const formatMarkdown = (text?: string) => {
+  if (!text) return null;
+  try {
+    const parts = text.split(/(\*\*.*?\*\*|\*.*?\*)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('**') && part.endsWith('**')) return <strong key={i} className="font-black text-indigo-900">{part.slice(2, -2)}</strong>;
+      if (part.startsWith('*') && part.endsWith('*')) return <em key={i} className="font-bold text-indigo-800">{part.slice(1, -1)}</em>;
+      return <span key={i}>{part}</span>;
+    });
+  } catch (e) {
+    return <span>{text}</span>;
+  }
+};
+
+// 🛡️ Helper para llamadas con límite de tiempo (Evita bloqueos infinitos)
+const fetchWithTimeout = async (resource: string, options: RequestInit & { timeout?: number } = {}) => {
+  const { timeout = 10000 } = options;
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  const response = await fetch(resource, { ...options, signal: controller.signal });
+  clearTimeout(id);
+  return response;
 };
 
 export const TelegramWidget = ({ currentModule, telegramToken, chatId }: TelegramWidgetProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const [message, setMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [isRecording, setIsRecording] = useState(false); // Innovación: Voz
+  const [isRecording, setIsRecording] = useState(false);
   const [history, setHistory] = useState<ChatMessage[]>([]);
   const [pendingQueue, setPendingQueue] = useState<string[]>([]);
   
@@ -53,28 +68,55 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
     return () => window.removeEventListener('keydown', handleEsc);
   }, [isOpen]);
 
+  const addSystemMessage = (text: string, type: 'system' | 'ai' = 'system') => {
+    if (!text) return;
+    setHistory(prev => [...prev, { id: Date.now().toString() + Math.random(), text, sender: type, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }]);
+  };
+
+  /* =======================================================
+   * 📡 INNOVACIÓN: ESCUCHA DE ALERTAS GLOBALES DE LA APP
+   * ======================================================= */
+  useEffect(() => {
+    // Esto permite que otras pantallas (como Albaranes) envíen alertas a Telegram
+    const handleAppAlert = async (e: any) => {
+      const alerta = e.detail;
+      if (alerta && telegramToken && chatId) {
+        try {
+          addSystemMessage(`🔔 Alerta detectada: ${alerta}`, 'system');
+          await fetchWithTimeout(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId, text: `🚨 *ALERTA ARUME*\n\n${alerta}`, parse_mode: 'Markdown' })
+          }, { timeout: 5000 });
+        } catch (err) {
+          console.warn("No se pudo enviar la alerta automática a Telegram.");
+        }
+      }
+    };
+
+    window.addEventListener('arume-bot-alert', handleAppAlert);
+    return () => window.removeEventListener('arume-bot-alert', handleAppAlert);
+  }, [telegramToken, chatId]);
+
   // Reconexión y cola offline
   useEffect(() => {
     const onOnline = async () => {
       if (pendingQueue.length > 0) {
-        addSystemMessage('🌐 Red restaurada. Sincronizando con n8n...');
-        for (const txt of pendingQueue) {
+        addSystemMessage('🌐 Red restaurada. Sincronizando comandos pendientes...');
+        const queueCopy = [...pendingQueue];
+        setPendingQueue([]);
+        for (const txt of queueCopy) {
           await processInteraction(txt);
           await new Promise(r => setTimeout(r, 1000));
         }
-        setPendingQueue([]);
       }
     };
     window.addEventListener('online', onOnline);
     return () => window.removeEventListener('online', onOnline);
   }, [pendingQueue]);
 
-  const addSystemMessage = (text: string, type: 'system' | 'ai' = 'system') => {
-    setHistory(prev => [...prev, { id: Date.now().toString() + Math.random(), text, sender: type, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }]);
-  };
-
   /* =======================================================
-   * 🎤 INNOVACIÓN: RECONOCIMIENTO DE VOZ WEB
+   * 🎤 RECONOCIMIENTO DE VOZ WEB
    * ======================================================= */
   const toggleVoiceRecord = () => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
@@ -104,77 +146,79 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
   };
 
   /* =======================================================
-   * 🧠 INNOVACIÓN: DOBLE CEREBRO (GROQ + TELEGRAM)
+   * 🧠 DOBLE CEREBRO BLINDADO (GROQ + TELEGRAM)
    * ======================================================= */
   const processInteraction = async (texto: string) => {
     setIsSending(true);
     setHistory(prev => [...prev, { id: Date.now().toString(), text, sender: 'user', time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }]);
     setMessage(''); 
     
-    // INNOVACIÓN: Comandos Locales App (No gasta internet)
     if (texto.toLowerCase().startsWith('/')) {
       addSystemMessage(`🔧 Ejecutando comando local interno: ${texto}`, 'system');
       setIsSending(false);
-      return; // Aquí podrías disparar un evento para navegar en la app
+      return; 
     }
 
-    // 1. 🛡️ ENVÍO BLINDADO A TELEGRAM (Evita el pantallazo azul)
+    // 1. ENVÍO A TELEGRAM (CON TIMEOUT PARA EVITAR BLOQUEOS)
     let telegramSuccess = false;
     if (telegramToken && chatId) {
       try {
-        // Limpiamos comillas y caracteres que rompen el JSON
         const safeText = texto.replace(/["\\]/g, ''); 
+        const invisibleContext = `\n\n\`[Contexto App: Módulo ${currentModule}]\``;
         
-        // INNOVACIÓN: Metadatos ocultos para n8n (Las 2 Supabase)
-        const invisibleContext = `\n\n\`[Contexto App: Módulo ${currentModule} | DB_Arume: bgt... | DB_Personal: tor...]\``;
-        
-        await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
+        await fetchWithTimeout(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             chat_id: chatId,
             text: `⚡ *Orden de Arume Pro*\n💬 "${safeText}"${invisibleContext}`,
             parse_mode: 'Markdown'
-          })
+          }),
+          timeout: 8000 // Si en 8 segundos no responde, aborta
         });
         telegramSuccess = true;
       } catch (error) {
-        console.error("Fallo silencioso conectando con Telegram.");
+        console.warn("Aviso: Fallo de conexión con Telegram API.");
       }
     }
 
-    // 2. 🚀 CEREBRO GROQ (Llama 3 70B) - Rápido y sin gastar Gemini
+    // 2. CEREBRO GROQ (Llama 3 70B) BLINDADO
     try {
       const groqKey = sessionStorage.getItem('groq_api_key') || localStorage.getItem('groq_api_key');
       
       if (!groqKey) {
         addSystemMessage(telegramSuccess 
-          ? "✅ Orden enviada a tu bot personal. (Añade clave GROQ en Ajustes para respuestas IA rápidas aquí)." 
+          ? "✅ Orden enviada a tu móvil. (Añade tu API Key de GROQ en Ajustes para chatear aquí mismo)." 
           : "❌ Error de conexión. Configura las APIs en Ajustes.", 'system');
       } else {
         const prompt = `Eres ArumeBot, el asistente ERP del restaurante. 
         El usuario está en el módulo "${currentModule}".
         Acaba de ordenar: "${texto}".
-        Responde en 1 o 2 líneas máximo. Sé profesional, directo y al grano. 
-        Si es una orden para el servidor (n8n/Supabase), confirma que la orden ha sido enviada al bot principal para su ejecución.`;
+        Responde en 1 o 2 líneas máximo. Sé profesional, directo y al grano.`;
 
-        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        const res = await fetchWithTimeout('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${groqKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: "llama3-70b-8192", // Modelo ultra inteligente y rápido
+            model: "llama3-70b-8192",
             messages: [{ role: "user", content: prompt }],
             temperature: 0.3
-          })
+          }),
+          timeout: 10000 // 10 segundos máximo para la IA
         });
 
-        if (!res.ok) throw new Error("Fallo Groq");
+        if (!res.ok) throw new Error("Fallo en la respuesta de Groq");
         const data = await res.json();
         
-        addSystemMessage(data.choices[0].message.content, 'ai');
+        const aiResponse = data?.choices?.[0]?.message?.content;
+        if (aiResponse) {
+          addSystemMessage(aiResponse, 'ai');
+        } else {
+          throw new Error("Respuesta vacía de la IA");
+        }
       }
     } catch (error) {
-      addSystemMessage("⚠️ IA local ocupada. Comando enviado a tu n8n personal.", 'system');
+      addSystemMessage(telegramSuccess ? "✅ Mensaje enviado a tu móvil (La IA local no pudo contestar)." : "⚠️ Error general de conexión.", 'system');
     } finally {
       setIsSending(false);
       setTimeout(() => inputRef.current?.focus(), 100);
@@ -186,7 +230,7 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
     if (!navigator.onLine) {
       setPendingQueue(q => [...q, texto]);
       setHistory(prev => [...prev, { id: Date.now().toString(), text, sender: 'user', time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}), isQueue: true }]);
-      addSystemMessage('📥 Sin conexión. Comando encolado.', 'system');
+      addSystemMessage('📥 Sin conexión a internet. Comando encolado.', 'system');
       setMessage('');
       return;
     }
@@ -220,10 +264,10 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
                   <Bot className="w-6 h-6 text-white" />
                 </div>
                 <div>
-                  <span className="font-black text-base block leading-none">Arume AI (Groq)</span>
+                  <span className="font-black text-base block leading-none">Arume AI</span>
                   <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest flex items-center gap-1.5 mt-1.5">
                     {navigator.onLine ? (
-                      <><span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span> n8n Conectado</>
+                      <><span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span> Conectado</>
                     ) : (
                       <><WifiOff className="w-3 h-3 text-rose-400" /> Offline</>
                     )}
@@ -248,9 +292,9 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
                   <div className="w-16 h-16 bg-white border border-slate-200 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
                     <Bot className="w-8 h-8 text-indigo-500" />
                   </div>
-                  <p className="text-sm font-black text-slate-700 uppercase tracking-widest">Bot Principal Activo</p>
+                  <p className="text-sm font-black text-slate-700 uppercase tracking-widest">Bot Asistente Activo</p>
                   <p className="text-[11px] font-medium text-slate-500 mt-2 leading-relaxed">
-                    Escribe un comando. El bot gestionará tu vida personal y los datos de Arume conectando ambas bases de datos.
+                    Pídeme lo que necesites o envíame comandos. Tus órdenes viajarán directamente a tu móvil.
                   </p>
                 </div>
               ) : (
@@ -307,10 +351,13 @@ export const TelegramWidget = ({ currentModule, telegramToken, chatId }: Telegra
                 {isRecording ? <Square className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
               </button>
 
+              {/* 🛡️ FIX WARNING: Añadidos id y name para que Chrome no se queje */}
               <input 
+                id="telegram-chat-input"
+                name="telegram-chat-input"
                 ref={inputRef} type="text" value={message} onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); safeSend(message); } }}
-                placeholder={isRecording ? "Escuchando..." : navigator.onLine ? "Comando o /comando..." : "Sin red..."} 
+                placeholder={isRecording ? "Escuchando..." : navigator.onLine ? "Comando o consulta..." : "Sin red..."} 
                 className="flex-1 bg-slate-50 text-sm font-bold rounded-xl px-4 py-3 outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500 text-slate-800 border border-slate-200 transition-all w-full"
               />
 
