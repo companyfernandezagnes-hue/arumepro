@@ -3,7 +3,7 @@ import {
   Search, Plus, Download, Package, AlertTriangle, Check, 
   Building2, ShoppingBag, ListPlus, Users, Hotel, Layers, 
   XCircle, LineChart as LineChartIcon, FileSpreadsheet, Mic, Square, Camera, Loader2, Smartphone,
-  Calculator, Sparkles, ArrowUp, ArrowDown, ArrowUpDown // 1. Añadidos los iconos de flechas
+  Calculator, Sparkles, ArrowUp, ArrowDown, ArrowUpDown 
 } from 'lucide-react';
 import { AppData, Albaran } from '../types';
 import { Num, ArumeEngine, DateUtil } from '../services/engine';
@@ -839,133 +839,11 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 relative z-10">
+      {/* CUERPO PRINCIPAL: LISTA A PANTALLA COMPLETA Y FORM ABAJO */}
+      <div className="flex flex-col gap-12 relative z-10 mt-6">
         
-        <aside className="lg:col-span-4 space-y-4">
-          <AnimatePresence mode="wait">
-            {showInspector ? (
-              <motion.div key="inspector" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-                <PriceInspector 
-                  priceHistory={safeData.priceHistory as any} 
-                  albaranesLite={albaranesLiteRanged} 
-                  proveedores={proveedoresHistoricos} 
-                  suggestionsByProv={suggestionsByProv}
-                  defaultProv={inspectorDefaults.prov}
-                  defaultItem={inspectorDefaults.item}
-                />
-              </motion.div>
-            ) : (
-              <motion.div key="form" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="bg-white p-6 rounded-[2.5rem] shadow-xl border border-slate-100 relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1.5 bg-indigo-500" />
-                <div className="flex justify-between items-center mb-5">
-                  <h3 className="text-sm font-black text-slate-800 flex items-center gap-2"><ListPlus className="w-5 h-5 text-indigo-500" /> Nuevo Albarán</h3>
-                  
-                  {/* BOTÓN OCR PDF DIRECTO Y VOSK RESTAURADO */}
-                  <div className="flex items-center gap-2">
-                    <button onClick={toggleRecording} className={cn("p-2 rounded-xl transition", isRecording ? "bg-rose-100 text-rose-600 animate-pulse" : "bg-indigo-50 text-indigo-600 hover:bg-indigo-100")} title="Dictar Albarán (Vosk)">
-                      {isRecording ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                    </button>
-                    <input type="file" ref={fileInputRef} className="hidden" accept="application/pdf, image/*" onChange={(e) => { if (e.target.files && e.target.files[0]) { processLocalFile(e.target.files[0]); e.target.value = ''; } }} />
-                    <button onClick={() => fileInputRef.current?.click()} className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 transition" title="Autorellenar con Foto/PDF"><Camera className="w-4 h-4"/></button>
-                  </div>
-                </div>
-
-                <div className={cn("mb-5 p-3 rounded-2xl border transition-colors", form.unitId === 'REST' ? "bg-indigo-50/50 border-indigo-100" : form.unitId === 'DLV' ? "bg-amber-50/50 border-amber-100" : "bg-emerald-50/50 border-emerald-100")}>
-                  <div className="grid grid-cols-2 gap-2">
-                    {BUSINESS_UNITS.map(unit => (
-                      <button type="button" key={unit.id} onClick={() => setForm({ ...form, unitId: unit.id })} className={cn("p-2 rounded-xl border-2 transition-all flex items-center justify-center gap-1.5", form.unitId === unit.id ? `${unit.color.replace('text-', 'border-')} ${unit.bg} ${unit.color} shadow-sm` : "border-slate-100 bg-white text-slate-400 grayscale hover:grayscale-0")}><unit.icon className="w-3.5 h-3.5" /><span className="text-[9px] font-black uppercase tracking-wider">{unit.name.split(' ')[0]}</span></button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-4 mb-5 relative">
-                  <input value={form.prov} onChange={(e) => setForm({ ...form, prov: e.target.value })} type="text" placeholder="Proveedor (Ej: Makro...)" list="proveedores-historicos" className="w-full p-4 bg-slate-50 rounded-2xl text-sm font-bold border border-slate-200 outline-none focus:border-indigo-500 focus:bg-white transition shadow-inner" />
-                  <datalist id="proveedores-historicos">{proveedoresHistoricos.map(p => <option key={p} value={p} />)}</datalist>
-                  
-                  <div className="flex gap-2">
-                    <input value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} type="date" className="flex-1 p-4 bg-slate-50 rounded-2xl text-sm font-bold border border-slate-200 outline-none focus:border-indigo-500 shadow-inner" />
-                    <input value={form.num} onChange={(e) => setForm({ ...form, num: e.target.value })} type="text" placeholder="Nº Albarán" className="w-1/3 p-4 bg-slate-50 rounded-2xl text-sm font-bold border border-slate-200 outline-none focus:border-indigo-500 shadow-inner" />
-                  </div>
-                </div>
-
-                {/* MEJORA: Panel de Control de IVA y Total Escaneado */}
-                <div className="mb-5 p-4 rounded-2xl border border-slate-200 bg-slate-50 space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-amber-500" /> Control de IVA en Líneas</span>
-                    <select value={ivaMode} onChange={(e) => setIvaMode(e.target.value as any)} className="bg-white border border-slate-200 rounded-lg text-[10px] font-bold px-2 py-1 outline-none text-slate-700">
-                      <option value="AUTO">🤖 Auto-Detectar</option>
-                      <option value="INC">✅ Líneas CON Iva</option>
-                      <option value="EXC">❌ Líneas SIN Iva</option>
-                    </select>
-                  </div>
-                  
-                  <div className="flex justify-between items-center bg-white p-2.5 rounded-xl border border-slate-100 shadow-sm">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Escaneado (Referencia)</label>
-                    <div className="relative w-24">
-                      <input type="number" step="0.01" value={form.expectedTotal || ''} onChange={(e) => setForm({...form, expectedTotal: e.target.value ? parseFloat(e.target.value) : null})} placeholder="0.00" className="w-full text-right bg-transparent text-sm font-black text-slate-700 outline-none" />
-                      <span className="absolute right-0 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none opacity-0">€</span>
-                    </div>
-                  </div>
-
-                  {decidedMode && ivaMode === 'AUTO' && form.expectedTotal && (
-                    <p className="text-[9px] font-bold text-indigo-600 bg-indigo-50 p-1.5 rounded text-center">
-                      IA Asignó: {decidedMode === 'INC' ? 'Precios Finales (Con IVA)' : 'Bases Imponibles (Sin IVA)'}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-1 mb-3 bg-indigo-50/50 p-2 rounded-xl border border-indigo-100">
-                  <input type="text" value={quickCalc.name} onChange={(e) => setQuickCalc({ ...quickCalc, name: e.target.value })} placeholder="Añadir a mano..." className="w-1/2 p-2 bg-white rounded-lg text-xs font-bold outline-none" />
-                  <input type="number" value={quickCalc.total} onChange={(e) => setQuickCalc({ ...quickCalc, total: e.target.value })} placeholder="Precio €" className="w-1/4 p-2 bg-white rounded-lg text-xs font-bold outline-none text-right" />
-                  <button type="button" onClick={handleQuickAdd} className="w-8 h-8 bg-indigo-600 text-white rounded-lg flex items-center justify-center hover:bg-indigo-700 transition shadow-sm"><Plus className="w-4 h-4" /></button>
-                </div>
-
-                <div className="relative group">
-                  <textarea value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="Pega el texto del albarán aquí...\nEj: 5 kg Salmón 150.00" className="w-full h-40 bg-slate-50 rounded-2xl p-4 pr-10 text-xs font-mono border border-slate-200 outline-none resize-none mb-4 shadow-inner focus:bg-white focus:border-indigo-400 transition leading-relaxed" />
-                  {form.text && <button type="button" onClick={() => setForm({...form, text: ''})} className="absolute top-4 right-4 text-slate-300 hover:text-rose-500 transition"><XCircle className="w-5 h-5" /></button>}
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-500 mb-3">
-                  <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-center">
-                    <div className="font-black text-slate-700">Base (10%) · IVA (10%)</div>
-                    <div>{Num.fmt(liveTotals.split.base10)} · {Num.fmt(liveTotals.split.iva10)}</div>
-                  </div>
-                  <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-center">
-                    <div className="font-black text-slate-700">Base (21%) · IVA (21%)</div>
-                    <div>{Num.fmt(liveTotals.split.base21)} · {Num.fmt(liveTotals.split.iva21)}</div>
-                  </div>
-                </div>
-
-                {/* TARJETA DE TOTALES CON FEEDBACK VISUAL DE CUADRE */}
-                <div className={cn("flex justify-between items-center p-5 rounded-2xl text-white mb-5 shadow-lg transition-colors", 
-                  !form.expectedTotal ? "bg-slate-900" : isTotalMatching ? "bg-emerald-600" : "bg-amber-600"
-                )}>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-black uppercase text-white/70 tracking-widest">Total Calculado</span>
-                    {roundingAdjustment !== 0 && (
-                      <span className="text-[9px] text-white/90 font-bold bg-white/20 px-1.5 py-0.5 rounded mt-1">
-                        Ajuste auto: {roundingAdjustment > 0 ? '+' : ''}{roundingAdjustment}€
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-right">
-                    <span className="text-3xl font-black tracking-tighter">{Num.fmt(liveTotals.grandTotal)}</span>
-                    {form.expectedTotal && !isTotalMatching && (
-                      <p className="text-[9px] font-bold text-white/80 mt-1">Ref: {Num.fmt(form.expectedTotal)} (Dif: {Num.fmt(Math.abs(liveTotals.grandTotal - form.expectedTotal))})</p>
-                    )}
-                  </div>
-                </div>
-
-                <button type="button" disabled={isSaving} onClick={handleSaveAlbaran} className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50">
-                  {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Check className="w-5 h-5" />} GUARDAR ALBARÁN
-                </button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </aside>
-
-        <section className="lg:col-span-8">
-          
+        {/* 1. SECCIÓN SUPERIOR: TABLA DE ALBARANES (FULL WIDTH) */}
+        <section className="w-full">
           {/* 🆕 BARRA DE ORDENACIÓN VISUAL */}
           <div className="flex items-center gap-2 mb-4 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm overflow-x-auto custom-scrollbar">
             <span className="text-[10px] font-black uppercase text-slate-400 ml-2 tracking-widest flex items-center gap-1 shrink-0">
@@ -1002,6 +880,147 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
             businessUnits={BUSINESS_UNITS} 
             onOpenEdit={setEditForm} 
           />
+        </section>
+
+        {/* SEPARADOR VISUAL ELEGANTE */}
+        <div className="w-full flex flex-col items-center justify-center opacity-50 my-4">
+           <div className="w-px h-12 bg-slate-300"></div>
+           <div className="w-2 h-2 rounded-full bg-slate-300 my-2"></div>
+           <div className="w-px h-12 bg-slate-300"></div>
+        </div>
+
+        {/* 2. SECCIÓN INFERIOR: FORMULARIO / INSPECTOR (CENTRADO) */}
+        <section className="w-full max-w-3xl mx-auto flex flex-col items-center pb-12">
+          
+          <div className="text-center mb-8">
+            <h3 className="text-2xl font-black text-slate-800 tracking-tighter flex items-center justify-center gap-2">
+              <Plus className="w-6 h-6 text-indigo-500" /> Registro Manual e IA
+            </h3>
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-2">Usa esta zona para añadir albaranes sueltos o consultar precios</p>
+          </div>
+
+          <aside className="w-full space-y-4">
+            <AnimatePresence mode="wait">
+              {showInspector ? (
+                <motion.div key="inspector" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+                  <PriceInspector 
+                    priceHistory={safeData.priceHistory as any} 
+                    albaranesLite={albaranesLiteRanged} 
+                    proveedores={proveedoresHistoricos} 
+                    suggestionsByProv={suggestionsByProv}
+                    defaultProv={inspectorDefaults.prov}
+                    defaultItem={inspectorDefaults.item}
+                  />
+                </motion.div>
+              ) : (
+                <motion.div key="form" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="bg-white p-6 rounded-[2.5rem] shadow-xl border border-slate-100 relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-full h-1.5 bg-indigo-500" />
+                  <div className="flex justify-between items-center mb-5">
+                    <h3 className="text-sm font-black text-slate-800 flex items-center gap-2"><ListPlus className="w-5 h-5 text-indigo-500" /> Nuevo Albarán</h3>
+                    
+                    {/* BOTÓN OCR PDF DIRECTO Y VOSK RESTAURADO */}
+                    <div className="flex items-center gap-2">
+                      <button onClick={toggleRecording} className={cn("p-2 rounded-xl transition", isRecording ? "bg-rose-100 text-rose-600 animate-pulse" : "bg-indigo-50 text-indigo-600 hover:bg-indigo-100")} title="Dictar Albarán (Vosk)">
+                        {isRecording ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                      </button>
+                      <input type="file" ref={fileInputRef} className="hidden" accept="application/pdf, image/*" onChange={(e) => { if (e.target.files && e.target.files[0]) { processLocalFile(e.target.files[0]); e.target.value = ''; } }} />
+                      <button onClick={() => fileInputRef.current?.click()} className="p-2 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-100 transition" title="Autorellenar con Foto/PDF"><Camera className="w-4 h-4"/></button>
+                    </div>
+                  </div>
+
+                  <div className={cn("mb-5 p-3 rounded-2xl border transition-colors", form.unitId === 'REST' ? "bg-indigo-50/50 border-indigo-100" : form.unitId === 'DLV' ? "bg-amber-50/50 border-amber-100" : "bg-emerald-50/50 border-emerald-100")}>
+                    <div className="grid grid-cols-2 gap-2">
+                      {BUSINESS_UNITS.map(unit => (
+                        <button type="button" key={unit.id} onClick={() => setForm({ ...form, unitId: unit.id })} className={cn("p-2 rounded-xl border-2 transition-all flex items-center justify-center gap-1.5", form.unitId === unit.id ? `${unit.color.replace('text-', 'border-')} ${unit.bg} ${unit.color} shadow-sm` : "border-slate-100 bg-white text-slate-400 grayscale hover:grayscale-0")}><unit.icon className="w-3.5 h-3.5" /><span className="text-[9px] font-black uppercase tracking-wider">{unit.name.split(' ')[0]}</span></button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-4 mb-5 relative">
+                    <input value={form.prov} onChange={(e) => setForm({ ...form, prov: e.target.value })} type="text" placeholder="Proveedor (Ej: Makro...)" list="proveedores-historicos" className="w-full p-4 bg-slate-50 rounded-2xl text-sm font-bold border border-slate-200 outline-none focus:border-indigo-500 focus:bg-white transition shadow-inner" />
+                    <datalist id="proveedores-historicos">{proveedoresHistoricos.map(p => <option key={p} value={p} />)}</datalist>
+                    
+                    <div className="flex gap-2">
+                      <input value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} type="date" className="flex-1 p-4 bg-slate-50 rounded-2xl text-sm font-bold border border-slate-200 outline-none focus:border-indigo-500 shadow-inner" />
+                      <input value={form.num} onChange={(e) => setForm({ ...form, num: e.target.value })} type="text" placeholder="Nº Albarán" className="w-1/3 p-4 bg-slate-50 rounded-2xl text-sm font-bold border border-slate-200 outline-none focus:border-indigo-500 shadow-inner" />
+                    </div>
+                  </div>
+
+                  {/* MEJORA: Panel de Control de IVA y Total Escaneado */}
+                  <div className="mb-5 p-4 rounded-2xl border border-slate-200 bg-slate-50 space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-amber-500" /> Control de IVA en Líneas</span>
+                      <select value={ivaMode} onChange={(e) => setIvaMode(e.target.value as any)} className="bg-white border border-slate-200 rounded-lg text-[10px] font-bold px-2 py-1 outline-none text-slate-700">
+                        <option value="AUTO">🤖 Auto-Detectar</option>
+                        <option value="INC">✅ Líneas CON Iva</option>
+                        <option value="EXC">❌ Líneas SIN Iva</option>
+                      </select>
+                    </div>
+                    
+                    <div className="flex justify-between items-center bg-white p-2.5 rounded-xl border border-slate-100 shadow-sm">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Escaneado (Referencia)</label>
+                      <div className="relative w-24">
+                        <input type="number" step="0.01" value={form.expectedTotal || ''} onChange={(e) => setForm({...form, expectedTotal: e.target.value ? parseFloat(e.target.value) : null})} placeholder="0.00" className="w-full text-right bg-transparent text-sm font-black text-slate-700 outline-none" />
+                        <span className="absolute right-0 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none opacity-0">€</span>
+                      </div>
+                    </div>
+
+                    {decidedMode && ivaMode === 'AUTO' && form.expectedTotal && (
+                      <p className="text-[9px] font-bold text-indigo-600 bg-indigo-50 p-1.5 rounded text-center">
+                        IA Asignó: {decidedMode === 'INC' ? 'Precios Finales (Con IVA)' : 'Bases Imponibles (Sin IVA)'}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1 mb-3 bg-indigo-50/50 p-2 rounded-xl border border-indigo-100">
+                    <input type="text" value={quickCalc.name} onChange={(e) => setQuickCalc({ ...quickCalc, name: e.target.value })} placeholder="Añadir a mano..." className="w-1/2 p-2 bg-white rounded-lg text-xs font-bold outline-none" />
+                    <input type="number" value={quickCalc.total} onChange={(e) => setQuickCalc({ ...quickCalc, total: e.target.value })} placeholder="Precio €" className="w-1/4 p-2 bg-white rounded-lg text-xs font-bold outline-none text-right" />
+                    <button type="button" onClick={handleQuickAdd} className="w-8 h-8 bg-indigo-600 text-white rounded-lg flex items-center justify-center hover:bg-indigo-700 transition shadow-sm"><Plus className="w-4 h-4" /></button>
+                  </div>
+
+                  <div className="relative group">
+                    <textarea value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="Pega el texto del albarán aquí...\nEj: 5 kg Salmón 150.00" className="w-full h-40 bg-slate-50 rounded-2xl p-4 pr-10 text-xs font-mono border border-slate-200 outline-none resize-none mb-4 shadow-inner focus:bg-white focus:border-indigo-400 transition leading-relaxed" />
+                    {form.text && <button type="button" onClick={() => setForm({...form, text: ''})} className="absolute top-4 right-4 text-slate-300 hover:text-rose-500 transition"><XCircle className="w-5 h-5" /></button>}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-500 mb-3">
+                    <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-center">
+                      <div className="font-black text-slate-700">Base (10%) · IVA (10%)</div>
+                      <div>{Num.fmt(liveTotals.split.base10)} · {Num.fmt(liveTotals.split.iva10)}</div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-center">
+                      <div className="font-black text-slate-700">Base (21%) · IVA (21%)</div>
+                      <div>{Num.fmt(liveTotals.split.base21)} · {Num.fmt(liveTotals.split.iva21)}</div>
+                    </div>
+                  </div>
+
+                  {/* TARJETA DE TOTALES CON FEEDBACK VISUAL DE CUADRE */}
+                  <div className={cn("flex justify-between items-center p-5 rounded-2xl text-white mb-5 shadow-lg transition-colors", 
+                    !form.expectedTotal ? "bg-slate-900" : isTotalMatching ? "bg-emerald-600" : "bg-amber-600"
+                  )}>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] font-black uppercase text-white/70 tracking-widest">Total Calculado</span>
+                      {roundingAdjustment !== 0 && (
+                        <span className="text-[9px] text-white/90 font-bold bg-white/20 px-1.5 py-0.5 rounded mt-1">
+                          Ajuste auto: {roundingAdjustment > 0 ? '+' : ''}{roundingAdjustment}€
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <span className="text-3xl font-black tracking-tighter">{Num.fmt(liveTotals.grandTotal)}</span>
+                      {form.expectedTotal && !isTotalMatching && (
+                        <p className="text-[9px] font-bold text-white/80 mt-1">Ref: {Num.fmt(form.expectedTotal)} (Dif: {Num.fmt(Math.abs(liveTotals.grandTotal - form.expectedTotal))})</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <button type="button" disabled={isSaving} onClick={handleSaveAlbaran} className="w-full bg-indigo-600 text-white py-5 rounded-2xl font-black shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50">
+                    {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Check className="w-5 h-5" />} GUARDAR ALBARÁN
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </aside>
         </section>
       </div>
 
