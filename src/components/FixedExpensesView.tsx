@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Building2, Search, Plus, Trash2, CheckCircle2, Clock, AlertTriangle,
   Calendar, Briefcase, Zap, Scale, Laptop, UtensilsCrossed, Edit3, X,
-  Hotel, ShoppingBag, Users, Layers, FileDown, FileUp, Target, Landmark, Wrench, AlertOctagon, Save, Filter
+  Hotel, ShoppingBag, Users, Layers, FileDown, FileUp, Target, Landmark, Wrench, AlertOctagon, Save, Filter, UserCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AppData, GastoFijo } from '../types';
@@ -19,10 +19,11 @@ const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string
   { id: 'CORP', name: 'Socios / Corp', icon: Users, color: 'text-slate-600', bg: 'bg-slate-100' },
 ];
 
-// 🌟 TIPOS DE COMPROMISOS (Categorización visual avanzada)
+// 🌟 TIPOS DE COMPROMISOS (Categorización fiscal y visual avanzada)
 const COMMITMENT_TYPES = [
-  { id: 'expense', name: 'Gasto Recurrente', icon: FileDown, color: 'text-rose-600', bg: 'bg-rose-50', border: 'border-rose-100' },
+  { id: 'expense', name: 'Gasto Deducible', icon: FileDown, color: 'text-rose-600', bg: 'bg-rose-50', border: 'border-rose-100' },
   { id: 'income', name: 'Ingreso Fijo', icon: FileUp, color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
+  { id: 'payroll', name: 'Personal y Seguros Soc.', icon: UserCircle, color: 'text-fuchsia-600', bg: 'bg-fuchsia-50', border: 'border-fuchsia-100' }, // 🚀 NUEVO: Nóminas
   { id: 'tax', name: 'Tributo / AEAT', icon: Scale, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100' },
   { id: 'grant', name: 'Subvención', icon: Target, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-100' },
   { id: 'debt', name: 'Préstamo / Deuda', icon: Landmark, color: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-100' },
@@ -42,7 +43,6 @@ const isDueThisMonth = (g: any, refDate = new Date()) => {
   const m0 = refDate.getMonth();
   const y0 = refDate.getFullYear();
   
-  // 1. Comprobar si está vivo en este mes (Start/End Dates)
   if (g.startDate) {
     const start = new Date(g.startDate);
     if (start.getFullYear() > y0 || (start.getFullYear() === y0 && start.getMonth() > m0)) return false;
@@ -52,7 +52,6 @@ const isDueThisMonth = (g: any, refDate = new Date()) => {
     if (end.getFullYear() < y0 || (end.getFullYear() === y0 && end.getMonth() < m0)) return false;
   }
 
-  // 2. Comprobar Frecuencia
   const start = g.startDate ? new Date(g.startDate) : new Date(y0, m0, 1);
   const mStart = start.getMonth(), yStart = start.getFullYear();
   const monthsDiff = (y0 - yStart) * 12 + (m0 - mStart); 
@@ -72,7 +71,8 @@ const isDueThisMonth = (g: any, refDate = new Date()) => {
 export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedUnit, setSelectedUnit] = useState<BusinessUnit | 'ALL'>('ALL'); 
-  const [showDueOnly, setShowDueOnly] = useState(false); // 🚀 NUEVO: Modo Focus (Solo lo de este mes)
+  const [showDueOnly, setShowDueOnly] = useState(false); 
+  const [showPayrollOnly, setShowPayrollOnly] = useState(false); // 🚀 NUEVO: Filtro de Personal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingGasto, setEditingGasto] = useState<any | null>(null);
 
@@ -83,7 +83,22 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
   const controlPagos = data.control_pagos || {};
   const currentPagos = controlPagos[currentMonthKey] || [];
 
-  // Calcula el "peso" mensual de un gasto para hacer el presupuesto (Mochila)
+  // 🚀 MIGRACIÓN SILENCIOSA: Convierte los gastos "personales" antiguos al nuevo tipo 'payroll'
+  useEffect(() => {
+    let needsSave = false;
+    const newData = JSON.parse(JSON.stringify(data)) as AppData;
+    
+    if (newData.gastos_fijos) {
+      newData.gastos_fijos.forEach((g: any) => {
+        if (!g.type && g.cat === 'personal') {
+          g.type = 'payroll';
+          needsSave = true;
+        }
+      });
+      if (needsSave) onSave(newData);
+    }
+  }, [data.gastos_fijos, onSave]);
+
   const getProrrateoMensual = (g: any) => {
     const amount = Math.abs(Num.parse(g.amount)) || 0;
     if (g.freq === 'anual') return amount / 12;
@@ -91,18 +106,16 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
     if (g.freq === 'trimestral') return amount / 3;
     if (g.freq === 'bimensual') return amount / 2;
     if (g.freq === 'semanal') return amount * 4.33;
-    if (g.freq === 'once') return 0; // Lo único no se prorratea
-    return amount; // Mensual
+    if (g.freq === 'once') return 0; 
+    return amount; 
   };
 
-  // 🚀 CEREBRO DE ESTADÍSTICAS: Separa lo que es "Presupuesto (Mochila)" de lo que "Toca pagar/cobrar hoy"
   const stats = useMemo(() => {
     const activeItems = gastosFijos.filter((g: any) => {
       if (g.active === false) return false;
       const gUnit = g.unitId || 'REST'; 
       if (selectedUnit !== 'ALL' && gUnit !== selectedUnit) return false;
       
-      // Tiene que estar vivo (Fechas)
       if (g.startDate && new Date(g.startDate) > new Date(today.getFullYear(), today.getMonth() + 1, 0)) return false;
       if (g.endDate && new Date(g.endDate) < new Date(today.getFullYear(), today.getMonth(), 1)) return false;
       return true;
@@ -110,47 +123,52 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
 
     let totalMochilaGastos = 0, totalPagadoGastos = 0;
     let totalMochilaIngresos = 0, totalPagadoIngresos = 0;
-    let dueRealGastos = 0, dueRealIngresos = 0; // Lo que toca pagar/cobrar de verdad este mes
+    let totalMochilaPersonal = 0, totalPagadoPersonal = 0; // 🚀 Nueva métrica de Personal
+    let dueRealGastos = 0, dueRealIngresos = 0, dueRealPersonal = 0; 
 
     activeItems.forEach((g: any) => {
       const isIncome = g.type === 'income' || g.type === 'grant';
+      const isPayroll = g.type === 'payroll' || g.cat === 'personal';
       const isDone = currentPagos.includes(g.id);
       const prorrateo = getProrrateoMensual(g);
       const importeReal = Math.abs(Num.parse(g.amount)) || 0;
       
       const tocaEsteMes = isDueThisMonth(g, today);
 
-      // Lógica de Mochila (Presupuesto Mensual)
       if (isIncome) {
         totalMochilaIngresos += prorrateo;
         if (isDone && tocaEsteMes) totalPagadoIngresos += importeReal;
+        if (tocaEsteMes) dueRealIngresos += importeReal;
+      } else if (isPayroll) {
+        totalMochilaPersonal += prorrateo;
+        if (isDone && tocaEsteMes) totalPagadoPersonal += importeReal;
+        if (tocaEsteMes) dueRealPersonal += importeReal;
       } else {
         totalMochilaGastos += prorrateo;
         if (isDone && tocaEsteMes) totalPagadoGastos += importeReal;
-      }
-
-      // Lógica de Tesorería Real (Cashflow)
-      if (tocaEsteMes) {
-        if (isIncome) dueRealIngresos += importeReal;
-        else dueRealGastos += importeReal;
+        if (tocaEsteMes) dueRealGastos += importeReal;
       }
     });
     
-    // Lo pendiente se calcula en base a lo que toca pagar este mes
-    const totalPendienteGastos = Math.max(0, dueRealGastos - totalPagadoGastos);
-    const porcentajeGastos = dueRealGastos > 0 ? (totalPagadoGastos / dueRealGastos) * 100 : 0;
+    const totalDueSalidas = dueRealGastos + dueRealPersonal;
+    const totalPagadoSalidas = totalPagadoGastos + totalPagadoPersonal;
+    const totalPendienteSalidas = Math.max(0, totalDueSalidas - totalPagadoSalidas);
+    const porcentajeSalidas = totalDueSalidas > 0 ? (totalPagadoSalidas / totalDueSalidas) * 100 : 0;
 
-    return { totalMochilaGastos, totalPagadoGastos, totalPendienteGastos, porcentajeGastos, totalMochilaIngresos, dueRealGastos, dueRealIngresos };
+    return { 
+      totalMochilaGastos, totalPagadoGastos, totalPendienteSalidas, porcentajeSalidas, 
+      totalMochilaIngresos, dueRealGastos, dueRealIngresos, dueRealPersonal, totalDueSalidas, totalMochilaPersonal 
+    };
   }, [gastosFijos, currentPagos, selectedUnit]);
 
-  // Filtramos la lista visible
   const filteredGastos = useMemo(() => {
     return gastosFijos
       .filter((g: any) => {
         if (g.active === false) return false;
         const gUnit = g.unitId || 'REST';
         if (selectedUnit !== 'ALL' && gUnit !== selectedUnit) return false;
-        if (showDueOnly && !isDueThisMonth(g, today)) return false; // 🚀 MODO FOCUS
+        if (showDueOnly && !isDueThisMonth(g, today)) return false;
+        if (showPayrollOnly && g.type !== 'payroll' && g.cat !== 'personal') return false; // 🚀 Filtro Personal
         return (g.name || '').toLowerCase().includes(searchTerm.toLowerCase());
       })
       .sort((a: any, b: any) => {
@@ -159,9 +177,8 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
         if (isPaidA !== isPaidB) return isPaidA ? 1 : -1;
         return (a.dia_pago || 1) - (b.dia_pago || 1);
       });
-  }, [gastosFijos, searchTerm, currentPagos, selectedUnit, showDueOnly]);
+  }, [gastosFijos, searchTerm, currentPagos, selectedUnit, showDueOnly, showPayrollOnly]);
 
-  // 🏦 Registrar Pago/Cobro en Banco
   const handleTogglePago = async (g: any) => {
     const newData = JSON.parse(JSON.stringify(data)) as AppData;
     if (!newData.control_pagos) newData.control_pagos = {};
@@ -175,27 +192,25 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
     const sign = isIncome ? 1 : -1;
 
     if (idx === -1) {
-      // MARCAR COMO PAGADO
       newData.control_pagos[currentMonthKey].push(g.id);
       
       if (confirm(`¿Registrar ${actionWord} de dinero en el Banco por ${Num.fmt(importeReal)}?`)) {
         if (!newData.banco) newData.banco = [];
         
-        // 🚀 INNOVACIÓN: Lo creamos como PENDING para que la conciliación PSD2 lo case matemáticamente.
+        // 🚀 INNOVACIÓN: Lo creamos como PENDING en Banco para que la conciliación lo case
         newData.banco.unshift({
           id: 'gf-pending-' + Date.now(),
           date: new Date().toISOString().split('T')[0],
-          desc: `[COMPROMISO] ${isIncome ? 'Cobro' : 'Pago'}: ${g.name}`,
+          desc: `[COMPROMISO] ${isIncome ? 'COBRO' : 'PAGO'} • ${String(g.type || 'expense').toUpperCase()} • ${g.name}`,
           amount: Num.round2(importeReal * sign),
-          status: 'pending', // ¡CRÍTICO! Así el banco lo detectará como movimiento esperado
-          link: { type: 'GASTO_FIJO', id: g.id }
+          status: 'pending', 
+          link: { type: 'GASTO_FIJO', id: g.id },
+          linkHint: { text: g.name, amount: importeReal } // Pista para la IA
         } as any);
       }
     } else {
-      // DESMARCAR COMO PAGADO (UNDO)
       newData.control_pagos[currentMonthKey].splice(idx, 1);
       
-      // Buscamos si hay un movimiento 'pending' en el banco de este mes para borrarlo
       if (newData.banco) {
          const movIdx = newData.banco.findIndex((b:any) => b.link?.type === 'GASTO_FIJO' && b.link?.id === g.id && b.status === 'pending');
          if (movIdx >= 0) newData.banco.splice(movIdx, 1);
@@ -213,9 +228,9 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
       id: editingGasto?.id || `compromiso-${Date.now()}`,
       type: formData.get('type') as string, 
       name: formData.get('name') as string,
-      amount: Math.abs(parseFloat(formData.get('amount') as string) || 0), // 🚀 Siempre positivo en BD
+      amount: Math.abs(parseFloat(formData.get('amount') as string) || 0), 
       freq: formData.get('freq') as any,
-      cat: 'varios', // Mantenemos para legacy
+      cat: formData.get('type') === 'payroll' ? 'personal' : 'varios', // Compatibilidad
       dia_pago: parseInt(formData.get('dia_pago') as string) || 1,
       startDate: formData.get('startDate') as string, 
       endDate: formData.get('endDate') as string, 
@@ -248,19 +263,17 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
     setEditingGasto(null);
   };
 
-  // Mapeo retrocompatible
   const getTypeTheme = (type?: string, legacyCat?: string) => {
     if (type) {
       const found = COMMITMENT_TYPES.find(t => t.id === type);
       if (found) return found;
     }
-    // Si es un gasto antiguo sin type, miramos su cat
     switch (legacyCat) {
-      case 'personal': return COMMITMENT_TYPES[0]; // Expense
-      case 'local': return COMMITMENT_TYPES[0]; // Expense
-      case 'suministros': return COMMITMENT_TYPES[0]; // Expense
-      case 'impuestos': return COMMITMENT_TYPES[2]; // Tax
-      case 'software': return COMMITMENT_TYPES[0]; // Expense
+      case 'personal': return COMMITMENT_TYPES[2]; // Payroll
+      case 'local': return COMMITMENT_TYPES[0]; 
+      case 'suministros': return COMMITMENT_TYPES[0]; 
+      case 'impuestos': return COMMITMENT_TYPES[3]; // Tax
+      case 'software': return COMMITMENT_TYPES[0]; 
       default: return COMMITMENT_TYPES[0];
     }
   };
@@ -268,8 +281,8 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
   return (
     <div className="animate-fade-in space-y-6 pb-24">
       {/* Header Dinámico */}
-      <header className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col justify-center">
+      <header className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+        <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col justify-center xl:col-span-1 md:col-span-2">
           <h2 className="text-xl font-black text-slate-800 tracking-tight">Agenda Financiera</h2>
           <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest flex items-center gap-2 mt-1">
             <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
@@ -280,20 +293,33 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
         <div className="bg-slate-900 p-6 rounded-[2.5rem] shadow-lg border border-slate-800 flex items-center justify-between text-white relative overflow-hidden">
            <div className="absolute top-0 left-0 w-1.5 h-full bg-rose-500"></div>
            <div className="flex flex-col pl-4">
-             <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest mb-1">Pagos de este mes</p>
-             <p className="text-3xl font-black">{Num.fmt(stats.totalPendienteGastos)} <span className="text-sm text-slate-400 font-medium tracking-normal">pendientes</span></p>
-             <p className="text-[10px] text-slate-400 font-bold mt-1">De un total de {Num.fmt(stats.dueRealGastos)} previstos</p>
+             <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest mb-1">Obligaciones (Salidas)</p>
+             <p className="text-3xl font-black">{Num.fmt(stats.totalPendienteSalidas)} <span className="text-sm text-slate-400 font-medium tracking-normal">pendientes</span></p>
+             <p className="text-[10px] text-slate-400 font-bold mt-1">De un total de {Num.fmt(stats.totalDueSalidas)} previstos</p>
            </div>
-           <div className="w-16 h-16 rounded-full border-4 border-slate-800 flex items-center justify-center relative overflow-hidden shadow-inner bg-slate-800 shrink-0">
-             <div className="absolute bottom-0 w-full bg-rose-500 transition-all duration-1000" style={{ height: `${stats.porcentajeGastos}%` }}></div>
-             <span className="text-[10px] font-black z-10 relative text-white">{Math.round(stats.porcentajeGastos)}%</span>
+           <div className="w-14 h-14 rounded-full border-4 border-slate-800 flex items-center justify-center relative overflow-hidden shadow-inner bg-slate-800 shrink-0">
+             <div className="absolute bottom-0 w-full bg-rose-500 transition-all duration-1000" style={{ height: `${stats.porcentajeSalidas}%` }}></div>
+             <span className="text-[9px] font-black z-10 relative text-white">{Math.round(stats.porcentajeSalidas)}%</span>
+           </div>
+        </div>
+
+        {/* 🚀 NUEVA PÍLDORA: GASTOS DE PERSONAL */}
+        <div className="bg-fuchsia-50 p-6 rounded-[2.5rem] shadow-sm border border-fuchsia-100 flex items-center justify-between relative overflow-hidden">
+           <div className="absolute top-0 left-0 w-1.5 h-full bg-fuchsia-500"></div>
+           <div className="flex flex-col pl-4">
+             <p className="text-[9px] font-black text-fuchsia-600 uppercase tracking-widest mb-1">Coste Laboral Mes</p>
+             <p className="text-3xl font-black text-fuchsia-700">{Num.fmt(stats.dueRealPersonal)}</p>
+             <p className="text-[10px] text-fuchsia-500/70 font-bold mt-1">Nóminas y Seguros Sociales</p>
+           </div>
+           <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm shrink-0">
+             <UserCircle className="w-5 h-5 text-fuchsia-500" />
            </div>
         </div>
 
         <div className="bg-emerald-50 p-6 rounded-[2.5rem] shadow-sm border border-emerald-100 flex items-center justify-between relative overflow-hidden">
            <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-500"></div>
            <div className="flex flex-col pl-4">
-             <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-1">Cobros de este mes</p>
+             <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-1">Previsión Ingresos</p>
              <p className="text-3xl font-black text-emerald-700">{Num.fmt(stats.dueRealIngresos)}</p>
              <p className="text-[10px] text-emerald-500/70 font-bold mt-1">Ayudas, Subvenciones y otros</p>
            </div>
@@ -317,13 +343,25 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
             />
           </div>
           
-          <div className="flex items-center gap-2 w-full md:w-auto">
-            {/* 🚀 EL MODO FOCUS */}
+          <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto no-scrollbar">
+            
+            {/* 🚀 EL MODO FOCUS DE PERSONAL */}
+            <button 
+              onClick={() => setShowPayrollOnly(!showPayrollOnly)}
+              className={cn(
+                "flex-1 md:flex-none px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border flex items-center justify-center gap-2 whitespace-nowrap",
+                showPayrollOnly ? "bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200 shadow-sm" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+              )}
+            >
+              <UserCircle className="w-3.5 h-3.5" /> {showPayrollOnly ? 'Ver Todo' : 'Solo Personal'}
+            </button>
+
+            {/* 🚀 EL MODO FOCUS MENSUAL */}
             <button 
               onClick={() => setShowDueOnly(!showDueOnly)}
               className={cn(
-                "flex-1 md:flex-none px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border flex items-center justify-center gap-2",
-                showDueOnly ? "bg-indigo-50 text-indigo-700 border-indigo-200" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+                "flex-1 md:flex-none px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border flex items-center justify-center gap-2 whitespace-nowrap",
+                showDueOnly ? "bg-indigo-50 text-indigo-700 border-indigo-200 shadow-sm" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
               )}
             >
               <Filter className="w-3.5 h-3.5" /> {showDueOnly ? 'Viendo este Mes' : 'Ver todo el año'}
@@ -331,14 +369,13 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
 
             <button 
               onClick={() => { setEditingGasto(null); setIsModalOpen(true); }}
-              className="flex-1 md:flex-none bg-slate-900 text-white px-6 py-2.5 rounded-xl text-[10px] font-black hover:bg-indigo-600 transition flex-shrink-0 shadow-lg flex items-center justify-center gap-2"
+              className="flex-1 md:flex-none bg-slate-900 text-white px-6 py-2.5 rounded-xl text-[10px] font-black hover:bg-indigo-600 transition flex-shrink-0 shadow-lg flex items-center justify-center gap-2 whitespace-nowrap"
             >
               <Plus className="w-4 h-4"/> NUEVO
             </button>
           </div>
         </div>
         
-        {/* 🚀 Filtros de Unidad de Negocio */}
         <div className="flex flex-wrap gap-2 px-1">
           <button
             onClick={() => setSelectedUnit('ALL')}
@@ -392,7 +429,7 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
                 key={g.id}
                 className={cn(
                   "bg-white p-5 rounded-[2.5rem] border transition-all relative group hover:shadow-xl flex flex-col justify-between",
-                  !tocaEsteMes ? 'opacity-50 grayscale hover:grayscale-0 hover:opacity-100' : '',
+                  !tocaEsteMes ? 'opacity-40 grayscale hover:grayscale-0 hover:opacity-100' : '',
                   isDone ? 'border-emerald-200 bg-emerald-50/20' : esUrgente ? 'border-rose-300 shadow-rose-100 shadow-lg' : 'border-slate-100 shadow-sm'
                 )}
               >
@@ -473,7 +510,7 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
                   </div>
                 )}
                 {!tocaEsteMes && (
-                  <div className="absolute -top-2 -right-2 bg-slate-200 text-slate-500 text-[8px] font-black px-2 py-1 rounded-lg shadow-sm border border-slate-300">
+                  <div className="absolute -top-2 -right-2 bg-slate-100 text-slate-400 text-[8px] font-black px-2 py-1 rounded-lg shadow-sm border border-slate-200">
                     NO TOCA ESTE MES
                   </div>
                 )}
@@ -498,11 +535,11 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="bg-white w-full max-w-lg rounded-[3rem] p-8 shadow-2xl relative max-h-[90vh] overflow-y-auto custom-scrollbar"
+              className="bg-white w-full max-w-xl rounded-[3rem] p-8 shadow-2xl relative max-h-[90vh] overflow-y-auto custom-scrollbar"
             >
               <button 
                 onClick={() => setIsModalOpen(false)}
-                className="absolute top-6 right-6 text-slate-300 hover:text-slate-600 transition bg-slate-100 p-2 rounded-full z-50"
+                className="absolute top-6 right-6 text-slate-400 hover:text-rose-500 transition bg-slate-50 hover:bg-rose-50 p-2 rounded-full z-50 border border-slate-100 hover:border-rose-200"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -517,7 +554,7 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
                 {/* 🚀 Selector VIP de Tipo */}
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-slate-400 uppercase ml-2 tracking-widest">Naturaleza de la Operación</label>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                     {COMMITMENT_TYPES.map(t => (
                       <label key={t.id} className="relative cursor-pointer group">
                         <input type="radio" name="type" value={t.id} defaultChecked={editingGasto?.type ? editingGasto.type === t.id : t.id === 'expense'} className="peer sr-only" />
@@ -536,7 +573,7 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
                 {/* 🚀 Selector VIP de Unidad de Negocio */}
                 <div className="p-4 bg-slate-50 rounded-[2rem] border border-slate-100 shadow-inner">
                   <label className="text-[10px] font-black text-slate-400 uppercase ml-2 mb-3 block tracking-widest">A qué bloque pertenece</label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                     {BUSINESS_UNITS.map(unit => (
                       <label key={unit.id} className="relative cursor-pointer">
                         <input type="radio" name="unitId" value={unit.id} defaultChecked={editingGasto?.unitId === unit.id || (!editingGasto && unit.id === 'REST')} className="peer sr-only"/>
@@ -552,7 +589,7 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
                 <div className="space-y-4">
                   <div>
                     <label className="text-[10px] font-black text-slate-400 uppercase ml-2 tracking-widest">Nombre / Concepto</label>
-                    <input name="name" type="text" defaultValue={editingGasto?.name || ''} placeholder="Ej: Préstamo ICO, Terraza 2026..." required className="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border border-slate-100 outline-none focus:ring-2 ring-indigo-500/20" />
+                    <input name="name" type="text" defaultValue={editingGasto?.name || ''} placeholder="Ej: Nómina Recepción, Préstamo ICO..." required className="w-full p-4 bg-slate-50 rounded-2xl font-bold text-sm border border-slate-100 outline-none focus:ring-2 ring-indigo-500/20" />
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
@@ -582,11 +619,11 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="text-[10px] font-black text-slate-400 uppercase ml-2 tracking-widest">Inicio (Opcional)</label>
-                      <input name="startDate" type="date" defaultValue={editingGasto?.startDate || ''} className="w-full p-4 bg-slate-50 rounded-2xl font-bold text-xs border border-slate-100 outline-none" />
+                      <input name="startDate" type="date" defaultValue={editingGasto?.startDate || ''} className="w-full p-4 bg-slate-50 rounded-2xl font-bold text-xs border border-slate-100 outline-none cursor-text" />
                     </div>
                     <div>
                       <label className="text-[10px] font-black text-slate-400 uppercase ml-2 tracking-widest">Fin (Opcional)</label>
-                      <input name="endDate" type="date" defaultValue={editingGasto?.endDate || ''} className="w-full p-4 bg-slate-50 rounded-2xl font-bold text-xs border border-slate-100 outline-none" />
+                      <input name="endDate" type="date" defaultValue={editingGasto?.endDate || ''} className="w-full p-4 bg-slate-50 rounded-2xl font-bold text-xs border border-slate-100 outline-none cursor-text" />
                     </div>
                   </div>
 
