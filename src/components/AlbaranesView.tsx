@@ -3,7 +3,8 @@ import {
   Search, Plus, Download, Package, AlertTriangle, Check, 
   Building2, ShoppingBag, ListPlus, Users, Hotel, Layers, 
   XCircle, LineChart as LineChartIcon, FileSpreadsheet, Mic, Square, Camera, Loader2, Smartphone,
-  Calculator, Sparkles, ArrowUp, ArrowDown, ArrowUpDown 
+  Calculator, Sparkles, ArrowUp, ArrowDown, ArrowUpDown,
+  ChevronLeft, ChevronRight // 🛡️ FIX CRÍTICO: Añadidos para evitar el Pantallazo Rojo
 } from 'lucide-react';
 import { AppData, Albaran } from '../types';
 import { Num, ArumeEngine, DateUtil } from '../services/engine';
@@ -212,7 +213,18 @@ function useAlbaranEnginePRO(text: string, expectedTotal: number | null, ivaMode
         else if (raw.rate === 21) { b21 += base; i21 += tax; }
         else { b10 += base; i10 += tax; }
 
-        out.push({ q: raw.q, n: raw.name, t: Num.round2(total), rate: raw.rate, base: Num.round2(base), tax: Num.round2(tax), unitPrice: Num.round2(unitPriceBruto), u: raw.u });
+        // 🛡️ EL FIX DE LOS 0,00€ PARA ALBARANES MANUALES: Generamos `t` y `total`
+        out.push({ 
+          q: raw.q, 
+          n: raw.name, 
+          t: Num.round2(total), 
+          total: Num.round2(total), // <-- Compatibilidad añadida
+          rate: raw.rate, 
+          base: Num.round2(base), 
+          tax: Num.round2(tax), 
+          unitPrice: Num.round2(unitPriceBruto), 
+          u: raw.u 
+        });
       }
 
       return { 
@@ -598,8 +610,10 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         let alerts: string[] = [];
         
         const finalItems = [...analyzedItems];
+        
+        // 🛡️ FIX REDONDEO: Aseguramos que el ajuste tenga 'total'
         if (roundingAdjustment !== 0) {
-            finalItems.push({ q: 1, n: "AJUSTE REDONDEO IA", t: roundingAdjustment, rate: 0, base: roundingAdjustment, tax: 0, unitPrice: roundingAdjustment, u: 'uds' } as any);
+            finalItems.push({ q: 1, n: "AJUSTE REDONDEO IA", t: roundingAdjustment, total: roundingAdjustment, rate: 0, base: roundingAdjustment, tax: 0, unitPrice: roundingAdjustment, u: 'uds' } as any);
         }
 
         for (const it of finalItems as any[]) {
@@ -619,8 +633,11 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
         const newAlbaran: Albaran = {
           id: robustId, prov: form.prov.trim().toUpperCase(), date: form.date, num: form.num || "S/N",
-          socio: form.socio, notes: form.notes, items: finalItems as any[], total: String(liveTotals.grandTotal),
-          base: String(liveTotals.baseFinal), taxes: String(liveTotals.taxFinal), invoiced: false, paid: form.paid, status: 'ok', reconciled: false, unitId: form.unitId 
+          socio: form.socio, notes: form.notes, items: finalItems as any[], 
+          total: String(Num.round2(liveTotals.grandTotal)), // 🛡️ FIX STRINGS
+          base: String(Num.round2(liveTotals.baseFinal)), 
+          taxes: String(Num.round2(liveTotals.taxFinal)), 
+          invoiced: false, paid: form.paid, status: 'ok', reconciled: false, unitId: form.unitId 
         };
 
         newData.albaranes.unshift(newAlbaran);
