@@ -5,17 +5,17 @@ import {
   X, Layers, ShieldCheck, List, Sparkles, ArrowDownLeft,
   Calendar, Wand2, PieChart, ArrowUpRight, ArrowDownRight,
   Eye, Save, MailCheck, Webhook, FileText, Inbox, AlertCircle, Bot,
-  ChevronLeft, ChevronRight, Users // 🛡️ EL FIX: Faltaban estos iconos
+  ChevronLeft, ChevronRight, Users
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import { GoogleGenAI } from "@google/genai";
 
-// 🛡️ TIPOS Y SERVICIOS
+// 🛡️ TIPOS Y SERVICIOS CONECTADOS AL MOTOR CENTRAL
 import { AppData, FacturaExtended, BusinessUnit, EmailDraft } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
-import { getOfficialProvName, basicNorm, linkAlbaranesToFactura, matchAlbaranesToFactura } from '../services/invoicing'; 
+import { basicNorm, linkAlbaranesToFactura, recomputeFacturaFromAlbaranes } from '../services/invoicing'; 
 import { fetchNewEmails, markEmailAsParsed } from '../services/supabase';
 
 // 🧩 COMPONENTES HIJOS
@@ -193,8 +193,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       if (!newData.facturas) newData.facturas = [];
 
       autoGroupPreview.forEach(f => {
+        // 🛡️ MAGIA APLICADA: Inicializamos a 0 y delegamos al motor
+        f.total = "0"; f.base = "0"; f.tax = "0";
         newData.facturas.unshift(f);
-        linkAlbaranesToFactura(newData, f.id, f.albaranIdsArr || []);
+        linkAlbaranesToFactura(newData, f.id, f.albaranIdsArr || [], { strategy: 'useAlbTotals' });
       });
 
       newData.facturas = [...newData.facturas]; 
@@ -202,7 +204,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       
       setAutoGroupPreview(null);
       setActiveTab('hist'); 
-      alert(`✅ ¡Perfecto! Se han guardado ${autoGroupPreview.length} facturas.`);
+      alert(`✅ ¡Perfecto! Se han guardado ${autoGroupPreview.length} facturas. Totales recalculados con éxito.`);
     } catch (e) { alert("⚠️ Hubo un error al guardar."); } finally { setIsProcessing(false); }
   };
 
@@ -220,7 +222,8 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       };
 
       newData.facturas.unshift(newFactura);
-      linkAlbaranesToFactura(newData, newFacId, modalForm.selectedAlbs);
+      // 🛡️ MAGIA APLICADA: El motor vincula y recalcula los totales automáticamente
+      linkAlbaranesToFactura(newData, newFacId, modalForm.selectedAlbs, { strategy: 'useAlbTotals' });
       
       newData.facturas = [...newData.facturas]; 
       await onSave(newData); 
@@ -251,13 +254,18 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     const fac = facturasBoveda.find(f => f && f.id === id); 
     if (!fac) return;
     if (fac.reconciled) return alert("⚠️ No puedes borrar una factura validada por el Banco.");
-    if (!window.confirm(`🛑 ¿Eliminar DEFINITIVAMENTE la factura ${fac.num || 'sin número'}? Los albaranes volverán a estar sueltos.`)) return;
+    if (!window.confirm(`🛑 ¿Eliminar DEFINITIVAMENTE la factura ${fac.num || 'sin número'}? Los albaranes volverán a estar sueltos en la sala de espera.`)) return;
     
     const newData = JSON.parse(JSON.stringify(safeData));
     const idsToFree = fac.albaranIdsArr || [];
+    
+    // 🛡️ MAGIA APLICADA: Liberamos los albaranes para que se puedan volver a agrupar
     if (Array.isArray(newData.albaranes)) {
-       newData.albaranes.forEach((a: any) => { if (a && idsToFree.includes(a.id)) a.invoiced = false; });
+       newData.albaranes.forEach((a: any) => { 
+         if (a && idsToFree.includes(a.id)) a.invoiced = false; 
+       });
     }
+    
     newData.facturas = newData.facturas.filter((f: any) => f && f.id !== id);
     await onSave(newData);
   };
@@ -300,7 +308,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   };
 
   // ============================================================================
-  // 🛡️ INNOVACIÓN 2: LÓGICA DE AUDITORÍA DE CORREOS
+  // 🛡️ LÓGICA DE AUDITORÍA DE CORREOS
   // ============================================================================
   const fetchPendingAudits = async () => {
     setIsSyncing(true);
