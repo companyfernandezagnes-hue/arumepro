@@ -1,284 +1,35 @@
-import React, { useState, useMemo, useEffect, useRef, useDeferredValue } from 'react';
+import React, { useState, useMemo, useRef, useDeferredValue, useEffect } from 'react';
 import { 
   Building2, Search, Trash2, Upload, Zap, 
   CheckCircle2, ArrowRight, TrendingUp, TrendingDown, 
   RefreshCw, Eraser, Filter, BarChart3, PieChart,
-  X as CloseIcon, Loader2, Landmark, ShieldCheck, List, Sparkles, ArrowDownLeft
+  X as CloseIcon, Loader2, Landmark, ShieldCheck, List, Sparkles, Undo2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AppData, BankMovement } from '../types';
-import { Num, DateUtil } from '../services/engine';
+import { AppData } from '../types';
+import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
 import { proxyFetch } from '../services/api';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import * as XLSX from 'xlsx';
 
-// ============================================================================
-// 🧠 BLOQUE 1: LÓGICA BANCARIA Y MOTOR DE MATCHING (Integrado para evitar errores de ruta)
-// ============================================================================
+// 🚀 IMPORTAMOS EL CEREBRO DESDE bancoLogic.ts
+import { findMatches, executeLink, undoLink, fingerprint, isSuspicious, normalizeDesc, daysBetween } from './bancoLogic';
 
-export function normalizeDesc(s = '') {
-  return s.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[\u00A0\u202F\s]+/g, ' ').trim();
-}
+// Importación opcional del modo Swipe si existe en tu proyecto. Si no existe, esto no fallará, solo no se mostrará.
+// Asumo que SwipeReconciler está en la misma carpeta o no lo usas. Lo dejaremos como dummy seguro si no existe.
+const SwipeReconciler = ({ data, onSave, onClose }: any) => (
+  <div className="fixed inset-0 z-[600] flex items-center justify-center bg-slate-900/90 text-white p-4">
+    <div className="bg-slate-800 p-8 rounded-3xl text-center relative max-w-sm">
+       <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-slate-700 rounded-full hover:bg-rose-500 transition"><CloseIcon className="w-4 h-4"/></button>
+       <Sparkles className="w-12 h-12 text-indigo-400 mx-auto mb-4"/>
+       <h3 className="text-xl font-black mb-2">Modo Swipe</h3>
+       <p className="text-sm font-medium text-slate-300">Esta función está en desarrollo. Próximamente podrás deslizar facturas como en Tinder.</p>
+    </div>
+  </div>
+);
 
-export function fingerprint(date: string, amount: number, desc: string) {
-  return `${date}|${Number(amount || 0).toFixed(2)}|${normalizeDesc(desc)}`;
-}
-
-export function daysBetween(a: string, b: string) {
-  if (!a || !b) return 999;
-  const A = new Date(a).getTime(), B = new Date(b).getTime();
-  return Math.abs(A - B) / 86400000;
-}
-
-const SUSP_PATTERNS = ['COMISION', 'FEE', 'INTERES', 'INTERESES', 'CARGO', 'GASTO BANCO', 'RETENCION', 'ANULACION', 'AJUSTE'];
-
-export function isSuspicious(desc: string) {
-  const d = normalizeDesc(desc);
-  return SUSP_PATTERNS.some(p => d.includes(p));
-}
-
-function similarityScore(a: string, b: string) {
-  const normA = normalizeDesc(a);
-  const normB = normalizeDesc(b);
-  if (normA.includes(normB) || normB.includes(normA)) return 100;
-  
-  const wordsA = normA.split(' ').filter(w => w.length > 2);
-  const wordsB = normB.split(' ').filter(w => w.length > 2);
-  let matches = 0;
-  
-  wordsA.forEach(wa => {
-    if (wordsB.some(wb => wa === wb || wa.startsWith(wb) || wb.startsWith(wa))) matches++;
-  });
-  
-  const maxWords = Math.max(wordsA.length, wordsB.length);
-  return maxWords === 0 ? 0 : (matches / maxWords) * 100;
-}
-
-export function findMatches(item: BankMovement, data: AppData) {
-  if (!item) return [];
-  const rawAmt = Num.parse(item.amount);
-  const amt = Math.abs(rawAmt);
-  const isIncome = rawAmt > 0;
-  const descNorm = normalizeDesc(item.desc);
-  const bankDate = item.date;
-  const results: any[] = [];
-  
-  const TOLERANCIA_FIJA = 1.05; 
-  const MAX_COMISION_TPV = 0.03; 
-
-  if (isIncome) {
-    data.cierres?.forEach((c: any) => {
-      if (c.conciliado_banco) return;
-      const tpvDeclarado = Num.parse(c.tarjeta);
-      const diferencia = tpvDeclarado - amt; 
-      const porcentajeDiferencia = tpvDeclarado > 0 ? diferencia / tpvDeclarado : 0;
-      const dDays = daysBetween(bankDate, c.date);
-
-      if (diferencia >= -0.5 && porcentajeDiferencia <= MAX_COMISION_TPV && dDays <= 5) {
-        let score = 100 - (dDays * 5); 
-        if (diferencia !== 0) score -= 10; 
-        
-        results.push({ 
-          type: 'TPV CAJA', id: c.id, date: c.date, 
-          title: `Cierre ${c.date} (Comisión: ${Num.fmt(diferencia)})`, 
-          amount: tpvDeclarado, realAmount: amt, comision: diferencia, color: 'emerald',
-          score: Math.round(score), diff: diferencia
-        });
-      }
-    });
-
-    data.facturas?.forEach((f: any) => {
-      if (f.tipo !== 'venta' || f.reconciled) return;
-      const total = Math.abs(Num.parse(f.total));
-      const diff = Math.abs(total - amt);
-      const textMatch = similarityScore(descNorm, f.cliente || '');
-      const dDays = daysBetween(bankDate, f.date);
-
-      if (diff <= TOLERANCIA_FIJA || (textMatch > 50 && diff <= 50)) { 
-        let score = 0;
-        if (diff <= TOLERANCIA_FIJA) score += 60; 
-        score += (textMatch * 0.4); 
-        if (dDays > 30) score -= 20; 
-
-        results.push({ 
-          type: 'FACTURA CLIENTE', id: f.id, date: f.date, 
-          title: `Fac ${f.num} (${f.cliente})`, 
-          amount: total, color: 'teal', score: Math.round(score), diff 
-        });
-      }
-    });
-  } else {
-    const albaranesPendientes = (data.albaranes || []).filter((a:any) => !a.reconciled && !a.invoiced && Num.parse(a.total) > 0);
-    
-    albaranesPendientes.forEach((a: any) => {
-      const total = Math.abs(Num.parse(a.total));
-      const diff = Math.abs(total - amt);
-      const textMatch = similarityScore(descNorm, a.prov || '');
-      const dDays = daysBetween(bankDate, a.date);
-
-      if (diff <= TOLERANCIA_FIJA || (textMatch > 60 && diff <= 10)) {
-        let score = 0;
-        if (diff <= TOLERANCIA_FIJA) score += 60;
-        score += (textMatch * 0.4);
-        if (dDays > 15) score -= 10;
-
-        results.push({ 
-          type: 'ALBARÁN SUELTO', id: a.id, date: a.date, 
-          title: `${a.prov} (${a.num})`, 
-          amount: total, color: 'indigo', score: Math.round(score), diff 
-        });
-      }
-    });
-
-    const albaranesPorProv = albaranesPendientes.reduce((acc: any, a: any) => {
-      const provNorm = normalizeDesc(a.prov);
-      if (!acc[provNorm]) acc[provNorm] = [];
-      acc[provNorm].push(a);
-      return acc;
-    }, {});
-
-    for (const prov in albaranesPorProv) {
-      const lista = albaranesPorProv[prov];
-      if (lista.length < 2) continue; 
-      for (let i = 0; i < lista.length; i++) {
-        for (let j = i + 1; j < lista.length; j++) {
-          const sum = Math.abs(Num.parse(lista[i].total)) + Math.abs(Num.parse(lista[j].total));
-          const diff = Math.abs(sum - amt);
-          if (diff <= TOLERANCIA_FIJA) {
-            const textMatch = similarityScore(descNorm, prov);
-            let score = 70 + (textMatch * 0.3); 
-            results.push({
-              type: 'MULTI-ALBARÁN', 
-              id: `${lista[i].id},${lista[j].id}`, 
-              date: lista[j].date, 
-              title: `${lista[i].prov} (Agrupación de 2 Albaranes)`, 
-              amount: sum, color: 'purple', score: Math.round(score), diff
-            });
-          }
-        }
-      }
-    }
-
-    data.facturas?.forEach((f: any) => {
-      if (f.tipo !== 'compra' || f.reconciled) return;
-      const total = Math.abs(Num.parse(f.total));
-      const diff = Math.abs(total - amt);
-      const textMatch = similarityScore(descNorm, f.prov || '');
-      
-      if (diff <= TOLERANCIA_FIJA || (textMatch > 50 && diff <= 10)) {
-        let score = 0;
-        if (diff <= TOLERANCIA_FIJA) score += 60;
-        score += (textMatch * 0.4);
-        results.push({ 
-          type: 'FACTURA PROV', id: f.id, date: f.date, 
-          title: `Fac ${f.num} (${f.prov})`, 
-          amount: total, color: 'rose', score: Math.round(score), diff 
-        });
-      }
-    });
-
-    data.gastos_fijos?.forEach((g: any) => {
-      if (g.active === false) return;
-      const total = Math.abs(Num.parse(g.amount));
-      const diff = Math.abs(total - amt);
-      const textMatch = similarityScore(descNorm, g.name);
-
-      if (diff <= TOLERANCIA_FIJA || textMatch > 70) {
-        let score = 0;
-        if (diff <= TOLERANCIA_FIJA) score += 50;
-        score += (textMatch * 0.5);
-        results.push({ 
-          type: 'GASTO FIJO/NÓMINA', id: g.id, date: bankDate, 
-          title: g.name, amount: total, color: 'amber', score: Math.round(score), diff 
-        });
-      }
-    });
-  }
-
-  return results.sort((a, b) => b.score - a.score).filter(r => r.score > 30); 
-}
-
-export function executeLink(newData: AppData, bankId: string, matchType: string, docId: string, comision: number = 0) {
-  const bItem: any = newData.banco?.find((b: any) => b.id === bankId);
-  if (!bItem) return;
-
-  if (matchType === 'MULTI-ALBARÁN') {
-    const idsToGroup = docId.split(',');
-    const albs = newData.albaranes?.filter(a => idsToGroup.includes(a.id)) || [];
-    
-    if (albs.length > 0) {
-      const newFacId = `fac-auto-agrup-${Date.now()}`;
-      let totalSuma = 0; let baseSuma = 0; let taxSuma = 0;
-      
-      albs.forEach(a => {
-        a.reconciled = true; a.paid = true; a.status = 'paid'; a.invoiced = true;
-        totalSuma += Math.abs(Num.parse(a.total));
-        baseSuma += Math.abs(Num.parse(a.base));
-        taxSuma += Math.abs(Num.parse(a.taxes));
-      });
-
-      if (!newData.facturas) newData.facturas = [];
-      newData.facturas.unshift({
-        id: newFacId, tipo: 'compra', num: `AGRUP-${Date.now().toString().slice(-4)}`,
-        date: albs[0].date, prov: albs[0].prov,
-        total: String(totalSuma), base: String(baseSuma), tax: String(taxSuma),
-        albaranIdsArr: idsToGroup,
-        paid: true, reconciled: true, source: 'auto-agrupacion-banco', status: 'reconciled', unidad_negocio: albs[0].unitId || 'REST'
-      } as any);
-
-      bItem.link = { type: 'FACTURA', id: newFacId }; 
-    }
-  } else if (matchType.includes('ALBARÁN')) {
-    const alb = newData.albaranes?.find((a: any) => a.id === docId);
-    if (alb) { alb.reconciled = true; alb.paid = true; alb.status = 'paid'; }
-    bItem.link = { type: 'ALBARAN', id: docId }; 
-  } else if (matchType.includes('FACTURA')) {
-    const fac = newData.facturas?.find((f: any) => f.id === docId);
-    if (fac) { 
-      fac.reconciled = true; fac.paid = true; fac.status = 'reconciled';
-      if (fac.albaranIdsArr?.length) {
-        newData.albaranes?.forEach((a: any) => {
-          if (fac.albaranIdsArr.includes(a.id)) { a.reconciled = true; a.paid = true; }
-        });
-      }
-    }
-    bItem.link = { type: 'FACTURA', id: docId }; 
-  } else if (matchType.includes('GASTO FIJO')) {
-    const d = new Date(bItem.date);
-    const monthKey = `pagos_${d.getFullYear()}_${d.getMonth() + 1}`;
-    if (!newData.control_pagos) newData.control_pagos = {};
-    if (!newData.control_pagos[monthKey]) newData.control_pagos[monthKey] = [];
-    if (!newData.control_pagos[monthKey].includes(docId)) newData.control_pagos[monthKey].push(docId);
-    bItem.link = { type: 'FIXED_EXPENSE', id: docId };
-  } else if (matchType === 'TPV CAJA') {
-    const cierre = newData.cierres?.find((c: any) => c.id === docId);
-    if (cierre) {
-      cierre.conciliado_banco = true;
-      if (comision > 0) {
-        if (!newData.gastos_fijos) newData.gastos_fijos = [];
-        const comisionId = 'gf-comision-' + Date.now();
-        newData.gastos_fijos.push({
-          id: comisionId, name: `Comisión TPV Cierre ${cierre.date}`, amount: comision, 
-          freq: 'puntual', dia_pago: new Date(bItem.date).getDate(), cat: 'varios', active: false
-        });
-        const d = new Date(bItem.date);
-        const monthKey = `pagos_${d.getFullYear()}_${d.getMonth() + 1}`;
-        if (!newData.control_pagos) newData.control_pagos = {};
-        if (!newData.control_pagos[monthKey]) newData.control_pagos[monthKey] = [];
-        newData.control_pagos[monthKey].push(comisionId);
-      }
-    }
-    bItem.link = { type: 'TPV', id: docId };
-  }
-
-  bItem.status = 'matched';
-}
-
-// ============================================================================
-// ⚡ BLOQUE 2: COMPONENTES VISUALES
-// ============================================================================
-
+// Componente Visual del Rayo Láser (EnergyBeam)
 const EnergyBeam = ({ sourceId, targetId, isActive }: { sourceId: string, targetId: string, isActive: boolean }) => {
   const [coords, setCoords] = useState<{x1: number, y1: number, x2: number, y2: number} | null>(null);
 
@@ -326,9 +77,6 @@ const EnergyBeam = ({ sourceId, targetId, isActive }: { sourceId: string, target
   );
 };
 
-// ============================================================================
-// 🏦 BLOQUE 3: COMPONENTE PRINCIPAL (BANCO VIEW)
-// ============================================================================
 
 interface BancoViewProps {
   data: AppData;
@@ -412,6 +160,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
 
   const selectedItem = useMemo(() => data.banco?.find((b: any) => b.id === selectedBankId), [data.banco, selectedBankId]);
   
+  // 🧠 USAMOS EL CEREBRO PARA BUSCAR COINCIDENCIAS
   const matches = useMemo(() => {
     if (!selectedItem) return [];
     return findMatches(selectedItem, data).slice(0, 3); 
@@ -468,11 +217,20 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
     await onSave(newData); alert('📊 Análisis completado: Sospechosos y duplicados detectados.');
   };
 
+  // 🚀 DELEGAMOS EN EL CEREBRO EL ENLACE
   const handleLink = async (bankId: string, matchType: string, docId: string, comision: number = 0) => {
     const newData = JSON.parse(JSON.stringify(data));
     executeLink(newData, bankId, matchType, docId, comision); 
     await onSave(newData);
     setSelectedBankId(null);
+  };
+
+  // 🚀 NUEVA ACCIÓN: DESHACER ENLACE
+  const handleUndoLink = async (bankId: string) => {
+    if (!window.confirm("¿Seguro que quieres desenlazar este movimiento y revertir los pagos?")) return;
+    const newData = JSON.parse(JSON.stringify(data));
+    undoLink(newData, bankId);
+    await onSave(newData);
   };
 
   const handleQuickAction = async (bankId: string, label: string, type: 'ALBARAN' | 'FIXED_EXPENSE' | 'TPV' | 'CASH' | 'INCOME') => {
@@ -497,11 +255,13 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
 
       if (pendingFixed) {
         newData.control_pagos[monthKey].push(pendingFixed.id);
+        item.link = { type: 'GASTO_FIJO', id: pendingFixed.id };
       } else { 
         const newFixedId = 'gf-' + Date.now();
         if (!newData.gastos_fijos) newData.gastos_fijos = [];
         newData.gastos_fijos.push({ id: newFixedId, name: `${label} (Detectado Auto)`, amount: amt, freq: 'mensual', dia_pago: d.getDate(), cat: isPersonal ? 'personal' : 'varios', active: true });
         newData.control_pagos[monthKey].push(newFixedId);
+        item.link = { type: 'GASTO_FIJO', id: newFixedId };
       }
     } else if (type === 'TPV') {
       const zMatch = newData.cierres?.find((c: any) => !c.conciliado_banco && Math.abs(Num.parse(c.tarjeta) - amt) <= 5);
@@ -510,10 +270,12 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
         const zNum = `Z-${zMatch.date.replace(/-/g, '')}`;
         const fZ = newData.facturas?.find((f: any) => f.num === zNum);
         if (fZ) { fZ.reconciled = true; fZ.paid = true; fZ.status = 'reconciled'; }
+        item.link = { type: 'TPV', id: zMatch.id };
       }
     } else if (type === 'CASH') {
       const cMatch = newData.cierres?.find((c: any) => !c.conciliado_banco && Math.abs(Num.parse(c.efectivo) - amt) <= 50);
       if (cMatch) cMatch.conciliado_banco = true;
+      item.link = { type: 'CASH', id: cMatch?.id || 'none' };
     }
 
     item.status = 'matched'; item.category = label;
@@ -542,6 +304,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
                 zMatch.conciliado_banco = true;
                 const fZ = newData.facturas?.find((f: any) => f.num === `Z-${zMatch.date.replace(/-/g, '')}`);
                 if (fZ) { fZ.reconciled = true; fZ.paid = true; fZ.status = 'reconciled'; }
+                item.link = { type: 'TPV', id: zMatch.id };
               }
             }
           } else {
@@ -557,6 +320,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
                  if (!newData.gastos_fijos) newData.gastos_fijos = [];
                  newData.gastos_fijos.push({ id: newFixedId, name: mov.categoriaAsignada, amount: Math.abs(amtRaw), freq: 'mensual', dia_pago: d.getDate(), cat: catLower.includes('personal') ? 'personal' : 'varios', active: true });
                  newData.control_pagos[monthKey].push(newFixedId);
+                 item.link = { type: 'GASTO_FIJO', id: newFixedId };
               }
             }
           }
@@ -788,9 +552,19 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
                   <motion.div key={selectedItem.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="flex-1 flex flex-col">
                     
                     <div className="border-b border-slate-100 pb-8 mb-8 relative">
-                      <span className={cn("text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest", Num.parse(selectedItem.amount) > 0 ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700")}>
-                        {Num.parse(selectedItem.amount) > 0 ? 'INGRESO DETECTADO' : 'GASTO DETECTADO'}
-                      </span>
+                      <div className="flex justify-between items-center">
+                        <span className={cn("text-[10px] font-black px-3 py-1.5 rounded-full uppercase tracking-widest", Num.parse(selectedItem.amount) > 0 ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700")}>
+                          {Num.parse(selectedItem.amount) > 0 ? 'INGRESO DETECTADO' : 'GASTO DETECTADO'}
+                        </span>
+                        
+                        {/* 🚀 BOTÓN DESHACER (UNDO LINK) */}
+                        {selectedItem.status === 'matched' && (
+                          <button onClick={() => handleUndoLink(selectedItem.id)} className="bg-slate-100 text-slate-500 hover:bg-rose-100 hover:text-rose-600 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition flex items-center gap-1.5">
+                            <Undo2 className="w-3 h-3" /> Deshacer Enlace
+                          </button>
+                        )}
+                      </div>
+                      
                       <h3 className="font-black text-2xl md:text-3xl mt-5 leading-tight text-slate-800 tracking-tighter line-clamp-2">{selectedItem.desc}</h3>
                       <p id={`bank-preview-${selectedItem.id}`} className={cn("text-4xl md:text-5xl font-black mt-3 tracking-tighter inline-block relative z-10", Num.parse(selectedItem.amount) > 0 ? "text-emerald-500" : "text-slate-900")}>
                         {Num.fmt(selectedItem.amount)}
