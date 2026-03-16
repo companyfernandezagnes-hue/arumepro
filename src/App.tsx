@@ -155,28 +155,44 @@ function CommandPalette<T extends string>({ open, onClose, items, onSelect, onAc
 }
 
 /* =======================================================
- * 📱 2. HOOK SWIPE UP (Móviles)
- * ======================================================= */
-function useSwipeUpToReveal(onReveal: () => void) {
-  const startY = useRef(0);
-  useEffect(() => {
-    if (!window.matchMedia?.('(pointer: coarse)').matches) return;
-    const onTouchStart = (e: TouchEvent) => { if (e.touches.length && window.innerHeight - e.touches[0].clientY <= 40) startY.current = e.touches[0].clientY; };
-    const onTouchMove = (e: TouchEvent) => { if (startY.current > 0 && startY.current - e.touches[0].clientY >= 30) { onReveal(); startY.current = 0; } };
-    const onTouchEnd = () => { startY.current = 0; };
-    window.addEventListener('touchstart', onTouchStart, { passive: true });
-    window.addEventListener('touchmove', onTouchMove, { passive: true });
-    window.addEventListener('touchend', onTouchEnd, { passive: true });
-    return () => { window.removeEventListener('touchstart', onTouchStart); window.removeEventListener('touchmove', onTouchMove); window.removeEventListener('touchend', onTouchEnd); };
-  }, [onReveal]);
-}
-
-/* =======================================================
- * 🚀 3. EL DOCK ESTILO MAC
+ * 📱 2. NAVEGACIÓN MÓVIL (SIEMPRE FIJA Y COMPACTA)
  * ======================================================= */
 type DockItemDef<T extends string> = { key: T; label: string; icon: any; group?: 'main'|'fin'|'ops'; shortcut?: string };
 
-function AutoHideDock<T extends string>({ items, activeKey, onChange }: { items: DockItemDef<T>[], activeKey: T, onChange: (k:T)=>void }) {
+function MobileTabBar<T extends string>({ items, activeKey, onChange }: { items: DockItemDef<T>[], activeKey: T, onChange: (k:T)=>void }) {
+  const groups = useMemo(() => ({
+    main: items.filter(i => (i.group ?? 'main') === 'main'), 
+    fin: items.filter(i => i.group === 'fin'), 
+    ops: items.filter(i => i.group === 'ops'),
+  }), [items]);
+
+  return (
+    <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-[120] bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe shadow-[0_-5px_15px_rgba(0,0,0,0.05)]">
+      <div className="flex items-center overflow-x-auto no-scrollbar px-2 py-1.5 gap-1">
+        {groups.main.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
+        <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
+        {groups.fin.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
+        <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
+        {groups.ops.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
+      </div>
+    </nav>
+  );
+}
+
+function MobileTabButton<T extends string>({ item, active, onClick }: { item: DockItemDef<T>, active: boolean, onClick: () => void }) {
+  const Icon = item.icon;
+  return (
+    <button type="button" onClick={onClick} className={cn("min-w-[56px] h-12 px-1 rounded-xl border border-transparent text-[8px] font-black flex flex-col items-center justify-center gap-1 transition-all shrink-0", active ? "bg-slate-800 text-white shadow-md" : "text-slate-500 hover:bg-slate-100")}>
+      <Icon className={cn("w-4 h-4", active ? "text-white" : "")} />
+      <span className="truncate w-full text-center px-0.5">{item.label}</span>
+    </button>
+  );
+}
+
+/* =======================================================
+ * 🚀 3. EL DOCK DE ESCRITORIO (AUTO-OCULTABLE ESTILO MAC)
+ * ======================================================= */
+function DesktopDock<T extends string>({ items, activeKey, onChange }: { items: DockItemDef<T>[], activeKey: T, onChange: (k:T)=>void }) {
   const [visible, setVisible] = useState(false);
   const [hoveringDock, setHoveringDock] = useState(false);
   const hideTimerRef = useRef<number | null>(null);
@@ -192,8 +208,6 @@ function AutoHideDock<T extends string>({ items, activeKey, onChange }: { items:
     window.addEventListener('mousemove', onMouseMove);
     return () => window.removeEventListener('mousemove', onMouseMove);
   }, [handleShow]);
-
-  useSwipeUpToReveal(handleShow);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -215,7 +229,7 @@ function AutoHideDock<T extends string>({ items, activeKey, onChange }: { items:
   }), [items]);
 
   return (
-    <>
+    <div className="hidden lg:block">
       <AnimatePresence>
         {!visible && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed bottom-1 left-1/2 -translate-x-1/2 w-16 h-1 rounded-full bg-slate-300 z-[119] pointer-events-none" />
@@ -226,30 +240,30 @@ function AutoHideDock<T extends string>({ items, activeKey, onChange }: { items:
         {visible && (
           <motion.nav
             initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            className="fixed bottom-safe left-0 right-0 z-[120] px-4 pb-3 pt-6 flex justify-center"
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[120] flex justify-center"
           >
-            <div className="bg-white/95 backdrop-blur-md border border-slate-200 shadow-xl rounded-xl p-2 max-w-full overflow-x-auto relative" onMouseEnter={() => setHoveringDock(true)} onMouseLeave={() => { setHoveringDock(false); handleShow(); }}>
-              <div className="flex items-center gap-1 no-scrollbar" style={{ WebkitOverflowScrolling: 'touch' }}>
-                {groups.main.map(it => <DockButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
+            <div className="bg-white/95 backdrop-blur-md shadow-2xl border border-slate-200/50 rounded-full px-6 py-2 max-w-full overflow-x-auto relative" onMouseEnter={() => setHoveringDock(true)} onMouseLeave={() => { setHoveringDock(false); handleShow(); }}>
+              <div className="flex items-center gap-1 no-scrollbar">
+                {groups.main.map(it => <DesktopTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
                 <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
-                {groups.fin.map(it => <DockButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
+                {groups.fin.map(it => <DesktopTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
                 <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
-                {groups.ops.map(it => <DockButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
+                {groups.ops.map(it => <DesktopTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
               </div>
             </div>
           </motion.nav>
         )}
       </AnimatePresence>
-    </>
+    </div>
   );
 }
 
-function DockButton<T extends string>({ item, active, onClick }: { item: DockItemDef<T>, active: boolean, onClick: () => void }) {
+function DesktopTabButton<T extends string>({ item, active, onClick }: { item: DockItemDef<T>, active: boolean, onClick: () => void }) {
   const Icon = item.icon;
   return (
-    <button type="button" onClick={onClick} className={cn("min-w-[60px] h-14 px-1 rounded-lg border border-transparent text-[9px] font-bold flex flex-col items-center justify-center gap-1 transition-all shrink-0", active ? "bg-slate-800 text-white shadow-md" : "text-slate-500 hover:bg-slate-100 hover:text-slate-800 hover:border-slate-200")}>
+    <button type="button" onClick={onClick} className={cn("min-w-[60px] h-14 px-1 rounded-2xl border border-transparent text-[9px] font-bold flex flex-col items-center justify-center gap-1 transition-all shrink-0", active ? "bg-slate-800 text-white shadow-md" : "text-slate-500 hover:bg-slate-100 hover:text-slate-800 hover:border-slate-200")}>
       <Icon className={cn("w-4 h-4", active ? "text-white" : "")} />
-      <span className="hidden sm:block truncate w-full text-center px-0.5">{item.label}</span>
+      <span className="truncate w-full text-center px-0.5">{item.label}</span>
     </button>
   );
 }
@@ -281,7 +295,6 @@ export default function App() {
     setIsCmdOpen(false);
   }, []);
 
-  // 🌟 INNOVACIÓN: Modo Pantalla Completa
   const toggleFullScreen = () => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(err => {
@@ -518,7 +531,6 @@ export default function App() {
 
   return (
     <AuthScreen>
-      {/* 🚀 FIX CLAVE: Cambiado flex-1 y overflow interno para liberar el scroll al navegador */}
       <div id="app-root-container" className="min-h-screen w-full bg-slate-50 relative pt-safe">
         
         <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={handlePhotoCapture} className="hidden" />
@@ -551,7 +563,6 @@ export default function App() {
               </div>
             )}
             
-            {/* 🌟 BOTÓN FULLSCREEN */}
             <button onClick={toggleFullScreen} aria-label="Pantalla Completa" className="hidden sm:flex w-8 h-8 items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 rounded transition">
               <Maximize className="w-4 h-4" />
             </button>
@@ -562,7 +573,7 @@ export default function App() {
           </div>
         </header>
 
-        {/* 🌟 CONTENEDOR PRINCIPAL LIBERADO */}
+        {/* 🌟 CONTENEDOR PRINCIPAL */}
         <main className="w-full pb-32">
           <AnimatePresence mode="wait">
             <motion.div 
@@ -580,13 +591,13 @@ export default function App() {
           </AnimatePresence>
         </main>
 
-        {/* BOTÓN FLOTANTE DINÁMICO */}
+        {/* 🚀 FIX: BOTÓN DE CÁMARA MOVIDO A LA IZQUIERDA PARA NO PISAR A TELEGRAM */}
         {showCameraButton && (
           <button 
             onClick={() => fileInputRef.current?.click()}
             disabled={isProcessingPhoto}
             className={cn(
-              "fixed bottom-24 right-4 z-[90] w-14 h-14 rounded-full flex items-center justify-center text-white shadow-xl transition-all duration-300 md:hidden",
+              "fixed bottom-24 left-4 z-[90] w-14 h-14 rounded-full flex items-center justify-center text-white shadow-xl transition-all duration-300 md:hidden",
               isProcessingPhoto ? "bg-indigo-400 cursor-not-allowed scale-95" : "bg-indigo-600 hover:bg-indigo-700 hover:scale-105 active:scale-95",
               activeTab === 'compras' && "animate-bounce shadow-indigo-500/50"
             )}
@@ -614,7 +625,9 @@ export default function App() {
 
         <TelegramWidget currentModule={TAB_LABELS[activeTab]} telegramToken={db?.config?.telegramToken} chatId={db?.config?.telegramChatId} />
         
-        <AutoHideDock items={navItems} activeKey={activeTab} onChange={(k) => handleTabChange(k)} />
+        {/* 🚀 BARRAS DE NAVEGACIÓN (Móvil Fija vs PC Auto-Hide) */}
+        <MobileTabBar items={navItems} activeKey={activeTab} onChange={(k) => handleTabChange(k)} />
+        <DesktopDock items={navItems} activeKey={activeTab} onChange={(k) => handleTabChange(k)} />
         
         <CommandPalette 
           open={isCmdOpen} onClose={() => setIsCmdOpen(false)} 
