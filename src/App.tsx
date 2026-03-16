@@ -155,7 +155,7 @@ function CommandPalette<T extends string>({ open, onClose, items, onSelect, onAc
 }
 
 /* =======================================================
- * 📱 2. NAVEGACIÓN MÓVIL (SIEMPRE FIJA Y COMPACTA)
+ * 📱 2. NAVEGACIÓN MÓVIL (SIEMPRE FIJA Y CORREDERA)
  * ======================================================= */
 type DockItemDef<T extends string> = { key: T; label: string; icon: any; group?: 'main'|'fin'|'ops'; shortcut?: string };
 
@@ -168,12 +168,15 @@ function MobileTabBar<T extends string>({ items, activeKey, onChange }: { items:
 
   return (
     <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-[120] bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe shadow-[0_-5px_15px_rgba(0,0,0,0.05)]">
-      <div className="flex items-center overflow-x-auto no-scrollbar px-2 py-1.5 gap-1">
+      {/* 🚀 FIX CLAVE: overflow-x-auto, flex-nowrap y touch-pan-x para permitir deslizar con el dedo sin ocultar la barra de scroll de forma fea */}
+      <div className="flex items-center overflow-x-auto flex-nowrap touch-pan-x px-2 py-1.5 gap-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {groups.main.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
         <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
         {groups.fin.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
         <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
         {groups.ops.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
+        {/* Margen final para que no se pegue al borde derecho al hacer scroll a tope */}
+        <div className="w-2 shrink-0"></div>
       </div>
     </nav>
   );
@@ -182,7 +185,7 @@ function MobileTabBar<T extends string>({ items, activeKey, onChange }: { items:
 function MobileTabButton<T extends string>({ item, active, onClick }: { item: DockItemDef<T>, active: boolean, onClick: () => void }) {
   const Icon = item.icon;
   return (
-    <button type="button" onClick={onClick} className={cn("min-w-[56px] h-12 px-1 rounded-xl border border-transparent text-[8px] font-black flex flex-col items-center justify-center gap-1 transition-all shrink-0", active ? "bg-slate-800 text-white shadow-md" : "text-slate-500 hover:bg-slate-100")}>
+    <button type="button" onClick={onClick} className={cn("min-w-[64px] w-[64px] h-12 px-1 rounded-xl border border-transparent text-[8px] font-black flex flex-col items-center justify-center gap-1 transition-all shrink-0", active ? "bg-slate-800 text-white shadow-md" : "text-slate-500 hover:bg-slate-100")}>
       <Icon className={cn("w-4 h-4", active ? "text-white" : "")} />
       <span className="truncate w-full text-center px-0.5">{item.label}</span>
     </button>
@@ -531,7 +534,7 @@ export default function App() {
 
   return (
     <AuthScreen>
-      <div id="app-root-container" className="min-h-screen w-full bg-slate-50 relative pt-safe">
+      <div id="app-root-container" className="min-h-screen w-full bg-slate-50 relative pt-safe overflow-x-hidden">
         
         <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={handlePhotoCapture} className="hidden" />
 
@@ -591,7 +594,7 @@ export default function App() {
           </AnimatePresence>
         </main>
 
-        {/* 🚀 FIX: BOTÓN DE CÁMARA MOVIDO A LA IZQUIERDA PARA NO PISAR A TELEGRAM */}
+        {/* 🚀 FIX: BOTÓN DE CÁMARA A LA IZQUIERDA */}
         {showCameraButton && (
           <button 
             onClick={() => fileInputRef.current?.click()}
@@ -625,7 +628,7 @@ export default function App() {
 
         <TelegramWidget currentModule={TAB_LABELS[activeTab]} telegramToken={db?.config?.telegramToken} chatId={db?.config?.telegramChatId} />
         
-        {/* 🚀 BARRAS DE NAVEGACIÓN (Móvil Fija vs PC Auto-Hide) */}
+        {/* 🚀 BARRAS DE NAVEGACIÓN */}
         <MobileTabBar items={navItems} activeKey={activeTab} onChange={(k) => handleTabChange(k)} />
         <DesktopDock items={navItems} activeKey={activeTab} onChange={(k) => handleTabChange(k)} />
         
