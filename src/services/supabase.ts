@@ -1,7 +1,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { AppData, EmailDraft } from '../types';
 
-// 1. CONEXIÓN (Variables de entorno)
+// 1. CONEXIÓN (Variables de entorno con salvavidas de emergencia)
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://bgtelulbiaugawyrhvwt.supabase.co";
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_jagYegyG8gGMijzpLEY9BQ_iWfL1MU4";
 
@@ -45,7 +45,9 @@ async function withRetries<T>(fn: () => Promise<T>, { retries = 3, baseMs = 700,
   }
 }
 
-async function withTimeout<T>(p: Promise<T>, ms = 15000): Promise<T> {
+// 🚀 MEJORA VITAL: Aumentamos el timeout a 25 segundos (25000ms). 
+// Si la base de datos está "dormida", le damos tiempo suficiente para arrancar sin que la app colapse.
+async function withTimeout<T>(p: Promise<T>, ms = 25000): Promise<T> {
   const ac = new AbortController();
   const to = setTimeout(() => ac.abort(), ms);
   try {
@@ -82,19 +84,19 @@ const enforceSchema = (d: any): AppData => {
 const unwrapData = (rawData: any) => {
   let cleanData = rawData;
 
-  // 🚨 EL FIX VITAL: Si Supabase nos devuelve un texto con un JSON dentro, lo convertimos a Objeto
+  // Si Supabase nos devuelve un texto con un JSON dentro, lo convertimos a Objeto
   if (typeof cleanData === 'string') {
     try {
       cleanData = JSON.parse(cleanData);
     } catch (e) {
       console.error("⚠️ Error crítico: El texto de la base de datos no es un JSON válido", e);
-      return enforceSchema({}); // Si está corrupto, devolvemos un esquema en blanco para no crashear
+      return enforceSchema({}); 
     }
   }
 
   let iterations = 0;
-  // Mientras esté envuelto en "data" (Efecto Matrioska), lo desenvolvemos
-  while (cleanData && typeof cleanData === 'object' && 'data' in cleanData && !cleanData.banco && iterations < 5) {
+  // 🚀 MEJORA ESCUDO ANTI-NULL: Añadimos `cleanData !== null` para que no explote si la base de datos responde vacío.
+  while (cleanData !== null && typeof cleanData === 'object' && 'data' in cleanData && !cleanData.banco && iterations < 5) {
     cleanData = cleanData.data;
     iterations++;
   }
@@ -132,7 +134,7 @@ export async function fetchArumeData(retries = 3): Promise<{ data: AppData | nul
   } catch (error: any) {
     console.error("❌ Error conectando a Supabase (fetch):", error?.message || error);
     
-    // Si falla Supabase, intentamos rescatar el Shadow Backup
+    // Si falla Supabase por timeout o error de red, intentamos rescatar el Shadow Backup
     try {
       const shadow = localStorage.getItem('arume_shadow_backup');
       if (shadow) {
@@ -180,7 +182,6 @@ export async function saveArumeData(
     const execUpsert = async () => {
       const { data: up, error } = await supabase
         .from('arume_data')
-        // Supabase guarda el payload. Si la columna data es de texto, se stringificará automáticamente por la librería de Supabase
         .upsert({ id: 1, data: payload }, { onConflict: 'id' })
         .select('updated_at, version')
         .single();
