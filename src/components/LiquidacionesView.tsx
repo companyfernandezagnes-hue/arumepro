@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import * as XLSX from 'xlsx';
-import { AppData } from '../types';
+import { AppData, Socio } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
 
@@ -24,10 +24,10 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
 
   // --- CÁLCULOS ROBUSTOS ---
   const stats = useMemo(() => {
-    // 1. Obtener socios dinámicamente de la DB
-    const sociosActivos = Array.isArray(data.socios) && data.socios.length > 0 
-      ? data.socios.filter(s => s.active).map(s => s.n) 
-      : ['ARUME', 'PAU'];
+    // 1. Obtener socios y sus ROLES de la DB
+    const sociosData = Array.isArray(data.socios) ? data.socios : [];
+    const sociosActivos = sociosData.filter(s => s.active);
+    const nombresSociosActivos = sociosActivos.map(s => s.n.toUpperCase());
 
     // 2. Filtrar por periodo
     const periodFacturas = (data.facturas || []).filter(f => 
@@ -55,17 +55,29 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
       ivaSoportado += Num.parse(a.taxes) || Num.round2(t - Num.parse(a.base));
     });
 
-    // 5. Gastos por Socio
-    const partnerSpending: Record<string, number> = {};
-    sociosActivos.forEach(p => partnerSpending[p] = 0);
-    partnerSpending['OTROS / RESTAURANTE'] = 0;
+    // 5. Gastos por Socio / Operativo (GASTOS SUPLIDOS)
+    // Inicializamos el contador para todos los activos
+    const partnerSpending: Record<string, { total: number, isOperativo: boolean }> = {};
+    sociosActivos.forEach(p => {
+       partnerSpending[p.n.toUpperCase()] = { total: 0, isOperativo: p.role === 'operativo' };
+    });
+    partnerSpending['OTROS / RESTAURANTE'] = { total: 0, isOperativo: false };
     
     periodAlbaranes.forEach(a => {
       const socioName = (a.socio || '').toUpperCase();
-      if (sociosActivos.includes(socioName)) {
-        partnerSpending[socioName] += Num.parse(a.total);
+      const matchSocio = sociosActivos.find(s => s.n.toUpperCase() === socioName);
+      
+      if (matchSocio) {
+        // 🚀 MAGIA: Si es Operativo (Agnès, Pau, Only One), se les debe devolver SÓLO LA BASE IMPONIBLE (Sin IVA)
+        if (matchSocio.role === 'operativo') {
+           const baseImponible = Num.parse(a.base) || Num.round2(Num.parse(a.total) / 1.10); // Asumimos 10% si no hay desglose
+           partnerSpending[socioName].total += baseImponible;
+        } else {
+           // Si es Socio Fundador o Empresa, contabilizamos el total del ticket
+           partnerSpending[socioName].total += Num.parse(a.total);
+        }
       } else {
-        partnerSpending['OTROS / RESTAURANTE'] += Num.parse(a.total);
+        partnerSpending['OTROS / RESTAURANTE'].total += Num.parse(a.total);
       }
     });
 
@@ -76,7 +88,7 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
       ivaSoportado,
       ivaBalance: ivaRepercutido - ivaSoportado,
       partnerSpending,
-      sociosActivos,
+      nombresSociosActivos,
       countFacturas: periodFacturas.length,
       countAlbaranes: periodAlbaranes.length,
       propinasVal: Num.round2(totalVentas * (propinasPct / 100)),
@@ -213,27 +225,36 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* 👥 LIQUIDACIÓN SOCIOS */}
+        {/* 👥 LIQUIDACIÓN EQUIPO Y SOCIOS */}
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col">
           <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
-            <Wallet className="w-5 h-5 text-indigo-500" /> Liquidación Socios
+            <Wallet className="w-5 h-5 text-indigo-500" /> Liquidación Gastos Suplidos
           </h3>
           <div className="space-y-3 flex-1">
-            {Object.entries(stats.partnerSpending).map(([partner, amount]) => {
-              if (amount === 0 && partner === 'OTROS / RESTAURANTE') return null;
+            {Object.entries(stats.partnerSpending).map(([partner, data]) => {
+              if (data.total === 0 && partner === 'OTROS / RESTAURANTE') return null;
+              if (data.total === 0) return null; // No mostrar si no debe nada
+              
               const isOther = partner === 'OTROS / RESTAURANTE';
+              const isOperativo = data.isOperativo;
+
               return (
                 <div key={partner} className={cn("flex justify-between items-center p-4 rounded-2xl border transition-all", isOther ? "bg-slate-50 border-slate-100" : "bg-white border-indigo-50 hover:border-indigo-200 hover:shadow-sm")}>
                   <div className="flex items-center gap-3">
-                    <div className={cn("w-10 h-10 rounded-full flex items-center justify-center font-black text-xs shadow-inner", isOther ? "bg-slate-200 text-slate-500" : "bg-indigo-100 text-indigo-700")}>
+                    <div className={cn("w-10 h-10 rounded-full flex items-center justify-center font-black text-xs shadow-inner", isOther ? "bg-slate-200 text-slate-500" : isOperativo ? "bg-fuchsia-100 text-fuchsia-700" : "bg-indigo-100 text-indigo-700")}>
                       {isOther ? '?' : partner.substring(0, 2)}
                     </div>
                     <div>
                       <p className="text-sm font-black text-slate-800">{partner}</p>
-                      <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">{isOther ? 'Gastos generales' : 'Retirado en compras'}</p>
+                      {/* 🚀 ETIQUETA CLAVE: Informa si se le ha quitado el IVA o no */}
+                      {isOperativo ? (
+                         <p className="text-[8px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-black uppercase tracking-widest mt-1 inline-block">Devolución (Sin IVA)</p>
+                      ) : (
+                         <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">{isOther ? 'Gastos generales' : 'Ticket Completo'}</p>
+                      )}
                     </div>
                   </div>
-                  <p className="text-lg font-black text-slate-900">{Num.fmt(amount)}</p>
+                  <p className="text-lg font-black text-slate-900">{Num.fmt(data.total)}</p>
                 </div>
               );
             })}
@@ -243,7 +264,7 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
         {/* 🧑‍🍳 LIQUIDACIÓN PERSONAL (INTERACTIVO) */}
         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col">
           <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
-            <ChefHat className="w-5 h-5 text-amber-500" /> Retribución Equipo
+            <ChefHat className="w-5 h-5 text-amber-500" /> Retribución Extras
           </h3>
           <div className="space-y-6 flex-1">
             
@@ -273,19 +294,22 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
             <div className="p-5 bg-indigo-50 rounded-[2rem] border border-indigo-100">
               <div className="flex justify-between items-start mb-2">
                 <span className="text-[10px] font-black text-indigo-800 uppercase tracking-widest mt-2">Bolsa Horas Extra</span>
-                <input 
-                  type="number" 
-                  value={horasExtraEuro} 
-                  onChange={e => setHorasExtraEuro(Number(e.target.value))}
-                  placeholder="0.00"
-                  className="w-28 bg-white border border-indigo-200 rounded-xl text-right font-black text-indigo-700 text-xl py-2 px-3 outline-none focus:ring-2 ring-indigo-400 shadow-sm"
-                />
+                <div className="relative">
+                  <input 
+                    type="number" 
+                    value={horasExtraEuro || ''} 
+                    onChange={e => setHorasExtraEuro(Number(e.target.value))}
+                    placeholder="0.00"
+                    className="w-28 bg-white border border-indigo-200 rounded-xl text-right font-black text-indigo-700 text-xl py-2 px-6 outline-none focus:ring-2 ring-indigo-400 shadow-sm"
+                  />
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-indigo-400 font-bold">€</span>
+                </div>
               </div>
-              <p className="text-[9px] text-indigo-400 font-bold uppercase tracking-widest mt-2">Repartir a final de mes</p>
+              <p className="text-[9px] text-indigo-400 font-bold uppercase tracking-widest mt-2">A repartir entre el equipo a final de mes</p>
             </div>
 
             <div className="pt-4 border-t border-slate-100 flex justify-between items-center">
-              <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Total Equipo:</span>
+              <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Total Equipo Extra:</span>
               <span className="text-xl font-black text-slate-900">{Num.fmt(stats.propinasVal + horasExtraEuro)}</span>
             </div>
           </div>
