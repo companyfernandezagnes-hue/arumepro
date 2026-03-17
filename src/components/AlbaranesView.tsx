@@ -48,8 +48,16 @@ const safeJSON = (str: string) => { try { const match = str.match(/\{[\s\S]*\}/)
 const looksLikeDuplicate = (prov: string, num: string, date: string, albaranes: Albaran[]) => 
   albaranes.some(a => basicNorm(a.prov) === basicNorm(prov) && (a.num||'S/N') === (num||'S/N') && (a.date||'').slice(0,10) === (date||'').slice(0,10));
 
+// 🧠 MEJORA: Eliminación básica de plurales (es, s) para búsquedas más efectivas
+const singularize = (word: string) => {
+  let w = basicNorm(word);
+  if (w.endsWith('es')) return w.slice(0, -2);
+  if (w.endsWith('s')) return w.slice(0, -1);
+  return w;
+};
+
 const getDynamicThreshold = (itemName: string) => {
-  const n = itemName.toLowerCase();
+  const n = basicNorm(itemName);
   if (n.match(/tomate|lechuga|cebolla|patata|pimiento|verdura|fruta|limon|naranja/)) return 25; 
   if (n.match(/pescado|salmon|lubina|pulpo|calamar|gamba|langostino/)) return 15; 
   if (n.match(/carne|ternera|pollo|cerdo/)) return 8; 
@@ -59,8 +67,10 @@ const getDynamicThreshold = (itemName: string) => {
 
 const normalizeUnitPrice = (q: number, u: string | undefined, unitPrice: number) => {
   if (!u) return Num.round2(unitPrice);
-  switch (u) {
-    case "g":  return Num.round2(unitPrice * 1000); 
+  switch (u.toLowerCase()) {
+    case "g":
+    case "gr":
+    case "grs":  return Num.round2(unitPrice * 1000); 
     case "ml": return Num.round2(unitPrice * 1000); 
     default:   return Num.round2(unitPrice);
   }
@@ -146,7 +156,7 @@ function upsertFacturaFromAlbaran(data: AppData, alb: Albaran) {
 }
 
 /* =======================================================
- * 🧠 2. MOTOR DE PARSEO V2 INTEGRADO CON MODO DUAL DE IVA
+ * 🧠 MOTOR DE PARSEO V2 INTEGRADO
  * ======================================================= */
 type IvaMode = 'AUTO' | 'INC' | 'EXC';
 
@@ -269,7 +279,7 @@ function useAlbaranEnginePRO(text: string, expectedTotal: number | null, ivaMode
 }
 
 /* =======================================================
- * 📈 3. PRICE INSPECTOR (Incrustado)
+ * 📈 3. PRICE INSPECTOR (El Cerebro Mejorado)
  * ======================================================= */
 function smaN(values: number[], n=30) {
   const out: number[] = [];
@@ -282,42 +292,63 @@ function smaN(values: number[], n=30) {
   return out;
 }
 
+// 🚀 FIX: Búsqueda difusa de precios cruzados
 function usePriceSeries({ history, albaranes, prov, item }: any) {
   return useMemo(() => {
     if (!prov || !item) return { series: [], avgAll: 0, avg30: 0 };
     
-    const H = (history||[]).filter((h:any) => h.prov===prov && h.item===item);
+    const pNorm = basicNorm(prov);
+    const iNorm = singularize(item); // Buscamos la raíz singular (Tomate vs Tomates)
+    
+    const H = (history||[]).filter((h:any) => basicNorm(h.prov) === pNorm && basicNorm(h.item).includes(iNorm));
     let fallback: any[] = [];
     
     if (!H.length && (albaranes||[]).length){
       for (const a of (albaranes||[])){
-        if ((a.prov||'').toUpperCase() !== prov) continue;
+        if (basicNorm(a.prov) !== pNorm) continue;
         for (const it of (a.items||[])) {
-          const n = (it.n||'').toUpperCase();
-          if (!n.includes(item)) continue; 
+          const nNorm = singularize(it.n);
+          if (!nNorm.includes(iNorm) && !iNorm.includes(nNorm)) continue; 
+          
+          let up = Number(it.unitPrice);
+          if (isNaN(up) || up <= 0) {
+             const qt = Number(it.q) || 1;
+             up = Number(it.t) / qt;
+          }
+          
           fallback.push({
-            id: `rebuild-${prov}-${n}-${a.date}`, prov, item: n,
-            unitPrice: normalizeUnitPrice(it.q, it.u as any, it.unitPrice),
+            id: `rebuild-${prov}-${it.n}-${a.date}`, prov, item: it.n,
+            unitPrice: normalizeUnitPrice(it.q, it.u as any, up),
             date: a.date
           });
         }
       }
     }
 
-    const rows = (H.length ? H : fallback)
-      .filter(r => r.unitPrice>0 && r.date)
-      .sort((a,b)=> a.date.localeCompare(b.date));
+    const rawRows = (H.length ? H : fallback).filter(r => r.unitPrice > 0 && r.date);
+    
+    // 🚀 FIX: Promediar compras del mismo día
+    const groupedByDate = rawRows.reduce((acc: any, curr: any) => {
+      if (!acc[curr.date]) { acc[curr.date] = { sum: 0, count: 0 }; }
+      acc[curr.date].sum += curr.unitPrice;
+      acc[curr.date].count += 1;
+      return acc;
+    }, {});
 
-    const series = rows.map(r => ({ date: r.date, price: r.unitPrice }));
-    if (!series.length) return { series: [], avgAll: 0, avg30: 0 };
+    const rows = Object.keys(groupedByDate).map(date => ({
+      date,
+      price: Num.round2(groupedByDate[date].sum / groupedByDate[date].count)
+    })).sort((a, b) => a.date.localeCompare(b.date));
 
-    const prices = series.map(s => s.price);
+    if (!rows.length) return { series: [], avgAll: 0, avg30: 0 };
+
+    const prices = rows.map(s => s.price);
     const avgAll = Num.round2(prices.reduce((a,x)=>a+x,0)/prices.length);
     const sma30 = smaN(prices, 30);
     const avg30 = Num.round2(sma30.filter(x=>!Number.isNaN(x)).slice(-30).reduce((a,x,i,arr)=>a+x/(arr.length||1),0)||0);
 
-    const withMetrics = series.map((s, i) => {
-      const prev = i>0 ? series[i-1].price : s.price;
+    const withMetrics = rows.map((s, i) => {
+      const prev = i>0 ? rows[i-1].price : s.price;
       const deltaPct = prev>0 ? Num.round2(((s.price - prev)/prev)*100) : 0;
       return { ...s, sma30: sma30[i], deltaPct };
     });
@@ -326,7 +357,7 @@ function usePriceSeries({ history, albaranes, prov, item }: any) {
   }, [history, albaranes, prov, item]);
 }
 
-function PriceEvolutionChart({ data, unitLabel = "€/ud", upThreshold = 10 }: any) {
+function PriceEvolutionChart({ data, unitLabel = "€", upThreshold = 10 }: any) {
   const domain = useMemo(()=>{
     if (!data.length) return [0, 1];
     const vals = data.map((d:any)=>d.price).filter((v:any)=>Number.isFinite(v));
@@ -397,7 +428,7 @@ function PriceInspector({ priceHistory, albaranesLite, proveedores, suggestionsB
         <div className="bg-white rounded-[2rem] border border-slate-100 p-8 text-center mt-4 shadow-sm">
           <span className="text-3xl mb-2 block opacity-50">📉</span>
           <p className="text-slate-500 font-bold text-sm">Faltan datos o buscando...</p>
-          <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-widest">Selecciona proveedor y producto con +2 compras.</p>
+          <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-widest">Asegúrate de que existan al menos 2 compras de este producto.</p>
         </div>
       )}
     </div>
@@ -438,13 +469,13 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const [isSyncingTelegram, setIsSyncingTelegram] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // 🚀 MAGIA BOT: EL AUDÍFONO (Escucha comandos de TelegramWidget)
+  // 🚀 MAGIA BOT: EL AUDÍFONO
   useEffect(() => {
     const handleBotCommand = (e: any) => {
       const { cmd, q } = e.detail || {};
       if (cmd === 'buscar' && q) {
         setSearchQ(q);
-        window.scrollTo({ top: 0, behavior: 'smooth' }); // Te lleva a los resultados
+        window.scrollTo({ top: 0, behavior: 'smooth' }); 
       }
     };
     window.addEventListener('arume-bot-command', handleBotCommand);
@@ -467,7 +498,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const albaranesLiteRanged = useMemo(() => {
     return albaranesSeguros.filter(a => (!dateFrom && !dateTo) ? true : inRange(a.date||'', dateFrom, dateTo)).map(a => ({
         date: (a.date||'').slice(0,10), prov: (a.prov||'').toUpperCase(),
-        items: (a.items||[]).map((it:any) => ({ q: it.q, n: it.n, unitPrice: it.unitPrice, u: it.u }))
+        items: (a.items||[]).map((it:any) => ({ q: it.q, n: it.n, unitPrice: it.unitPrice, u: it.u, t: it.t }))
       }));
   }, [albaranesSeguros, dateFrom, dateTo]);
 
@@ -589,13 +620,21 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     }
   };
 
+  // 🚀 FIX: Detección Automática de subidas al momento de guardar
   const detectPriceIncrease = (history: any[], prov: string, item: string, latestPrice: number) => {
-    const provN = prov.trim().toUpperCase(); const itemN = item.trim().toUpperCase();
-    const previous = history.filter(h => h.prov === provN && h.item === itemN).sort((a,b) => b.date.localeCompare(a.date))[0];
+    const pNorm = basicNorm(prov); 
+    const iNorm = singularize(item);
+    
+    const previousEntries = history
+      .filter(h => basicNorm(h.prov) === pNorm && singularize(h.item).includes(iNorm))
+      .sort((a,b) => b.date.localeCompare(a.date));
+      
+    const previous = previousEntries.length > 0 ? previousEntries[0] : null;
+
     if (!previous || previous.unitPrice <= 0) return { isIncrease: false, pct: 0, previous: null, threshold: 0 };
     
     const pct = Num.round2(((latestPrice - previous.unitPrice) / previous.unitPrice) * 100);
-    const dynamicThreshold = getDynamicThreshold(itemN); 
+    const dynamicThreshold = getDynamicThreshold(item); 
     
     return { isIncrease: pct >= dynamicThreshold, pct, previous, threshold: dynamicThreshold }; 
   };
@@ -638,7 +677,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
             const msg = `📈 [${provN}] ${itemN} ha subido un +${increase.pct}% (Límite tolerado: ${increase.threshold}%). Antes: ${increase.previous?.unitPrice}€ -> Ahora: ${normalizedPrice}€`;
             alerts.push(msg);
             
-            // 🚀 MAGIA BOT: EL MEGÁFONO. Envía la alerta directa a Telegram a través del widget.
+            // 🚀 ALERTA DIRECTA A TELEGRAM AUTOMÁTICAMENTE
             window.dispatchEvent(new CustomEvent('arume-bot-alert', { detail: msg }));
           }
 
@@ -718,13 +757,11 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
   // 🧠 CEREBRO DE FILTRADO Y ORDENACIÓN APLICADO
   const filteredForList = useMemo(() => {
-    // 1. Primero filtramos como siempre
     let result = albaranesSeguros
       .filter(a => (selectedUnit === 'ALL' ? true : a.unitId === selectedUnit))
       .filter(a => (!dateFrom && !dateTo) ? true : inRange(a.date || '', dateFrom, dateTo))
       .filter(a => !deferredSearch || filterByQuery(a, deferredSearch));
 
-    // 2. Luego ORDENAMOS la lista final según las flechas
     result.sort((a, b) => {
       let valA: any, valB: any;
 
