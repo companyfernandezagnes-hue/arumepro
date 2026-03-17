@@ -4,7 +4,7 @@ import {
   Building2, ShoppingBag, ListPlus, Users, Hotel, Layers, 
   XCircle, LineChart as LineChartIcon, FileSpreadsheet, Mic, Square, Camera, Loader2, Smartphone,
   Calculator, Sparkles, ArrowUp, ArrowDown, ArrowUpDown,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, RefreshCw, Gift, Percent // 🚀 Importamos iconos para los Regalos y Descuentos
 } from 'lucide-react';
 import { AppData, Albaran, PriceHistoryItem } from '../types';
 import { Num, ArumeEngine, DateUtil } from '../services/engine';
@@ -48,7 +48,6 @@ const safeJSON = (str: string) => { try { const match = str.match(/\{[\s\S]*\}/)
 const looksLikeDuplicate = (prov: string, num: string, date: string, albaranes: Albaran[]) => 
   albaranes.some(a => basicNorm(a.prov) === basicNorm(prov) && (a.num||'S/N') === (num||'S/N') && (a.date||'').slice(0,10) === (date||'').slice(0,10));
 
-// 🧠 MEJORA: Eliminación básica de plurales (es, s) para búsquedas más efectivas
 const singularize = (word: string) => {
   let w = basicNorm(word);
   if (w.endsWith('es')) return w.slice(0, -2);
@@ -156,7 +155,7 @@ function upsertFacturaFromAlbaran(data: AppData, alb: Albaran) {
 }
 
 /* =======================================================
- * 🧠 MOTOR DE PARSEO V2 INTEGRADO
+ * 🧠 MOTOR DE PARSEO V2 INTEGRADO (Soporte para Regalos y Descuentos)
  * ======================================================= */
 type IvaMode = 'AUTO' | 'INC' | 'EXC';
 
@@ -183,18 +182,39 @@ function useAlbaranEnginePRO(text: string, expectedTotal: number | null, ivaMode
         u = ['kg','kgs','kilo'].includes(unitToken) ? 'kg' : ['g','gr','grs'].includes(unitToken) ? 'g' : ['l','lt','litro'].includes(unitToken) ? 'l' : ['ml'].includes(unitToken) ? 'ml' : 'uds';
       }
 
-      const nums = Array.from(line.matchAll(/(\d+(?:\.\d{1,3})?)/g)).map(m=> parseFloat(m[1]));
-      if (!nums.length) continue;
+      // 🚀 MEJORA: Detección inteligente de Regalos y Descuentos
+      let rawNumber = 0;
+      const isGift = /regalo|sin cargo|promocion|bonificaci|muestra/i.test(line);
+      const isExplicitDiscount = /descuento|dto|rappel/i.test(line);
 
-      const discount = line.match(/(-\s?\d+(?:[.,]\d{1,2})?)\b/)?.[1] ? Math.abs(parseFloat(line.match(/(-\s?\d+(?:[.,]\d{1,2})?)\b/)![1].replace(',','.'))) : 0;
-      const rawNumber = Num.round2((nums.at(-1) || 0) - discount);
-      if (!isFinite(rawNumber) || rawNumber <= 0) continue;
+      const mNegativeEnd = line.match(/(-\s*\d+(?:\.\d{1,3})?)(?:\s*[€$])?$/);
+      
+      if (mNegativeEnd) {
+        rawNumber = parseFloat(mNegativeEnd[1].replace(/\s/g, ''));
+      } else {
+        const nums = Array.from(line.matchAll(/(\d+(?:\.\d{1,3})?)/g)).map(m=> parseFloat(m[1]));
+        if (!nums.length && !isGift) continue;
+        
+        const lastNum = nums.length ? nums[nums.length - 1] : 0;
+        const inlineDiscount = line.match(/(-\s?\d+(?:\.\d{1,2})?)\b/)?.[1];
+        const discountVal = inlineDiscount ? Math.abs(parseFloat(inlineDiscount.replace(/\s/g,''))) : 0;
+        
+        rawNumber = Num.round2(lastNum - discountVal);
+      }
+
+      // Si es un regalo explícito, el precio es cero. Si es un descuento escrito en positivo, lo hacemos negativo.
+      if (isGift) rawNumber = 0;
+      if (isExplicitDiscount && rawNumber > 0 && !line.includes('-')) rawNumber = -rawNumber;
+
+      if (!isFinite(rawNumber)) continue;
 
       let name = line;
       if (mQty) name = name.replace(mQty[0],'');
       if (mRate) name = name.replace(mRate[0],'');
-      if (discount) name = name.replace(/(-\s?\d+(?:[.,]\d{1,2})?)\b/,'');
-      name = name.replace(new RegExp(`${(nums.at(-1) || 0).toString().replace('.', '\\.')}(?!\\d)`),'').replace(/\s{2,}/g,' ').trim() || 'Varios Indefinido';
+      name = name.replace(/(-\s?\d+(?:\.\d{1,2})?)\b/g,''); 
+      name = name.replace(new RegExp(`${Math.abs(rawNumber).toString().replace('.', '\\.')}(?!\\d)`),'');
+      name = name.replace(/[€$]/g,'');
+      name = name.replace(/\s{2,}/g,' ').trim() || (rawNumber < 0 ? 'Descuento / Abono' : rawNumber === 0 ? 'Artículo de Regalo' : 'Varios Indefinido');
 
       rawData.push({ q, name, rawNumber, rate, u });
     }
@@ -535,6 +555,10 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const { analyzedItems, liveTotals, decidedMode, roundingAdjustment } = useAlbaranEnginePRO(form.text, form.expectedTotal, ivaMode);
   const isTotalMatching = form.expectedTotal ? Math.abs(liveTotals.grandTotal - form.expectedTotal) <= TOLERANCIA : true;
 
+  // 🚀 DETECCIÓN DE REGALOS Y DESCUENTOS PARA LA UI
+  const hasGifts = analyzedItems.some(it => it.total === 0);
+  const hasDiscounts = analyzedItems.some(it => it.total < 0);
+
   const inRange = (iso: string, from?: string, to?: string) => {
     if (!iso) return false; const d = iso.slice(0,10);
     if (from && d < from) return false; if (to && d > to) return false;
@@ -562,6 +586,23 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     for (const p of Object.keys(map)) { out[p] = Object.entries(map[p]).sort((a,b)=>b[1]-a[1]).map(([n])=>n); }
     return out;
   }, [albaranesSeguros]);
+
+  const lastPurchaseFromProv = useMemo(() => {
+    if (!form.prov || form.prov.length < 2) return null;
+    const provNorm = basicNorm(form.prov);
+    const matches = albaranesSeguros
+      .filter(a => basicNorm(a.prov || '') === provNorm)
+      .sort((a, b) => b.date.localeCompare(a.date));
+    return matches.length > 0 ? matches[0] : null;
+  }, [form.prov, albaranesSeguros]);
+
+  const handleLoadLastPurchase = () => {
+    if (!lastPurchaseFromProv || !lastPurchaseFromProv.items) return;
+    const newText = lastPurchaseFromProv.items
+      .map(it => `${it.q} ${it.u || 'uds'} ${it.n} ${it.rate || 10}% ${it.t}`)
+      .join('\n');
+    setForm(prev => ({ ...prev, text: newText }));
+  };
 
   const handleTelegramSync = async () => {
     setIsSyncingTelegram(true);
@@ -662,8 +703,8 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   };
 
   const handleQuickAdd = () => {
-    const t = Num.parse(quickCalc.total);
-    if (t > 0 && quickCalc.name) {
+    const t = parseFloat(quickCalc.total);
+    if (!isNaN(t) && quickCalc.name) {
       const newLine = `1x ${quickCalc.name} ${quickCalc.iva}% ${t.toFixed(2)}`;
       setForm(prev => ({ ...prev, text: prev.text ? `${prev.text}\n${newLine}` : newLine }));
       setQuickCalc({ name: '', total: '', iva: 10 });
@@ -721,16 +762,24 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
           const itemN = it.n.trim().toUpperCase();
           const normalizedPrice = normalizeUnitPrice(it.q, it.u, it.unitPrice);
 
-          const increase = detectPriceIncrease(newData.priceHistory, provN, itemN, normalizedPrice);
-          if (increase.isIncrease) {
-            const msg = `📈 [${provN}] ${itemN} ha subido un +${increase.pct}% (Límite tolerado: ${increase.threshold}%). Antes: ${increase.previous?.unitPrice}€ -> Ahora: ${normalizedPrice}€`;
-            alerts.push(msg);
-            
-            // 🚀 ALERTA DIRECTA A TELEGRAM AUTOMÁTICAMENTE
-            window.dispatchEvent(new CustomEvent('arume-bot-alert', { detail: msg }));
-          }
+          // 🚀 FIX: No alertar ni guardar en el historial precios de 0 o negativos (Regalos/Descuentos)
+          if (normalizedPrice > 0) {
+            const increase = detectPriceIncrease(newData.priceHistory, provN, itemN, normalizedPrice);
+            if (increase.isIncrease) {
+              const msg = `📈 [${provN}] ${itemN} ha subido un +${increase.pct}% (Límite tolerado: ${increase.threshold}%). Antes: ${increase.previous?.unitPrice}€ -> Ahora: ${normalizedPrice}€`;
+              alerts.push(msg);
+              window.dispatchEvent(new CustomEvent('arume-bot-alert', { detail: msg }));
+            }
 
-          newData.priceHistory.push({ id: "price-" + Date.now() + "-" + Math.random().toString(36).slice(2), prov: provN, item: itemN, unitPrice: normalizedPrice, date: form.date });
+            newData.priceHistory.push({ 
+              id: "price-" + Date.now() + "-" + Math.random().toString(36).slice(2), 
+              prov: provN, 
+              item: itemN, 
+              unitPrice: normalizedPrice, 
+              date: form.date,
+              albaranId: robustId 
+            } as any);
+          }
         }
 
         const newAlbaran: Albaran = {
@@ -776,10 +825,47 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         detachFromPreviousFacturaIfMoved(newData, before, sanitizedAlbaran);
         upsertFacturaFromAlbaran(newData, sanitizedAlbaran);
 
+        newData.priceHistory = (newData.priceHistory || []).filter((h: any) => h.albaranId !== editForm.id);
+        
+        let alerts: string[] = [];
+        for (const it of sanitizedAlbaran.items) {
+          if (it.n === "AJUSTE REDONDEO IA") continue; 
+
+          const provN = sanitizedAlbaran.prov.trim().toUpperCase();
+          const itemN = it.n.trim().toUpperCase();
+          
+          let up = Number(it.unitPrice);
+          if (isNaN(up) || up <= 0) {
+             const qt = Number(it.q) || 1;
+             up = Number(it.t) / qt;
+          }
+          const normalizedPrice = normalizeUnitPrice(Number(it.q), it.u, up);
+
+          // 🚀 FIX: No guardar ni alertar precios negativos o 0 en el historial
+          if (normalizedPrice > 0) {
+            const increase = detectPriceIncrease(newData.priceHistory, provN, itemN, normalizedPrice);
+            if (increase.isIncrease) {
+              const msg = `📈 [${provN}] ${itemN} ha subido un +${increase.pct}% (Límite tolerado: ${increase.threshold}%). Antes: ${increase.previous?.unitPrice}€ -> Ahora: ${normalizedPrice}€`;
+              alerts.push(msg);
+              window.dispatchEvent(new CustomEvent('arume-bot-alert', { detail: msg }));
+            }
+
+            newData.priceHistory.push({ 
+              id: "price-" + Date.now() + "-" + Math.random().toString(36).slice(2), 
+              prov: provN, 
+              item: itemN, 
+              unitPrice: normalizedPrice, 
+              date: sanitizedAlbaran.date,
+              albaranId: editForm.id 
+            } as any);
+          }
+        }
+
         newData.albaranes = [...newData.albaranes]; 
 
         await onSave(newData);
         setEditForm(null); 
+        if (alerts.length > 0) alert("⚠️ ALERTA DE COSTES (Desviaciones detectadas al editar)\n\n" + alerts.join("\n\n"));
     } finally {
         setIsSaving(false);
     }
@@ -796,6 +882,8 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
            detachFromPreviousFacturaIfMoved(newData, albaranToDelete, { ...albaranToDelete, prov: 'DELETED_MOCK', date: '1970-01-01' } as any);
         }
         
+        newData.priceHistory = (newData.priceHistory || []).filter((h: any) => h.albaranId !== id);
+
         newData.albaranes = (newData.albaranes || []).filter(a => a.id !== id);
         await onSave(newData);
         setEditForm(null);
@@ -804,7 +892,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     }
   };
 
-  // 🧠 CEREBRO DE FILTRADO Y ORDENACIÓN APLICADO
   const filteredForList = useMemo(() => {
     let result = albaranesSeguros
       .filter(a => (selectedUnit === 'ALL' ? true : a.unitId === selectedUnit))
@@ -835,7 +922,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
   const sumFiltered = useMemo(() => filteredForList.reduce((acc, a) => acc + (Num.parse(a.total) || 0), 0), [filteredForList]);
 
-  // 🚀 MEJORA: Exportación a Excel con soporte para IVA 4% (Superreducido)
   const handleExportExcel = () => {
     const rows = filteredForList;
     if (!rows.length) return alert("No hay albaranes para exportar con los filtros actuales.");
@@ -1055,7 +1141,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                   <div className="flex justify-between items-center mb-5">
                     <h3 className="text-sm font-black text-slate-800 flex items-center gap-2"><ListPlus className="w-5 h-5 text-indigo-500" /> Nuevo Albarán</h3>
                     
-                    {/* BOTÓN OCR PDF DIRECTO Y VOSK RESTAURADO */}
                     <div className="flex items-center gap-2">
                       <button onClick={toggleRecording} className={cn("p-2 rounded-xl transition", isRecording ? "bg-rose-100 text-rose-600 animate-pulse" : "bg-indigo-50 text-indigo-600 hover:bg-indigo-100")} title="Dictar Albarán (Vosk)">
                         {isRecording ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
@@ -1083,7 +1168,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                     </div>
                   </div>
 
-                  {/* MEJORA: Panel de Control de IVA y Total Escaneado */}
+                  {/* Panel de Control de IVA y Total Escaneado */}
                   <div className="mb-5 p-4 rounded-2xl border border-slate-200 bg-slate-50 space-y-3">
                     <div className="flex justify-between items-center">
                       <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-amber-500" /> Control de IVA en Líneas</span>
@@ -1115,19 +1200,44 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                     <button type="button" onClick={handleQuickAdd} className="w-8 h-8 bg-indigo-600 text-white rounded-lg flex items-center justify-center hover:bg-indigo-700 transition shadow-sm"><Plus className="w-4 h-4" /></button>
                   </div>
 
+                  <div className="flex justify-between items-center mb-2 mt-4">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Líneas del Documento</label>
+                    {/* 🚀 MEJORA VIP 1: BOTÓN DE AUTOCOMPLETADO */}
+                    {lastPurchaseFromProv && !form.text && (
+                      <button type="button" onClick={handleLoadLastPurchase} className="text-[9px] font-black bg-indigo-50 text-indigo-600 px-2 py-1 rounded-lg flex items-center gap-1 hover:bg-indigo-100 transition shadow-sm">
+                        <RefreshCw className="w-3 h-3" /> Repetir última compra
+                      </button>
+                    )}
+                  </div>
                   <div className="relative group">
                     <textarea value={form.text} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="Pega el texto del albarán aquí...\nEj: 5 kg Salmón 150.00" className="w-full h-40 bg-slate-50 rounded-2xl p-4 pr-10 text-xs font-mono border border-slate-200 outline-none resize-none mb-4 shadow-inner focus:bg-white focus:border-indigo-400 transition leading-relaxed" />
                     {form.text && <button type="button" onClick={() => setForm({...form, text: ''})} className="absolute top-4 right-4 text-slate-300 hover:text-rose-500 transition"><XCircle className="w-5 h-5" /></button>}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-500 mb-3">
-                    <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-center">
-                      <div className="font-black text-slate-700">Base (10%) · IVA (10%)</div>
-                      <div>{Num.fmt(liveTotals.split.base10)} · {Num.fmt(liveTotals.split.iva10)}</div>
+                  {/* 🚀 CHIVATO VISUAL DE REGALOS Y DESCUENTOS */}
+                  {(hasGifts || hasDiscounts) && (
+                    <div className="flex gap-2 mb-3">
+                      {hasGifts && <span className="bg-emerald-100 text-emerald-700 text-[10px] font-black px-2 py-1 rounded-lg flex items-center gap-1 shadow-sm"><Gift className="w-3 h-3"/> INCLUYE REGALO (0€)</span>}
+                      {hasDiscounts && <span className="bg-amber-100 text-amber-700 text-[10px] font-black px-2 py-1 rounded-lg flex items-center gap-1 shadow-sm"><Percent className="w-3 h-3"/> INCLUYE DESCUENTO</span>}
                     </div>
-                    <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl text-center">
-                      <div className="font-black text-slate-700">Base (21%) · IVA (21%)</div>
-                      <div>{Num.fmt(liveTotals.split.base21)} · {Num.fmt(liveTotals.split.iva21)}</div>
+                  )}
+
+                  {/* 🚀 MEJORA VIP 2: DESGLOSE VISUAL DE IVA 4% */}
+                  <div className="grid grid-cols-3 gap-2 text-[10px] text-slate-500 mb-3">
+                    <div className="bg-slate-50 border border-slate-200 p-2 rounded-xl text-center">
+                      <div className="font-black text-slate-700">IVA (4%)</div>
+                      <div>B: {Num.fmt(liveTotals.split.base4)}</div>
+                      <div>I: {Num.fmt(liveTotals.split.iva4)}</div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 p-2 rounded-xl text-center">
+                      <div className="font-black text-slate-700">IVA (10%)</div>
+                      <div>B: {Num.fmt(liveTotals.split.base10)}</div>
+                      <div>I: {Num.fmt(liveTotals.split.iva10)}</div>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 p-2 rounded-xl text-center">
+                      <div className="font-black text-slate-700">IVA (21%)</div>
+                      <div>B: {Num.fmt(liveTotals.split.base21)}</div>
+                      <div>I: {Num.fmt(liveTotals.split.iva21)}</div>
                     </div>
                   </div>
 
