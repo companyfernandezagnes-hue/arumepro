@@ -6,7 +6,7 @@ import {
   Calculator, Sparkles, ArrowUp, ArrowDown, ArrowUpDown,
   ChevronLeft, ChevronRight
 } from 'lucide-react';
-import { AppData, Albaran } from '../types';
+import { AppData, Albaran, PriceHistoryItem } from '../types';
 import { Num, ArumeEngine, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -162,7 +162,7 @@ type IvaMode = 'AUTO' | 'INC' | 'EXC';
 
 function useAlbaranEnginePRO(text: string, expectedTotal: number | null, ivaMode: IvaMode) {
   const { analyzedItems, liveTotals, decidedMode, roundingAdjustment } = useMemo(() => {
-    if (!text) return { analyzedItems: [], liveTotals: { grandTotal: 0, baseFinal: 0, taxFinal: 0, split: { base10: 0, iva10: 0, base21: 0, iva21: 0 } }, decidedMode: ivaMode, roundingAdjustment: 0 };
+    if (!text) return { analyzedItems: [], liveTotals: { grandTotal: 0, baseFinal: 0, taxFinal: 0, split: { base4: 0, iva4: 0, base10: 0, iva10: 0, base21: 0, iva21: 0 } }, decidedMode: ivaMode, roundingAdjustment: 0 };
     
     const lines = text.replace(/\t/g,' ').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
     const rawData = [];
@@ -171,9 +171,9 @@ function useAlbaranEnginePRO(text: string, expectedTotal: number | null, ivaMode
       let line = original.replace(/[€$]/g,'').replace(/,/g,'.').replace(/\s{2,}/g,' ').trim();
       if (line.length < 3) continue;
 
-      let rate: 4|10|21 = 10;
-      const mRate = line.match(/\b(4|10|21)\s?%/i);
-      if (mRate) rate = Number(mRate[1]) as 4|10|21;
+      let rate: 0|4|10|21 = 10;
+      const mRate = line.match(/\b(0|4|10|21)\s?%/i);
+      if (mRate) rate = Number(mRate[1]) as 0|4|10|21;
 
       let q = 1, u = 'uds';
       const mQty = line.match(/^(\d+(?:[.,]\d{1,3})?)\s*(kg|kgs|kilo|g|gr|grs|l|lt|litro|ml|ud|uds|x)\b/i);
@@ -219,7 +219,7 @@ function useAlbaranEnginePRO(text: string, expectedTotal: number | null, ivaMode
         }
 
         grandTotal += total;
-        if (raw.rate === 4) { b4 += base; i4 += tax; }
+        if (raw.rate === 4 || raw.rate === 0) { b4 += base; i4 += tax; }
         else if (raw.rate === 21) { b21 += base; i21 += tax; }
         else { b10 += base; i10 += tax; }
 
@@ -241,7 +241,7 @@ function useAlbaranEnginePRO(text: string, expectedTotal: number | null, ivaMode
         sumTotal: Num.round2(grandTotal), 
         totals: {
           grandTotal: Num.round2(grandTotal), baseFinal: Num.round2(b4+b10+b21), taxFinal: Num.round2(i4+i10+i21),
-          split: { base10: Num.round2(b10), iva10: Num.round2(i10), base21: Num.round2(b21), iva21: Num.round2(i21) }
+          split: { base4: Num.round2(b4), iva4: Num.round2(i4), base10: Num.round2(b10), iva10: Num.round2(i10), base21: Num.round2(b21), iva21: Num.round2(i21) }
         }
       };
     };
@@ -279,8 +279,58 @@ function useAlbaranEnginePRO(text: string, expectedTotal: number | null, ivaMode
 }
 
 /* =======================================================
- * 📈 3. PRICE INSPECTOR (El Cerebro Mejorado)
+ * 📈 3. PRICE INSPECTOR (Con Tipos Estrictos de Jules)
  * ======================================================= */
+
+interface PricePoint {
+  date: string;
+  price: number;
+  sma30: number;
+  deltaPct: number;
+}
+
+interface AlbaranLiteItem {
+  q: number;
+  n: string;
+  unitPrice?: number;
+  u?: string;
+  t: number | string;
+}
+
+interface AlbaranLite {
+  date: string;
+  prov: string;
+  items: AlbaranLiteItem[];
+}
+
+interface PriceSeriesParams {
+  history: PriceHistoryItem[];
+  albaranes: AlbaranLite[];
+  prov: string;
+  item: string;
+}
+
+interface PriceSeriesResult {
+  series: PricePoint[];
+  avgAll: number;
+  avg30: number;
+}
+
+interface PriceEvolutionChartProps {
+  data: PricePoint[];
+  unitLabel?: string;
+  upThreshold?: number;
+}
+
+interface PriceInspectorProps {
+  priceHistory: PriceHistoryItem[];
+  albaranesLite: AlbaranLite[];
+  proveedores: string[];
+  suggestionsByProv: Record<string, string[]>;
+  defaultProv?: string;
+  defaultItem?: string;
+}
+
 function smaN(values: number[], n=30) {
   const out: number[] = [];
   let acc = 0;
@@ -292,16 +342,15 @@ function smaN(values: number[], n=30) {
   return out;
 }
 
-// 🚀 FIX: Búsqueda difusa de precios cruzados
-function usePriceSeries({ history, albaranes, prov, item }: any) {
+function usePriceSeries({ history, albaranes, prov, item }: PriceSeriesParams): PriceSeriesResult {
   return useMemo(() => {
     if (!prov || !item) return { series: [], avgAll: 0, avg30: 0 };
     
     const pNorm = basicNorm(prov);
-    const iNorm = singularize(item); // Buscamos la raíz singular (Tomate vs Tomates)
+    const iNorm = singularize(item); 
     
-    const H = (history||[]).filter((h:any) => basicNorm(h.prov) === pNorm && basicNorm(h.item).includes(iNorm));
-    let fallback: any[] = [];
+    const H = (history||[]).filter((h) => basicNorm(h.prov) === pNorm && basicNorm(h.item).includes(iNorm));
+    let fallback: PriceHistoryItem[] = [];
     
     if (!H.length && (albaranes||[]).length){
       for (const a of (albaranes||[])){
@@ -317,8 +366,10 @@ function usePriceSeries({ history, albaranes, prov, item }: any) {
           }
           
           fallback.push({
-            id: `rebuild-${prov}-${it.n}-${a.date}`, prov, item: it.n,
-            unitPrice: normalizeUnitPrice(it.q, it.u as any, up),
+            id: `rebuild-${prov}-${it.n}-${a.date}`, 
+            prov, 
+            item: it.n,
+            unitPrice: normalizeUnitPrice(it.q, it.u, up),
             date: a.date
           });
         }
@@ -327,8 +378,7 @@ function usePriceSeries({ history, albaranes, prov, item }: any) {
 
     const rawRows = (H.length ? H : fallback).filter(r => r.unitPrice > 0 && r.date);
     
-    // 🚀 FIX: Promediar compras del mismo día
-    const groupedByDate = rawRows.reduce((acc: any, curr: any) => {
+    const groupedByDate = rawRows.reduce((acc: Record<string, {sum: number, count: number}>, curr) => {
       if (!acc[curr.date]) { acc[curr.date] = { sum: 0, count: 0 }; }
       acc[curr.date].sum += curr.unitPrice;
       acc[curr.date].count += 1;
@@ -357,10 +407,10 @@ function usePriceSeries({ history, albaranes, prov, item }: any) {
   }, [history, albaranes, prov, item]);
 }
 
-function PriceEvolutionChart({ data, unitLabel = "€", upThreshold = 10 }: any) {
+function PriceEvolutionChart({ data, unitLabel = "€", upThreshold = 10 }: PriceEvolutionChartProps) {
   const domain = useMemo(()=>{
     if (!data.length) return [0, 1];
-    const vals = data.map((d:any)=>d.price).filter((v:any)=>Number.isFinite(v));
+    const vals = data.map((d) => d.price).filter((v) => Number.isFinite(v));
     const min = Math.min(...vals), max = Math.max(...vals);
     return [Math.max(0, Math.floor(min*0.95*100)/100), Math.ceil(max*1.05*100)/100];
   }, [data]);
@@ -376,13 +426,13 @@ function PriceEvolutionChart({ data, unitLabel = "€", upThreshold = 10 }: any)
           <LineChart data={data}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
             <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} tickMargin={10} axisLine={false} tickLine={false} />
-            <YAxis domain={domain as any} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v)=>Num.round2(v).toString()} />
+            <YAxis domain={domain as [number, number]} tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v)=>Num.round2(v).toString()} />
             <RechartsTooltip 
               contentStyle={{ borderRadius: 16, border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 'bold', fontSize: 12 }}
-              formatter={(val:any, name:any) => name==='price' ? [`${Num.round2(val)} ${unitLabel}`, 'Precio'] : name==='sma30' ? [`${Num.round2(val)} ${unitLabel}`, 'Media 30d'] : [val, name]}
+              formatter={(val: number, name: string) => name==='price' ? [`${Num.round2(val)} ${unitLabel}`, 'Precio'] : name==='sma30' ? [`${Num.round2(val)} ${unitLabel}`, 'Media 30d'] : [val, name]}
             />
             <Legend wrapperStyle={{ fontSize: 10, fontWeight: 'bold', paddingTop: 10 }} />
-            <Line type="monotone" dataKey="price" name="Precio" stroke="#4f46e5" strokeWidth={3} activeDot={{ r: 6, fill: '#4f46e5', stroke: '#fff', strokeWidth: 2 }} isAnimationActive={false} dot={(props:any)=>{
+            <Line type="monotone" dataKey="price" name="Precio" stroke="#4f46e5" strokeWidth={3} activeDot={{ r: 6, fill: '#4f46e5', stroke: '#fff', strokeWidth: 2 }} isAnimationActive={false} dot={(props: any)=>{
                const { cx, cy, payload } = props;
                const up = (payload?.deltaPct ?? 0) >= upThreshold;
                return <circle cx={cx} cy={cy} r={up ? 4 : 0} fill={up ? "#f43f5e" : "transparent"} stroke={up ? "#fff" : "transparent"} strokeWidth={2} key={`dot-${cx}-${cy}`} />;
@@ -395,7 +445,7 @@ function PriceEvolutionChart({ data, unitLabel = "€", upThreshold = 10 }: any)
   );
 }
 
-function PriceInspector({ priceHistory, albaranesLite, proveedores, suggestionsByProv, defaultProv, defaultItem }: any) {
+function PriceInspector({ priceHistory, albaranesLite, proveedores, suggestionsByProv, defaultProv, defaultItem }: PriceInspectorProps) {
   const [prov, setProv] = useState((defaultProv||'').toUpperCase());
   const [item, setItem] = useState((defaultItem||'').toUpperCase());
   
@@ -428,7 +478,7 @@ function PriceInspector({ priceHistory, albaranesLite, proveedores, suggestionsB
         <div className="bg-white rounded-[2rem] border border-slate-100 p-8 text-center mt-4 shadow-sm">
           <span className="text-3xl mb-2 block opacity-50">📉</span>
           <p className="text-slate-500 font-bold text-sm">Faltan datos o buscando...</p>
-          <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-widest">Asegúrate de que existan al menos 2 compras de este producto.</p>
+          <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-widest">Selecciona proveedor y producto con +2 compras.</p>
         </div>
       )}
     </div>
@@ -620,7 +670,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     }
   };
 
-  // 🚀 FIX: Detección Automática de subidas al momento de guardar
   const detectPriceIncrease = (history: any[], prov: string, item: string, latestPrice: number) => {
     const pNorm = basicNorm(prov); 
     const iNorm = singularize(item);
@@ -786,6 +835,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
   const sumFiltered = useMemo(() => filteredForList.reduce((acc, a) => acc + (Num.parse(a.total) || 0), 0), [filteredForList]);
 
+  // 🚀 MEJORA: Exportación a Excel con soporte para IVA 4% (Superreducido)
   const handleExportExcel = () => {
     const rows = filteredForList;
     if (!rows.length) return alert("No hay albaranes para exportar con los filtros actuales.");
@@ -802,28 +852,48 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     wsDetail['!cols'] = [{ wch: 12 }, { wch: 28 }, { wch: 14 }, { wch: 10 }, { wch: 36 }, { wch: 8 }, { wch: 6 }, { wch: 6 }, { wch: 14 }, { wch: 16 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 14 }];
     for (let r = 2; r <= detail.length + 1; r++) { ['F','H','I','J','K','L','M','N'].forEach(c => { const cell = wsDetail[`${c}${r}`]; if (cell) { cell.t = 'n'; cell.z = '#,##0.00'; } }); }
 
-    const provMap = new Map<string, {base10:number; iva10:number; base21:number; iva21:number; total:number}>();
+    const provMap = new Map<string, {base4:number; iva4:number; base10:number; iva10:number; base21:number; iva21:number; total:number}>();
     for (const a of rows) {
-      const k = a.prov || '—'; if (!provMap.has(k)) provMap.set(k, {base10:0, iva10:0, base21:0, iva21:0, total:0}); const acc = provMap.get(k)!;
+      const k = a.prov || '—'; if (!provMap.has(k)) provMap.set(k, {base4:0, iva4:0, base10:0, iva10:0, base21:0, iva21:0, total:0}); const acc = provMap.get(k)!;
       for (const it of (a.items||[])) {
         const base = Number(it.base||0), iva = Number(it.tax||0);
-        if (Number(it.rate||0) === 21) { acc.base21 += base; acc.iva21 += iva; } else if (Number(it.rate||0) === 10) { acc.base10 += base; acc.iva10 += iva; }
+        if (Number(it.rate||0) === 21) { acc.base21 += base; acc.iva21 += iva; } 
+        else if (Number(it.rate||0) === 10) { acc.base10 += base; acc.iva10 += iva; }
+        else if (Number(it.rate||0) === 4) { acc.base4 += base; acc.iva4 += iva; }
         acc.total += Number(it.t||0);
       }
     }
 
-    const resumen = Array.from(provMap.entries()).map(([prov, v])=> ({ PROVEEDOR: prov, 'BASE 10%': Num.round2(v.base10), 'IVA 10%': Num.round2(v.iva10), 'BASE 21%': Num.round2(v.base21), 'IVA 21%': Num.round2(v.iva21), TOTAL: Num.round2(v.total) }));
+    const resumen = Array.from(provMap.entries()).map(([prov, v])=> ({ PROVEEDOR: prov, 'BASE 4%': Num.round2(v.base4), 'IVA 4%': Num.round2(v.iva4), 'BASE 10%': Num.round2(v.base10), 'IVA 10%': Num.round2(v.iva10), 'BASE 21%': Num.round2(v.base21), 'IVA 21%': Num.round2(v.iva21), TOTAL: Num.round2(v.total) }));
     const wsProv = XLSX.utils.json_to_sheet(resumen);
-    wsProv['!cols'] = [{wch:30},{wch:14},{wch:12},{wch:14},{wch:12},{wch:14}];
-    for (let r=2; r<=resumen.length+1; r++) { ['B','C','D','E','F'].forEach(col=> { const cell = wsProv[`${col}${r}`]; if (cell) { cell.t='n'; cell.z='#,##0.00'; } }); }
+    wsProv['!cols'] = [{wch:30},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:12},{wch:14}];
+    for (let r=2; r<=resumen.length+1; r++) { ['B','C','D','E','F','G','H'].forEach(col=> { const cell = wsProv[`${col}${r}`]; if (cell) { cell.t='n'; cell.z='#,##0.00'; } }); }
 
-    const tot = { base10:0, iva10:0, base21:0, iva21:0, total:0 };
-    for (const a of rows) { for (const it of (a.items || [])) { const base = Number(it.base || 0), iva = Number(it.tax || 0), t = Number(it.t || 0); if (Number(it.rate || 0) === 21) { tot.base21 += base; tot.iva21 += iva; } else if (Number(it.rate || 0) === 10) { tot.base10 += base; tot.iva10 += iva; } tot.total += t; } }
-    const wsIva = XLSX.utils.aoa_to_sheet([ ['Concepto', 'Importe'], ['Base 10%', Num.round2(tot.base10)], ['IVA 10%', Num.round2(tot.iva10)], ['Base 21%', Num.round2(tot.base21)], ['IVA 21%', Num.round2(tot.iva21)], ['TOTAL', Num.round2(tot.total)], [], ['Rango aplicado', `${dateFrom || 'inicio'} a ${dateTo || 'fin'}`] ]);
+    const tot = { base4:0, iva4:0, base10:0, iva10:0, base21:0, iva21:0, total:0 };
+    for (const a of rows) { 
+      for (const it of (a.items || [])) { 
+        const base = Number(it.base || 0), iva = Number(it.tax || 0), t = Number(it.t || 0); 
+        if (Number(it.rate || 0) === 21) { tot.base21 += base; tot.iva21 += iva; } 
+        else if (Number(it.rate || 0) === 10) { tot.base10 += base; tot.iva10 += iva; } 
+        else if (Number(it.rate || 0) === 4) { tot.base4 += base; tot.iva4 += iva; } 
+        tot.total += t; 
+      } 
+    }
+    const wsIva = XLSX.utils.aoa_to_sheet([ 
+      ['Concepto', 'Importe'], 
+      ['Base 4%', Num.round2(tot.base4)], ['IVA 4%', Num.round2(tot.iva4)], 
+      ['Base 10%', Num.round2(tot.base10)], ['IVA 10%', Num.round2(tot.iva10)], 
+      ['Base 21%', Num.round2(tot.base21)], ['IVA 21%', Num.round2(tot.iva21)], 
+      ['TOTAL', Num.round2(tot.total)], [], 
+      ['Rango aplicado', `${dateFrom || 'inicio'} a ${dateTo || 'fin'}`] 
+    ]);
     wsIva['!cols'] = [{ wch: 18 }, { wch: 16 }];
-    for (let r = 2; r <= 6; r++) { const cell = wsIva[`B${r}`]; if (cell) { cell.t='n'; cell.z='#,##0.00'; } }
+    for (let r = 2; r <= 8; r++) { const cell = wsIva[`B${r}`]; if (cell) { cell.t='n'; cell.z='#,##0.00'; } }
 
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, wsDetail, "Detalle"); XLSX.utils.book_append_sheet(wb, wsProv, "Resumen Prov"); XLSX.utils.book_append_sheet(wb, wsIva, "Totales IVA");
+    const wb = XLSX.utils.book_new(); 
+    XLSX.utils.book_append_sheet(wb, wsDetail, "Detalle"); 
+    XLSX.utils.book_append_sheet(wb, wsProv, "Resumen Prov"); 
+    XLSX.utils.book_append_sheet(wb, wsIva, "Totales IVA");
     XLSX.writeFile(wb, `Albaranes_${dateFrom || 'ALL'}.xlsx`);
   };
 
@@ -971,7 +1041,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
               {showInspector ? (
                 <motion.div key="inspector" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
                   <PriceInspector 
-                    priceHistory={safeData.priceHistory as any} 
+                    priceHistory={safeData.priceHistory || []} 
                     albaranesLite={albaranesLiteRanged} 
                     proveedores={proveedoresHistoricos} 
                     suggestionsByProv={suggestionsByProv}
