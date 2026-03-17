@@ -2,8 +2,13 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { AppData, EmailDraft } from '../types';
 
 // 1. CONEXIÓN (Variables de entorno con salvavidas de emergencia)
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://bgtelulbiaugawyrhvwt.supabase.co";
-const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || "sb_publishable_jagYegyG8gGMijzpLEY9BQ_iWfL1MU4";
+const SUPABASE_URL = typeof process !== 'undefined' && process.env.VITE_SUPABASE_URL
+  ? process.env.VITE_SUPABASE_URL
+  : (import.meta && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || "https://bgtelulbiaugawyrhvwt.supabase.co";
+
+const SUPABASE_KEY = typeof process !== 'undefined' && process.env.VITE_SUPABASE_ANON_KEY
+  ? process.env.VITE_SUPABASE_ANON_KEY
+  : (import.meta && import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) || "sb_publishable_jagYegyG8gGMijzpLEY9BQ_iWfL1MU4";
 
 // 🛡️ SINGLETON PARA EVITAR MÚLTIPLES INSTANCIAS
 let supabaseInstance: SupabaseClient | null = null;
