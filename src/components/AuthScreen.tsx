@@ -1,10 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ShieldCheck, Lock, AlertCircle, Fingerprint } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { cn } from '../lib/utils'; // 🚨 ¡¡ESTA ERA LA LÍNEA QUE FALTABA Y ROMPÍA TODA LA APP!!
+import { cn } from '../lib/utils'; 
 
-// 🔑 EL PIN MAESTRO DE ACCESO
-const SECRET_PIN = "1414"; 
+// 🚀 FIX DE SEGURIDAD: Leemos el PIN de las variables de entorno de Vite.
+// Si no está configurado, usamos '1414' como salvavidas para no quedarnos bloqueados.
+const getSecretPin = () => {
+  try {
+    return import.meta.env.VITE_APP_PIN || "1414";
+  } catch (e) {
+    return "1414";
+  }
+};
 
 export const AuthScreen = ({ children }: { children: React.ReactNode }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -20,29 +27,29 @@ export const AuthScreen = ({ children }: { children: React.ReactNode }) => {
     }
   }, []);
 
-  // 2. Lógica del Teclado (Mejorada para no colapsar con escrituras rápidas)
+  // 2. Lógica del Teclado (Protegida)
   const handleKeypad = useCallback((num: string) => {
-    if (error || success) return; // Bloquea si está en animación de error o éxito
+    if (error || success) return;
 
     setPin((prev) => {
       if (prev.length >= 4) return prev;
       const newPin = prev + num;
 
       if (newPin.length === 4) {
-        if (newPin === SECRET_PIN) {
-          setSuccess(true);
-          // Micro-pausa premium antes de entrar
-          setTimeout(() => {
-            localStorage.setItem('arume_secure_session', 'active');
-            setIsAuthenticated(true);
-          }, 400);
+        const correctPin = getSecretPin();
+        
+        if (newPin === correctPin) {
+            setSuccess(true);
+            setTimeout(() => {
+              localStorage.setItem('arume_secure_session', 'active');
+              setIsAuthenticated(true);
+            }, 400);
         } else {
-          setError(true);
-          // Agitación y limpieza
-          setTimeout(() => {
-            setPin('');
-            setError(false);
-          }, 800);
+            setError(true);
+            setTimeout(() => {
+              setPin('');
+              setError(false);
+            }, 800);
         }
       }
       return newPin;
@@ -54,7 +61,7 @@ export const AuthScreen = ({ children }: { children: React.ReactNode }) => {
     setPin((prev) => prev.slice(0, -1));
   }, [error, success]);
 
-  // 🚀 INNOVACIÓN 1: Soporte para Teclado Físico (Súper rápido en Desktop)
+  // Soporte para Teclado Físico
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (/^[0-9]$/.test(e.key)) {
@@ -71,13 +78,10 @@ export const AuthScreen = ({ children }: { children: React.ReactNode }) => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isAuthenticated, handleKeypad, handleDelete]);
 
-
-  // Si está autenticada, mostramos la App normal
   if (isAuthenticated) {
     return <>{children}</>;
   }
 
-  // Si NO está autenticada, mostramos el Escudo Premium
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 relative overflow-hidden select-none">
       {/* Barra de energía superior */}
@@ -155,7 +159,7 @@ export const AuthScreen = ({ children }: { children: React.ReactNode }) => {
           </button>
         </div>
 
-        {/* Mensaje de Error (Con espacio reservado para no mover el teclado) */}
+        {/* Mensaje de Error */}
         <div className="h-6 mt-6 flex items-center justify-center">
           <AnimatePresence>
             {error && (
