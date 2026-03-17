@@ -168,14 +168,12 @@ function MobileTabBar<T extends string>({ items, activeKey, onChange }: { items:
 
   return (
     <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-[120] bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe shadow-[0_-5px_15px_rgba(0,0,0,0.05)]">
-      {/* 🚀 FIX CLAVE: overflow-x-auto, flex-nowrap y touch-pan-x para permitir deslizar con el dedo sin ocultar la barra de scroll de forma fea */}
       <div className="flex items-center overflow-x-auto flex-nowrap touch-pan-x px-2 py-1.5 gap-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {groups.main.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
         <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
         {groups.fin.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
         <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
         {groups.ops.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
-        {/* Margen final para que no se pegue al borde derecho al hacer scroll a tope */}
         <div className="w-2 shrink-0"></div>
       </div>
     </nav>
@@ -319,7 +317,8 @@ export default function App() {
     return () => { try { supabase.removeChannel(channel); } catch { /* noop */ } };
   }, [reloadData]);
 
-  const REQUIRED: (keyof AppData)[] = ['banco','platos','recetas','ingredientes','ventas_menu','cierres','facturas','albaranes','gastos_fijos'];
+  // 🚀 AÑADIMOS 'socios' AL ARRAY DE REQUISITOS BÁSICOS
+  const REQUIRED: (keyof AppData)[] = ['banco','platos','recetas','ingredientes','ventas_menu','cierres','facturas','albaranes','gastos_fijos', 'socios', 'control_pagos'];
   
   useEffect(() => {
     if (loading || !db) return; 
@@ -333,10 +332,55 @@ export default function App() {
         changed = true; 
       } 
     }
-    
+
+    // 🚀 INYECCIÓN DEL ADN DE LA EMPRESA (SOCIOS Y ROLES)
+    if (!next.socios || next.socios.length === 0) {
+      next.socios = [
+        // role: 'socio_fundador' -> Socios Capitalistas (se llevan dividendos a final de año)
+        { id: 's-jeronimo', n: 'Jerónimo', active: true, role: 'socio_fundador' },
+        { id: 's-pedro', n: 'Pedro', active: true, role: 'socio_fundador' },
+        
+        // role: 'operativo' -> Equipo que hace gastos suplidos y maneja caja (Devolución Base Imponible sin IVA)
+        { id: 's-pau', n: 'Pau', active: true, role: 'operativo' },
+        { id: 's-agnes', n: 'Agnès', active: true, role: 'operativo' },
+        { id: 's-onlyone', n: 'Only One', active: true, role: 'operativo' }
+      ] as any; 
+      changed = true;
+    }
+
+    // 🚀 Matriz Financiera de Reparto (Solo se usa para calcular dividendos del B2B)
     if (!next.config) { 
-      next.config = { objetivoMensual: 45000, n8nUrlBanco: "", n8nUrlIA: "", emailGeneral: "" }; 
+      next.config = { 
+        objetivoMensual: 45000, 
+        n8nUrlBanco: "", 
+        n8nUrlIA: "", 
+        emailGeneral: "",
+        reparto: {
+          sociedadPrincipal: [
+            { nombre: 'Jerónimo', porcentaje: 50 },
+            { nombre: 'Pedro', porcentaje: 50 }
+          ],
+          acuerdosB2B: [
+            { nombre: 'Albert (Cocinero)', porcentaje: 20 },
+            { nombre: 'Antonio (Consultoría)', porcentaje: 10 },
+            { nombre: 'Sociedad Principal', porcentaje: 70 }
+          ]
+        }
+      }; 
       changed = true; 
+    } else if (!next.config.reparto) {
+      next.config.reparto = {
+        sociedadPrincipal: [
+          { nombre: 'Jerónimo', porcentaje: 50 },
+          { nombre: 'Pedro', porcentaje: 50 }
+        ],
+        acuerdosB2B: [
+          { nombre: 'Albert (Cocinero)', porcentaje: 20 },
+          { nombre: 'Antonio (Consultoría)', porcentaje: 10 },
+          { nombre: 'Sociedad Principal', porcentaje: 70 }
+        ]
+      };
+      changed = true;
     }
     
     if (changed) setData(next);
