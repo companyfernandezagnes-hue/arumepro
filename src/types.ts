@@ -12,6 +12,12 @@ export interface AppConfig {
   repartoDeliveryCocinero?: number;
   repartoDeliveryAdmin?: number;
   
+  // 🚀 INNOVACIÓN: Matriz Financiera de Reparto B2B
+  reparto?: {
+    sociedadPrincipal: { nombre: string; porcentaje: number }[];
+    acuerdosB2B: { nombre: string; porcentaje: number }[];
+  };
+  
   // 🔗 Webhooks de n8n
   n8nUrlBanco?: string;
   n8nUrlIA?: string;
@@ -45,9 +51,9 @@ export interface Albaran {
   socio?: string;
   num: string;
   total: number | string;
-  base?: number | string;  // 🛡️ Antes faltaba
-  taxes?: number | string; // 🛡️ Antes faltaba
-  items?: LineItem[];      // 🛡️ FUNDAMENTAL: Aquí se guardan los platos/productos
+  base?: number | string;  
+  taxes?: number | string; 
+  items?: LineItem[];      
   notes?: string;          // Para warnings de la IA
   unitId?: BusinessUnit;
   invoiced: boolean;
@@ -103,6 +109,7 @@ export interface Socio {
   id?: string;
   n: string; // nombre del socio
   active: boolean;
+  role?: 'socio_fundador' | 'operativo'; // 🚀 FUNDAMENTAL: Para saber si se les devuelve con o sin IVA
 }
 
 export interface BankMovement {
@@ -125,6 +132,7 @@ export interface PriceHistoryItem {
   item: string;
   unitPrice: number;
   date: string;
+  albaranId?: string; // 🚀 EL FIX DE JULES: Conecta el precio con el albarán para poder borrarlo si nos equivocamos
 }
 
 export interface AppData {
@@ -140,5 +148,5 @@ export interface AppData {
   recetas?: any[];
   ingredientes?: any[];
   control_pagos?: any;
-  priceHistory?: PriceHistoryItem[]; // 🛡️ FUNDAMENTAL: Evita que el gráfico de precios se borre al guardar
+  priceHistory?: PriceHistoryItem[]; 
 }
