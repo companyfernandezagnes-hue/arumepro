@@ -4,7 +4,7 @@ import {
   Building2, ShoppingBag, ListPlus, Users, Hotel, Layers, 
   XCircle, LineChart as LineChartIcon, FileSpreadsheet, Mic, Square, Camera, Loader2, Smartphone,
   Calculator, Sparkles, ArrowUp, ArrowDown, ArrowUpDown,
-  ChevronLeft, ChevronRight, RefreshCw, Gift, Percent // 🚀 Importamos iconos para los Regalos y Descuentos
+  ChevronLeft, ChevronRight, RefreshCw, Gift, Percent
 } from 'lucide-react';
 import { AppData, Albaran, PriceHistoryItem } from '../types';
 import { Num, ArumeEngine, DateUtil } from '../services/engine';
@@ -13,9 +13,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import * as XLSX from 'xlsx';
 import { GoogleGenAI } from "@google/genai";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend } from 'recharts';
-import { createClient } from '@supabase/supabase-js'; 
 
-// 🚀 IMPORTAMOS DEL CEREBRO CENTRAL
+// 🚀 FIX VITAL 1: Borrada la conexión local insegura a Supabase. 
+// Ahora importamos la conexión blindada y con auto-reconectador que creamos en supabase.ts
+import { supabase } from '../services/supabase'; 
 import { basicNorm, TOLERANCIA as CENTRAL_TOLERANCIA } from '../services/invoicing';
 
 // 🧩 COMPONENTES HIJOS
@@ -36,19 +37,16 @@ const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string
   { id: 'CORP', name: 'Socios / Corp', icon: Users, color: 'text-slate-600', bg: 'bg-slate-100' },
 ];
 
-// 🔑 CREDENCIALES SUPABASE
-const SUPABASE_URL = "https://bgtelulbiaugawyrhvwt.supabase.co"; 
-const SUPABASE_KEY = "sb_publishable_jagYegyG8gGMijzpLEY9BQ_iWfL1MU4";
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
 export const TOLERANCIA = CENTRAL_TOLERANCIA; 
 
 const safeJSON = (str: string) => { try { const match = str.match(/\{[\s\S]*\}/); return match ? JSON.parse(match[0]) : {}; } catch { return {}; } };
 
 const looksLikeDuplicate = (prov: string, num: string, date: string, albaranes: Albaran[]) => 
-  albaranes.some(a => basicNorm(a.prov) === basicNorm(prov) && (a.num||'S/N') === (num||'S/N') && (a.date||'').slice(0,10) === (date||'').slice(0,10));
+  albaranes.some(a => basicNorm(a.prov || '') === basicNorm(prov || '') && (a.num||'S/N') === (num||'S/N') && (a.date||'').slice(0,10) === (date||'').slice(0,10));
 
+// 🛡️ FIX ESCUDO: Si le pasamos un texto vacío, devuelve vacío y NO explota.
 const singularize = (word: string) => {
+  if (!word) return '';
   let w = basicNorm(word);
   if (w.endsWith('es')) return w.slice(0, -2);
   if (w.endsWith('s')) return w.slice(0, -1);
@@ -56,6 +54,7 @@ const singularize = (word: string) => {
 };
 
 const getDynamicThreshold = (itemName: string) => {
+  if (!itemName) return 10;
   const n = basicNorm(itemName);
   if (n.match(/tomate|lechuga|cebolla|patata|pimiento|verdura|fruta|limon|naranja/)) return 25; 
   if (n.match(/pescado|salmon|lubina|pulpo|calamar|gamba|langostino/)) return 15; 
@@ -78,14 +77,14 @@ const normalizeUnitPrice = (q: number, u: string | undefined, unitPrice: number)
 /* =======================================================
  * 🚀 CEREBRO FACTURACIÓN: PROMOCIÓN AUTOMÁTICA
  * ======================================================= */
-const groupKey = (alb: Albaran) => `${basicNorm(alb.prov)}__${(alb.date || DateUtil.today()).slice(0, 7)}`;
+const groupKey = (alb: Albaran) => `${basicNorm(alb.prov || '')}__${(alb.date || DateUtil.today()).slice(0, 7)}`;
 
 const findFacturaIdx = (data: AppData, alb: Albaran) => {
-  const key = basicNorm(alb.prov);
+  const key = basicNorm(alb.prov || '');
   const yymm = (alb.date || DateUtil.today()).slice(0, 7);
   return (data.facturas || []).findIndex((f: any) =>
     f?.tipo === 'compra' &&
-    basicNorm(f?.prov) === key &&
+    basicNorm(f?.prov || '') === key &&
     (f?.date || '').startsWith(yymm) &&
     !f?.reconciled
   );
@@ -182,7 +181,6 @@ function useAlbaranEnginePRO(text: string, expectedTotal: number | null, ivaMode
         u = ['kg','kgs','kilo'].includes(unitToken) ? 'kg' : ['g','gr','grs'].includes(unitToken) ? 'g' : ['l','lt','litro'].includes(unitToken) ? 'l' : ['ml'].includes(unitToken) ? 'ml' : 'uds';
       }
 
-      // 🚀 MEJORA: Detección inteligente de Regalos y Descuentos
       let rawNumber = 0;
       const isGift = /regalo|sin cargo|promocion|bonificaci|muestra/i.test(line);
       const isExplicitDiscount = /descuento|dto|rappel/i.test(line);
@@ -202,7 +200,6 @@ function useAlbaranEnginePRO(text: string, expectedTotal: number | null, ivaMode
         rawNumber = Num.round2(lastNum - discountVal);
       }
 
-      // Si es un regalo explícito, el precio es cero. Si es un descuento escrito en positivo, lo hacemos negativo.
       if (isGift) rawNumber = 0;
       if (isExplicitDiscount && rawNumber > 0 && !line.includes('-')) rawNumber = -rawNumber;
 
@@ -369,14 +366,15 @@ function usePriceSeries({ history, albaranes, prov, item }: PriceSeriesParams): 
     const pNorm = basicNorm(prov);
     const iNorm = singularize(item); 
     
-    const H = (history||[]).filter((h) => basicNorm(h.prov) === pNorm && basicNorm(h.item).includes(iNorm));
+    // 🛡️ FIX ESCUDO: Aseguramos que h.prov y h.item existen antes de compararlos
+    const H = (history||[]).filter((h) => basicNorm(h.prov || '') === pNorm && basicNorm(h.item || '').includes(iNorm));
     let fallback: PriceHistoryItem[] = [];
     
     if (!H.length && (albaranes||[]).length){
       for (const a of (albaranes||[])){
-        if (basicNorm(a.prov) !== pNorm) continue;
+        if (basicNorm(a.prov || '') !== pNorm) continue;
         for (const it of (a.items||[])) {
-          const nNorm = singularize(it.n);
+          const nNorm = singularize(it.n || '');
           if (!nNorm.includes(iNorm) && !iNorm.includes(nNorm)) continue; 
           
           let up = Number(it.unitPrice);
@@ -388,9 +386,9 @@ function usePriceSeries({ history, albaranes, prov, item }: PriceSeriesParams): 
           fallback.push({
             id: `rebuild-${prov}-${it.n}-${a.date}`, 
             prov, 
-            item: it.n,
+            item: it.n || '',
             unitPrice: normalizeUnitPrice(it.q, it.u, up),
-            date: a.date
+            date: a.date || ''
           });
         }
       }
@@ -399,16 +397,18 @@ function usePriceSeries({ history, albaranes, prov, item }: PriceSeriesParams): 
     const rawRows = (H.length ? H : fallback).filter(r => r.unitPrice > 0 && r.date);
     
     const groupedByDate = rawRows.reduce((acc: Record<string, {sum: number, count: number}>, curr) => {
+      if (!curr.date) return acc;
       if (!acc[curr.date]) { acc[curr.date] = { sum: 0, count: 0 }; }
       acc[curr.date].sum += curr.unitPrice;
       acc[curr.date].count += 1;
       return acc;
     }, {});
 
+    // 🛡️ FIX ESCUDO: Evita crash de localeCompare si la fecha viene corrupta
     const rows = Object.keys(groupedByDate).map(date => ({
       date,
       price: Num.round2(groupedByDate[date].sum / groupedByDate[date].count)
-    })).sort((a, b) => a.date.localeCompare(b.date));
+    })).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
     if (!rows.length) return { series: [], avgAll: 0, avg30: 0 };
 
@@ -539,7 +539,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const [isSyncingTelegram, setIsSyncingTelegram] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // 🚀 MAGIA BOT: EL AUDÍFONO
   useEffect(() => {
     const handleBotCommand = (e: any) => {
       const { cmd, q } = e.detail || {};
@@ -555,7 +554,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const { analyzedItems, liveTotals, decidedMode, roundingAdjustment } = useAlbaranEnginePRO(form.text, form.expectedTotal, ivaMode);
   const isTotalMatching = form.expectedTotal ? Math.abs(liveTotals.grandTotal - form.expectedTotal) <= TOLERANCIA : true;
 
-  // 🚀 DETECCIÓN DE REGALOS Y DESCUENTOS PARA LA UI
   const hasGifts = analyzedItems.some(it => it.total === 0);
   const hasDiscounts = analyzedItems.some(it => it.total < 0);
 
@@ -587,12 +585,13 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     return out;
   }, [albaranesSeguros]);
 
+  // 🛡️ FIX ESCUDO: Sort protegido por si falta la fecha
   const lastPurchaseFromProv = useMemo(() => {
     if (!form.prov || form.prov.length < 2) return null;
     const provNorm = basicNorm(form.prov);
     const matches = albaranesSeguros
       .filter(a => basicNorm(a.prov || '') === provNorm)
-      .sort((a, b) => b.date.localeCompare(a.date));
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     return matches.length > 0 ? matches[0] : null;
   }, [form.prov, albaranesSeguros]);
 
@@ -712,12 +711,12 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   };
 
   const detectPriceIncrease = (history: any[], prov: string, item: string, latestPrice: number) => {
-    const pNorm = basicNorm(prov); 
-    const iNorm = singularize(item);
+    const pNorm = basicNorm(prov || ''); 
+    const iNorm = singularize(item || '');
     
     const previousEntries = history
-      .filter(h => basicNorm(h.prov) === pNorm && singularize(h.item).includes(iNorm))
-      .sort((a,b) => b.date.localeCompare(a.date));
+      .filter(h => basicNorm(h.prov || '') === pNorm && singularize(h.item || '').includes(iNorm))
+      .sort((a,b) => (b.date || '').localeCompare(a.date || ''));
       
     const previous = previousEntries.length > 0 ? previousEntries[0] : null;
 
@@ -762,7 +761,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
           const itemN = it.n.trim().toUpperCase();
           const normalizedPrice = normalizeUnitPrice(it.q, it.u, it.unitPrice);
 
-          // 🚀 FIX: No alertar ni guardar en el historial precios de 0 o negativos (Regalos/Descuentos)
           if (normalizedPrice > 0) {
             const increase = detectPriceIncrease(newData.priceHistory, provN, itemN, normalizedPrice);
             if (increase.isIncrease) {
@@ -841,7 +839,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
           }
           const normalizedPrice = normalizeUnitPrice(Number(it.q), it.u, up);
 
-          // 🚀 FIX: No guardar ni alertar precios negativos o 0 en el historial
           if (normalizedPrice > 0) {
             const increase = detectPriceIncrease(newData.priceHistory, provN, itemN, normalizedPrice);
             if (increase.isIncrease) {
@@ -892,6 +889,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     }
   };
 
+  // 🛡️ FIX ESCUDO: Sort protegido para evitar pantallazos blancos
   const filteredForList = useMemo(() => {
     let result = albaranesSeguros
       .filter(a => (selectedUnit === 'ALL' ? true : a.unitId === selectedUnit))
@@ -1202,7 +1200,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
                   <div className="flex justify-between items-center mb-2 mt-4">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Líneas del Documento</label>
-                    {/* 🚀 MEJORA VIP 1: BOTÓN DE AUTOCOMPLETADO */}
+                    {/* BOTÓN DE AUTOCOMPLETADO */}
                     {lastPurchaseFromProv && !form.text && (
                       <button type="button" onClick={handleLoadLastPurchase} className="text-[9px] font-black bg-indigo-50 text-indigo-600 px-2 py-1 rounded-lg flex items-center gap-1 hover:bg-indigo-100 transition shadow-sm">
                         <RefreshCw className="w-3 h-3" /> Repetir última compra
@@ -1214,7 +1212,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                     {form.text && <button type="button" onClick={() => setForm({...form, text: ''})} className="absolute top-4 right-4 text-slate-300 hover:text-rose-500 transition"><XCircle className="w-5 h-5" /></button>}
                   </div>
 
-                  {/* 🚀 CHIVATO VISUAL DE REGALOS Y DESCUENTOS */}
+                  {/* CHIVATO VISUAL DE REGALOS Y DESCUENTOS */}
                   {(hasGifts || hasDiscounts) && (
                     <div className="flex gap-2 mb-3">
                       {hasGifts && <span className="bg-emerald-100 text-emerald-700 text-[10px] font-black px-2 py-1 rounded-lg flex items-center gap-1 shadow-sm"><Gift className="w-3 h-3"/> INCLUYE REGALO (0€)</span>}
@@ -1222,7 +1220,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                     </div>
                   )}
 
-                  {/* 🚀 MEJORA VIP 2: DESGLOSE VISUAL DE IVA 4% */}
+                  {/* DESGLOSE VISUAL DE IVA 4% */}
                   <div className="grid grid-cols-3 gap-2 text-[10px] text-slate-500 mb-3">
                     <div className="bg-slate-50 border border-slate-200 p-2 rounded-xl text-center">
                       <div className="font-black text-slate-700">IVA (4%)</div>
