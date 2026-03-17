@@ -104,6 +104,15 @@ const unwrapData = (rawData: any) => {
   while (cleanData !== null && typeof cleanData === 'object' && 'data' in cleanData && !cleanData.banco && iterations < 5) {
     cleanData = cleanData.data;
     iterations++;
+
+    // Si la propiedad interna 'data' era otro texto JSON (doble stringification), lo parseamos
+    if (typeof cleanData === 'string') {
+      try {
+        cleanData = JSON.parse(cleanData);
+      } catch (e) {
+        // Si falla, lo dejamos como texto, aunque probablemente rompa el esquema más adelante
+      }
+    }
   }
   
   return enforceSchema(cleanData);
