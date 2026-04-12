@@ -1,0 +1,30 @@
+{
+  "name": "Arume Sake Bar · Celoso de Palma SL",
+  "short_name": "Arume Sake",
+  "description": "Gestión y contabilidad de Arume Sake Bar (Celoso de Palma SL)",
+  "start_url": "/arumepro/",
+  "scope": "/arumepro/",
+  "display": "standalone",
+  "background_color": "#F8FAFC",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "/arumepro/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/arumepro/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/arumepro/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
