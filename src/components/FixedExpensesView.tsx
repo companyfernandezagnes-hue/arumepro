@@ -320,6 +320,13 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
     toast.success('Leyendo PDF con IA…');
 
     try {
+      // Guardar PDF en base64 para adjuntarlo a los gastos fijos (gestoría)
+      const pdfBase64: string = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(file);
+      });
+
       const prompt = `Eres un contable experto en nóminas españolas. Este PDF contiene una o más nóminas de trabajadores. Analiza TODAS las páginas y devuelve SOLO un JSON estricto sin comentarios ni markdown:
 {
   "mes": "YYYY-MM",
@@ -372,6 +379,7 @@ Instrucciones:
           startDate,
           unitId:    'REST',
           active:    true,
+          file_base64: pdfBase64,
           notes: [
             `Resumen nóminas ${mesLabelCap}.`,
             `${nTrab} trabajadores.`,
@@ -395,6 +403,7 @@ Instrucciones:
           startDate,
           unitId:    'REST',
           active:    true,
+          file_base64: pdfBase64,
           notes:     `Cuotas SS empresa ${mesLabelCap}. Contingencias comunes + AT&EP + Desempleo + FP + FOGASA.`,
         },
       ];

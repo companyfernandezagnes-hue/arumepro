@@ -164,9 +164,10 @@ const buildProveedorEstado = (
 // ─────────────────────────────────────────────────────────────────────────────
 export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const safeData          = data || {};
-  const facturasSeguras   = Array.isArray(safeData.facturas)  ? safeData.facturas  as FacturaExtended[] : [];
-  const albaranesSeguros  = Array.isArray(safeData.albaranes) ? safeData.albaranes : [];
-  const sociosSeguros     = Array.isArray(safeData.socios)    ? safeData.socios    : [];
+  const facturasSeguras   = Array.isArray(safeData.facturas)    ? safeData.facturas  as FacturaExtended[] : [];
+  const albaranesSeguros  = Array.isArray(safeData.albaranes)  ? safeData.albaranes : [];
+  const sociosSeguros     = Array.isArray(safeData.socios)     ? safeData.socios    : [];
+  const gastosFijos       = Array.isArray(safeData.gastos_fijos) ? safeData.gastos_fijos : [];
 
   const sociosRealesObj   = sociosSeguros.length > 0 ? sociosSeguros.filter(s => s && s.active) : [{ id: 's1', n: 'ARUME' }];
   const SOCIOS_REALES_NAMES = sociosRealesObj.map(s => String(s?.n || 'Desconocido'));
@@ -677,6 +678,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   // 📤 PARA GESTORÍA — facturas pagadas listas para subir a Bilky
   // ============================================================================
   const gestoriaData = useMemo(() => {
+    // Facturas de compra pagadas
     const pagadas = facturasBoveda.filter(f =>
       f && (f.paid || f.reconciled) && f.tipo === 'compra'
     );
@@ -684,8 +686,21 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     const sinPdf     = pagadas.filter(f => !f.file_base64);
     const yaSubidas  = conPdf.filter(f => (f as any).uploaded_gestoria === true);
     const pendientes = conPdf.filter(f => (f as any).uploaded_gestoria !== true);
-    return { conPdf, sinPdf, yaSubidas, pendientes, totalPagadas: pagadas.length };
-  }, [facturasBoveda]);
+
+    // Nóminas y Seguridad Social (gastos fijos tipo payroll)
+    const nominas = gastosFijos.filter((g: any) =>
+      g && (g.type === 'payroll' || g.cat === 'personal') && (g.active !== false && g.activo !== false)
+    );
+    const nominasConPdf     = nominas.filter((g: any) => !!g.file_base64);
+    const nominasSinPdf     = nominas.filter((g: any) => !g.file_base64);
+    const nominasSubidas    = nominasConPdf.filter((g: any) => g.uploaded_gestoria === true);
+    const nominasPendientes = nominasConPdf.filter((g: any) => g.uploaded_gestoria !== true);
+
+    return {
+      conPdf, sinPdf, yaSubidas, pendientes, totalPagadas: pagadas.length,
+      nominas, nominasConPdf, nominasSinPdf, nominasSubidas, nominasPendientes,
+    };
+  }, [facturasBoveda, gastosFijos]);
 
   const handleToggleGestoria = async (id: string) => {
     const newData = JSON.parse(JSON.stringify(safeData));
@@ -700,16 +715,45 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     }
   };
 
+  const handleToggleGestoriaNomina = async (id: string) => {
+    const newData = JSON.parse(JSON.stringify(safeData));
+    if (!newData.gastos_fijos) return;
+    const idx = newData.gastos_fijos.findIndex((g: any) => g && g.id === id);
+    if (idx !== -1) {
+      const now = newData.gastos_fijos[idx].uploaded_gestoria;
+      newData.gastos_fijos[idx].uploaded_gestoria = !now;
+      newData.gastos_fijos[idx].fecha_upload_gestoria = !now ? DateUtil.today() : undefined;
+      newData.gastos_fijos = [...newData.gastos_fijos];
+      await onSave(newData);
+      toast.success(!now ? '✅ Nómina marcada como subida a gestoría' : '↩️ Desmarcada de gestoría');
+    }
+  };
+
+  const handleDownloadNomina = (g: any) => {
+    if (!g || !g.file_base64) return toast.warning('El PDF de la nómina no está disponible.');
+    try {
+      const a = document.createElement('a');
+      a.href = g.file_base64.startsWith('data:') ? g.file_base64 : `data:application/pdf;base64,${g.file_base64}`;
+      a.download = `${basicNorm(g.name || 'nomina')}.pdf`;
+      a.click();
+    } catch { toast.error('Error al descargar el archivo'); }
+  };
+
   const handleDownloadAllGestoria = () => {
-    // Descargar cada PDF individualmente (sin necesidad de librería ZIP)
-    const toDownload = gestoriaData.pendientes;
-    if (toDownload.length === 0) return toast.warning('No hay PDFs pendientes de subir.');
-    toDownload.forEach((f, i) => {
-      setTimeout(() => {
-        handleDownloadFile(f);
-      }, i * 300); // 300ms de delay entre descargas para que el browser no las bloquee
+    const facturasDown = gestoriaData.pendientes;
+    const nominasDown  = gestoriaData.nominasPendientes;
+    const total = facturasDown.length + nominasDown.length;
+    if (total === 0) return toast.warning('No hay PDFs pendientes de subir.');
+    let idx = 0;
+    facturasDown.forEach((f) => {
+      setTimeout(() => handleDownloadFile(f), idx * 300);
+      idx++;
     });
-    toast.success(`⬇️ Descargando ${toDownload.length} PDF(s)…`);
+    nominasDown.forEach((g: any) => {
+      setTimeout(() => handleDownloadNomina(g), idx * 300);
+      idx++;
+    });
+    toast.success(`⬇️ Descargando ${total} PDF(s)…`);
   };
 
   // ============================================================================
@@ -1328,30 +1372,34 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                     <div>
                       <h3 className="text-lg font-black text-violet-900 tracking-tight">Para Gestoría · Bilky</h3>
                       <p className="text-[10px] font-bold text-violet-500 uppercase tracking-widest mt-1">
-                        Facturas pagadas listas para subir a tu gestoría
+                        Facturas, nóminas y SS listas para subir a tu gestoría
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 flex-wrap">
                     <div className="text-right">
-                      <p className="text-[9px] font-black text-violet-400 uppercase tracking-widest">Pendientes subir</p>
+                      <p className="text-[9px] font-black text-violet-400 uppercase tracking-widest">Facturas</p>
                       <p className="text-2xl font-black text-violet-700">{gestoriaData.pendientes.length}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Ya subidas</p>
-                      <p className="text-2xl font-black text-emerald-600">{gestoriaData.yaSubidas.length}</p>
+                      <p className="text-[9px] font-black text-pink-400 uppercase tracking-widest">Nóminas/SS</p>
+                      <p className="text-2xl font-black text-pink-700">{gestoriaData.nominasPendientes.length}</p>
                     </div>
-                    {gestoriaData.sinPdf.length > 0 && (
+                    <div className="text-right">
+                      <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Ya subidas</p>
+                      <p className="text-2xl font-black text-emerald-600">{gestoriaData.yaSubidas.length + gestoriaData.nominasSubidas.length}</p>
+                    </div>
+                    {(gestoriaData.sinPdf.length + gestoriaData.nominasSinPdf.length) > 0 && (
                       <div className="text-right">
                         <p className="text-[9px] font-black text-amber-400 uppercase tracking-widest">Sin PDF</p>
-                        <p className="text-2xl font-black text-amber-600">{gestoriaData.sinPdf.length}</p>
+                        <p className="text-2xl font-black text-amber-600">{gestoriaData.sinPdf.length + gestoriaData.nominasSinPdf.length}</p>
                       </div>
                     )}
                   </div>
                 </div>
-                {gestoriaData.pendientes.length > 0 && (
+                {(gestoriaData.pendientes.length + gestoriaData.nominasPendientes.length) > 0 && (
                   <button onClick={handleDownloadAllGestoria} className="mt-4 bg-violet-600 hover:bg-violet-500 text-white px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition shadow-lg flex items-center gap-2 active:scale-95">
-                    <Download className="w-4 h-4" /> Descargar todos los PDFs pendientes ({gestoriaData.pendientes.length})
+                    <Download className="w-4 h-4" /> Descargar todos los PDFs pendientes ({gestoriaData.pendientes.length + gestoriaData.nominasPendientes.length})
                   </button>
                 )}
               </div>
@@ -1436,11 +1484,129 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                 </div>
               )}
 
+              {/* ══════════════════════════════════════════════════════════ */}
+              {/* ── SECCIÓN: NÓMINAS Y SEGURIDAD SOCIAL ── */}
+              {/* ══════════════════════════════════════════════════════════ */}
+              {gestoriaData.nominas.length > 0 && (
+                <div className="mb-6 mt-2">
+                  <div className="flex items-center gap-2 mb-4">
+                    <div className="h-px flex-1 bg-pink-200" />
+                    <span className="text-[10px] font-black text-pink-600 uppercase tracking-widest px-3">Nóminas y Seguridad Social</span>
+                    <div className="h-px flex-1 bg-pink-200" />
+                  </div>
+
+                  {/* Nóminas pendientes de subir */}
+                  {gestoriaData.nominasPendientes.length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-[10px] font-black text-pink-600 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                        <UploadCloud className="w-3.5 h-3.5" /> Pendientes de subir — {gestoriaData.nominasPendientes.length} documentos
+                      </p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {gestoriaData.nominasPendientes.map((g: any) => {
+                          const b64 = g.file_base64 || '';
+                          const isNomina = String(g.name || '').toLowerCase().includes('nómina') || String(g.name || '').toLowerCase().includes('nomina');
+
+                          return (
+                            <div key={g.id} className="bg-white rounded-2xl border border-pink-100 overflow-hidden hover:border-pink-300 transition-colors shadow-sm flex flex-col">
+                              <button
+                                onClick={() => setPreviewFactura({ id: g.id, file_base64: b64, prov: g.name, num: '', date: g.startDate || '', total: g.amount || 0, tipo: 'compra', paid: true, reconciled: false } as any)}
+                                className="w-full h-32 bg-gradient-to-br from-pink-50 to-rose-50 flex items-center justify-center relative group"
+                              >
+                                <div className="flex flex-col items-center gap-2">
+                                  <FileText className="w-10 h-10 text-pink-300" />
+                                  <span className="text-[9px] font-black text-pink-400 uppercase tracking-widest">
+                                    {isNomina ? 'PDF Nóminas' : 'PDF Seg. Social'}
+                                  </span>
+                                </div>
+                                <div className="absolute inset-0 bg-pink-900/0 group-hover:bg-pink-900/10 transition-colors flex items-center justify-center">
+                                  <div className="bg-white/90 backdrop-blur rounded-xl px-3 py-1.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-lg flex items-center gap-1.5">
+                                    <Eye className="w-3.5 h-3.5 text-pink-600" />
+                                    <span className="text-[9px] font-black text-pink-700 uppercase tracking-widest">Ver documento</span>
+                                  </div>
+                                </div>
+                              </button>
+                              <div className="p-4 flex-1 flex flex-col">
+                                <p className="font-black text-slate-800 text-sm truncate">{g.name || 'Nómina'}</p>
+                                <p className="text-[10px] text-slate-400 mt-0.5">{g.startDate || '—'} · {g.notes ? g.notes.substring(0, 60) + '…' : ''}</p>
+                                <p className="font-black text-pink-700 text-lg mt-2">{Num.fmt(Math.abs(g.amount || 0))}</p>
+                                <div className="flex items-center gap-2 mt-3">
+                                  <button onClick={() => handleDownloadNomina(g)} className="flex-1 bg-pink-50 hover:bg-pink-100 text-pink-600 py-2.5 rounded-xl transition border border-pink-200 font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-1.5">
+                                    <Download className="w-3.5 h-3.5" /> Descargar
+                                  </button>
+                                  <button onClick={() => handleToggleGestoriaNomina(g.id)} className="flex-1 bg-pink-600 hover:bg-pink-500 text-white py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition flex items-center justify-center gap-1.5 shadow-sm">
+                                    <CheckCircle2 className="w-3.5 h-3.5" /> Subida a Bilky
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Nóminas sin PDF */}
+                  {gestoriaData.nominasSinPdf.length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5" /> Nóminas sin PDF — reimporta desde Gastos Fijos
+                      </p>
+                      <div className="space-y-2">
+                        {gestoriaData.nominasSinPdf.map((g: any) => (
+                          <div key={g.id} className="bg-amber-50/50 rounded-2xl border border-amber-100 p-4 flex items-center gap-4">
+                            <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center shrink-0">
+                              <AlertCircle className="w-5 h-5 text-amber-500" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-black text-slate-700 text-sm truncate">{g.name || 'Nómina'}</p>
+                              <p className="text-[10px] text-amber-500 mt-0.5">
+                                {g.startDate || '—'} — Sube el PDF desde "Importar Nóminas" en Gastos Fijos
+                              </p>
+                            </div>
+                            <p className="font-black text-slate-600 text-sm shrink-0">{Num.fmt(Math.abs(g.amount || 0))}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Nóminas ya subidas */}
+                  {gestoriaData.nominasSubidas.length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                        <ShieldCheck className="w-3.5 h-3.5" /> Nóminas ya subidas — {gestoriaData.nominasSubidas.length}
+                      </p>
+                      <div className="space-y-2">
+                        {gestoriaData.nominasSubidas.map((g: any) => (
+                          <div key={g.id} className="bg-emerald-50/50 rounded-2xl border border-emerald-100 p-4 flex items-center gap-4">
+                            <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center shrink-0">
+                              <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-black text-slate-700 text-sm truncate">{g.name || 'Nómina'}</p>
+                              <p className="text-[10px] text-emerald-500 mt-0.5">Subida: {g.fecha_upload_gestoria || '—'}</p>
+                            </div>
+                            <p className="font-black text-emerald-700 text-sm shrink-0">{Num.fmt(Math.abs(g.amount || 0))}</p>
+                            <button onClick={() => handleToggleGestoriaNomina(g.id)} className="bg-emerald-100 hover:bg-emerald-200 text-emerald-700 p-2.5 rounded-xl transition border border-emerald-200" title="Desmarcar">
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ══════════════════════════════════════════════════════════ */}
+              {/* ── SECCIÓN: FACTURAS SIN PDF / YA SUBIDAS ── */}
+              {/* ══════════════════════════════════════════════════════════ */}
+
               {/* ── Facturas sin PDF adjunto ── */}
               {gestoriaData.sinPdf.length > 0 && (
                 <div className="mb-6">
                   <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-                    <AlertTriangle className="w-3.5 h-3.5" /> Pagadas sin PDF adjunto — no se pueden subir aún
+                    <AlertTriangle className="w-3.5 h-3.5" /> Facturas pagadas sin PDF — no se pueden subir aún
                   </p>
                   <div className="space-y-2">
                     {gestoriaData.sinPdf.map(f => (
@@ -1464,11 +1630,11 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                 </div>
               )}
 
-              {/* ── Facturas ya subidas a gestoría ── */}
+              {/* ── Todo lo ya subido a gestoría (facturas + nóminas) ── */}
               {gestoriaData.yaSubidas.length > 0 && (
                 <div className="mb-6">
                   <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-                    <ShieldCheck className="w-3.5 h-3.5" /> Ya subidas a Bilky — {gestoriaData.yaSubidas.length} facturas
+                    <ShieldCheck className="w-3.5 h-3.5" /> Facturas ya subidas a Bilky — {gestoriaData.yaSubidas.length}
                   </p>
                   <div className="space-y-2">
                     {gestoriaData.yaSubidas.map(f => (
@@ -1493,13 +1659,13 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
               )}
 
               {/* Estado vacío */}
-              {gestoriaData.totalPagadas === 0 && (
+              {gestoriaData.totalPagadas === 0 && gestoriaData.nominas.length === 0 && (
                 <div className="py-24 text-center bg-white rounded-[3rem] border border-slate-100 shadow-sm flex flex-col items-center">
                   <div className="w-20 h-20 bg-violet-50 rounded-full flex items-center justify-center mb-4 border border-violet-100">
                     <UploadCloud className="w-10 h-10 text-violet-300" />
                   </div>
-                  <p className="text-slate-800 font-black text-base uppercase tracking-widest">Sin facturas pagadas</p>
-                  <p className="text-sm font-medium text-slate-400 mt-2">Cuando marques facturas como pagadas, aparecerán aquí listas para subir a Bilky.</p>
+                  <p className="text-slate-800 font-black text-base uppercase tracking-widest">Sin documentos para gestoría</p>
+                  <p className="text-sm font-medium text-slate-400 mt-2">Cuando marques facturas como pagadas o importes nóminas, aparecerán aquí listas para subir a Bilky.</p>
                 </div>
               )}
 

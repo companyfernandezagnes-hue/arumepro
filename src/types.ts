@@ -287,6 +287,9 @@ export interface GastoFijo {
   startDate?: string;
   endDate?: string;
   notes?: string;
+  file_base64?: string;             // PDF/imagen adjunto (nómina, recibo SS, etc.)
+  uploaded_gestoria?: boolean;      // marcada como subida a Bilky/gestoría
+  fecha_upload_gestoria?: string;   // fecha en que se marcó como subida
   [key: string]: unknown;
 }
 
