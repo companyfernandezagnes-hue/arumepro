@@ -267,12 +267,15 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
     const gastoPersonal = periodGastosFijos.filter((g:any) => g.type==='payroll').reduce((s,g:any) => s + Num.parse(g.amount||0), 0);
     const gastoFijoTotal = periodGastosFijos.filter((g:any) => g.type!=='income'&&g.type!=='grant').reduce((s,g:any) => s + Num.parse(g.amount||0), 0);
 
+    const gastoOtros = periodAlbaranes.filter(a => a.socio).reduce((s,a) => s + Num.parse(a.total), 0);
+
     const gastos = {
       comida: Num.round2(gastoComida),
       bebida: Num.round2(gastoBebida),
+      otros: Num.round2(gastoOtros),
       personal: Num.round2(gastoPersonal),
       fijos: Num.round2(gastoFijoTotal),
-      total: Num.round2(gastoComida + gastoPersonal + gastoFijoTotal),
+      total: Num.round2(gastoComida + gastoOtros + gastoPersonal + gastoFijoTotal),
     };
 
     const neto = Num.round2(ingresos.total - gastos.total);
@@ -512,6 +515,7 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
             {[
               { label:'Materia Prima', val:stats.gastos.comida,   color:'bg-emerald-400', icon:ChefHat   },
               { label:'Bebidas',       val:stats.gastos.bebida,   color:'bg-teal-400',    icon:Coffee    },
+              { label:'Otros',         val:stats.gastos.otros,    color:'bg-amber-400',   icon:Package   },
               { label:'Personal',      val:stats.gastos.personal, color:'bg-indigo-400',  icon:Users     },
               { label:'Gastos Fijos',  val:stats.gastos.fijos,    color:'bg-rose-400',    icon:Zap       },
             ].map(g => {

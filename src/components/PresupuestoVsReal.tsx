@@ -75,7 +75,7 @@ export const PresupuestoVsReal: React.FC<Props> = ({ data, onSave }) => {
       const p = ArumeEngine.getProfit(data, m, year);
       const real: Metas = {
         ingresos: p.ingresos?.total ?? 0,
-        gastoMP: (p.gastos?.comida ?? 0) + (p.gastos?.bebida ?? 0),
+        gastoMP: (p.gastos?.comida ?? 0) + (p.gastos?.bebida ?? 0) + (p.gastos?.otros ?? 0),
         personal: p.gastos?.personal ?? 0,
         estructura: p.gastos?.estructura ?? 0,
         neto: p.neto ?? 0,

@@ -139,6 +139,7 @@ export const ReportsView = ({ data, onSave }: { data: AppData; onSave?: (d: AppD
 
   const expenseChartData = stats ? [
     { name:'Materia Prima', value:(stats.gastos?.comida??0)+(stats.gastos?.bebida??0), color:'#10b981' },
+    { name:'Otros',         value: stats.gastos?.otros??0,                             color:'#f97316' },
     { name:'Personal',      value: stats.gastos?.personal??0,                          color:'#f59e0b' },
     { name:'Estructura',    value: stats.gastos?.estructura??0,                        color:'#f43f5e' },
   ].filter(d => d.value > 0) : [];
@@ -270,6 +271,7 @@ Escribe 3 párrafos muy cortos: evalúa la salud, el mayor problema y un consejo
     const wsPL = XLSX.utils.json_to_sheet([
       { Concepto:'INGRESOS TOTALES',         Valor: stats.ingresos?.total??0 },
       { Concepto:'Coste Materia Prima',       Valor:(stats.gastos?.comida??0)+(stats.gastos?.bebida??0) },
+      { Concepto:'Otros Gastos Variables',    Valor: stats.gastos?.otros??0 },
       { Concepto:'Coste Personal',            Valor: stats.gastos?.personal??0 },
       { Concepto:'Costes Fijos (Estructura)', Valor: stats.gastos?.estructura??0 },
       { Concepto:'BENEFICIO NETO',            Valor: stats.neto??0 },

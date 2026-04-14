@@ -117,7 +117,7 @@ export const ArumeEngine = {
   getProfit: (data: AppData, month: number, year: number) => {
     const empty = {
       ingresos: { total: 0, caja: 0, b2b: 0 },
-      gastos  : { total: 0, comida: 0, bebida: 0, personal: 0, estructura: 0, amortizacion: 0 },
+      gastos  : { total: 0, comida: 0, bebida: 0, otros: 0, personal: 0, estructura: 0, amortizacion: 0 },
       neto    : 0,
       unitBreakdown: {} as Record<string, { income: number; expenses: number; profit: number }>,
       ratios  : { foodCost: 0, staffCost: 0, primeCost: 0 },
@@ -220,6 +220,7 @@ export const ArumeEngine = {
         total       : totalGastos,
         comida      : Num.round2(gComida),
         bebida      : Num.round2(gBebida),
+        otros       : Num.round2(gOtros),
         personal    : Num.round2(gPersonal),
         estructura  : Num.round2(gEstructura),
         amortizacion: Num.round2(gAmort),

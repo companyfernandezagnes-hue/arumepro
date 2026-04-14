@@ -191,7 +191,7 @@ function MobileTabBar<T extends string>({ items, activeKey, onChange }: { items:
 
   return (
     <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-[120] bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe shadow-[0_-5px_15px_rgba(0,0,0,0.05)]">
-      <div className="flex items-center overflow-x-auto flex-nowrap touch-pan-x px-2 py-1.5 gap-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+      <div className="flex items-center overflow-x-auto flex-nowrap px-2 py-1.5 gap-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x', overscrollBehaviorX: 'contain' }}>
         {groups.main.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
         <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
         {groups.fin.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
@@ -671,7 +671,7 @@ export default function App() {
             onClick={() => fileInputRef.current?.click()}
             disabled={isProcessingPhoto}
             className={cn(
-              "fixed bottom-24 left-4 z-[90] w-14 h-14 rounded-full flex items-center justify-center text-white shadow-xl transition-all duration-300 md:hidden",
+              "fixed bottom-20 left-3 z-[90] w-12 h-12 rounded-full flex items-center justify-center text-white shadow-xl transition-all duration-300 md:hidden",
               isProcessingPhoto
                 ? "bg-indigo-400 cursor-not-allowed scale-95"
                 : "bg-indigo-600 hover:bg-indigo-700 hover:scale-105 active:scale-95",

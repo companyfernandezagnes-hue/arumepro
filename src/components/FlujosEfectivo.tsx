@@ -47,7 +47,7 @@ export const FlujosEfectivo: React.FC<Props> = ({ data }) => {
     for (let m = 1; m <= 12; m++) {
       const p = ArumeEngine.getProfit(data, m, year);
       const ing = p.ingresos?.total ?? 0;
-      const compras = (p.gastos?.comida ?? 0) + (p.gastos?.bebida ?? 0);
+      const compras = (p.gastos?.comida ?? 0) + (p.gastos?.bebida ?? 0) + (p.gastos?.otros ?? 0);
       const personal = p.gastos?.personal ?? 0;
       const estructura = p.gastos?.estructura ?? 0;
 
