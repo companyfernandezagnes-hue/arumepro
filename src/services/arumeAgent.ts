@@ -1,6 +1,6 @@
 // ==========================================
 // 🤖 arumeAgent.ts — Motor de Automatizaciones Nativo
-// Reemplaza n8n: ejecuta flujos directamente desde la app
+// Ejecuta flujos directamente desde la app
 // ==========================================
 
 import { AppData, BankMovement, Ingrediente, KardexEntry } from '../types';
@@ -99,7 +99,7 @@ const DEFAULT_FLOWS: FlowDef[] = [
   {
     id: 'telegram_directo',
     name: 'Telegram Directo',
-    description: 'Envía alertas a Telegram sin pasar por n8n (API directa del bot)',
+    description: 'Envía alertas a Telegram via API directa del bot',
     icon: '✈️',
     category: 'sync',
     enabled: true,
@@ -118,7 +118,7 @@ const DEFAULT_FLOWS: FlowDef[] = [
   {
     id: 'gmail_sync',
     name: 'Gmail → Facturas',
-    description: 'Lee PDFs de factura nuevos de Gmail y los mete en la bandeja de auditoría (sin n8n)',
+    description: 'Lee PDFs de factura nuevos de Gmail y los mete en la bandeja de auditoría (Gmail API directa)',
     icon: '📧',
     category: 'sync',
     enabled: true,
@@ -492,7 +492,7 @@ export class ArumeAgent {
     return null;
   }
 
-  // ── 6. Telegram Directo (API Bot sin n8n) ──
+  // ── 6. Telegram Directo (API Bot) ──
 
   private static async _sendTelegram(data: AppData, text: string): Promise<boolean> {
     const token = data.config?.telegramToken;
@@ -524,7 +524,7 @@ export class ArumeAgent {
   }
 
   private static async _testTelegram(data: AppData): Promise<FlowRun | null> {
-    const ok = await ArumeAgent._sendTelegram(data, '✅ Test: conexión directa funcionando sin n8n');
+    const ok = await ArumeAgent._sendTelegram(data, '✅ Test: conexión directa funcionando');
     if (ok) {
       ArumeAgent.logRun('telegram_directo', 'success', 'Mensaje de test enviado ✓');
     } else {
@@ -533,7 +533,7 @@ export class ArumeAgent {
     return null;
   }
 
-  // ── 6b. Gmail → Facturas (sync directo sin n8n) ──
+  // ── 6b. Gmail → Facturas (sync directo via Gmail API) ──
 
   private static async _syncGmail(data: AppData): Promise<FlowRun | null> {
     if (!GmailDirectSync.isAuthenticated()) {

@@ -2,47 +2,50 @@ import { AppData } from '../types';
 
 export class NotificationService {
   /**
-   * Envía una alerta al webhook de n8n para que este la procese y la envíe a Telegram
+   * Envía una alerta directamente a Telegram via Bot API
    */
   static async sendAlert(
-    data: AppData, 
-    message: string, 
+    data: AppData,
+    message: string,
     type: 'INFO' | 'WARNING' | 'CRITICAL' = 'INFO',
-    actionButton?: { text: string, url: string } // 🚀 MEJORA VIP: Soporte para botones en Telegram
+    actionButton?: { text: string, url: string }
   ) {
-    const n8nUrl = data.config.n8nUrlIA; // Usamos el mismo webhook de IA o uno específico si existiera
-    
-    if (!n8nUrl) {
-      console.warn("⚠️ No hay URL de n8n configurada para alertas.");
+    const token = data.config.telegramToken;
+    const chatId = data.config.telegramChatId;
+
+    if (!token || !chatId) {
+      console.warn("⚠️ No hay token/chatId de Telegram configurados para alertas.");
       return;
     }
 
     try {
+      const icon = type === 'CRITICAL' ? '🔴' : type === 'WARNING' ? '🟡' : 'ℹ️';
+      const restaurant = data.config.empresa || 'Arume ERP';
+      const text = `${icon} *${restaurant}*\n\n${message}`;
+
       const payload: any = {
-        type: 'NOTIFICATION',
-        alertType: type,
-        message: message,
-        timestamp: new Date().toISOString(),
-        restaurant: data.config.empresa || 'Arume ERP',
-        telegramChatId: data.config.telegramChatId
+        chat_id: chatId,
+        text,
+        parse_mode: 'Markdown',
+        disable_notification: type === 'INFO',
       };
 
-      // 🚀 MEJORA VIP: Si le pasamos un botón, n8n lo convertirá en un "Inline Keyboard" de Telegram
+      // Si le pasamos un botón, lo convertimos en un Inline Keyboard de Telegram
       if (actionButton) {
-        payload.replyMarkup = {
+        payload.reply_markup = {
           inline_keyboard: [[actionButton]]
         };
       }
 
-      const response = await fetch(n8nUrl, {
+      const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
 
-      if (!response.ok) throw new Error('Error enviando notificación a n8n');
-      
-      console.log(`✅ Notificación [${type}] enviada con éxito.`);
+      if (!response.ok) throw new Error('Error enviando notificación a Telegram');
+
+      console.log(`✅ Notificación [${type}] enviada con éxito via Telegram API.`);
     } catch (error) {
       console.error("❌ Error en NotificationService:", error);
     }
@@ -53,17 +56,16 @@ export class NotificationService {
    */
   static async checkCriticalStock(data: AppData) {
     const criticalItems = data.ingredientes.filter(i => i.stock <= i.min);
-    
+
     if (criticalItems.length > 0) {
-      const message = `🚨 *ALERTA DE STOCK CRÍTICO*\n\nHay ${criticalItems.length} productos bajo mínimos:\n` + 
+      const message = `🚨 *ALERTA DE STOCK CRÍTICO*\n\nHay ${criticalItems.length} productos bajo mínimos:\n` +
         criticalItems.slice(0, 5).map(i => `- ${i.n}: ${i.stock} ${i.unit}`).join('\n') +
         (criticalItems.length > 5 ? `\n...y ${criticalItems.length - 5} más.` : '');
-      
-      // 🚀 AÑADIDO: Botón directo al inventario
+
       const appUrl = data.config.appUrl || 'https://tu-erp.com';
-      await this.sendAlert(data, message, 'WARNING', { 
-        text: "📦 Abrir Lista de la Compra", 
-        url: `${appUrl}/?tab=inventario` 
+      await this.sendAlert(data, message, 'WARNING', {
+        text: "📦 Abrir Lista de la Compra",
+        url: `${appUrl}/?tab=inventario`
       });
     }
   }
@@ -73,20 +75,18 @@ export class NotificationService {
    */
   static async notifyCajaDescuadre(data: AppData, fecha: string, descuadre: number) {
     if (Math.abs(descuadre) > 5) { // Solo si el descuadre es mayor a 5€
-      // 🚀 MEJORA: Hacemos el texto más visual indicando si falta o sobra dinero
       const icon = descuadre > 0 ? '🟢' : '🔴';
       const warningText = descuadre > 0 ? 'Sobran' : 'Faltan';
-      
+
       const message = `${icon} *DESCUADRE DE CAJA DETECTADO*\n\n` +
                       `📅 Fecha: ${fecha}\n` +
                       `💸 Importe: *${descuadre > 0 ? '+' : ''}${descuadre.toFixed(2)}€* (${warningText})\n\n` +
                       `La IA detectó una diferencia entre el ticket y el sobre físico. Revísalo.`;
-      
-      // 🚀 AÑADIDO: Botón directo a la caja problemática
+
       const appUrl = data.config.appUrl || 'https://tu-erp.com';
-      await this.sendAlert(data, message, 'WARNING', { 
-        text: "🔍 Revisar Arqueo en la App", 
-        url: `${appUrl}/?tab=cajas` 
+      await this.sendAlert(data, message, 'WARNING', {
+        text: "🔍 Revisar Arqueo en la App",
+        url: `${appUrl}/?tab=cajas`
       });
     }
   }

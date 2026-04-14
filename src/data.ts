@@ -16,8 +16,8 @@ export const INITIAL_DATA: AppData = {
     empresa: "Arume Sake Bar (Celoso de Palma SL)",
     saldoInicial: 0,
     // ð ENLACES Y AUTOMATIZACIONES
-    n8nUrlBanco: "https://ia.permatunnelopen.org/webhook/1085406f-324c-42f7-b50f-22f211f445cd",
-    n8nUrlIA: "https://n8n.permatunnelopen.org/webhook/alertas-erp",
+    n8nUrlBanco: "",
+    n8nUrlIA: "",
     appUrl: "https://tu-erp-inteligente.app", 
     telegramToken: "",
     telegramChatId: "",

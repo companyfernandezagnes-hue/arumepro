@@ -105,6 +105,8 @@ export interface Factura {
   fecha_pago?: string;
   irpfPct?: number;       // % retención IRPF (ej: 15, 7)
   irpfAmount?: NumericValue; // importe retención IRPF
+  uploaded_gestoria?: boolean; // marcada como subida a Bilky/gestoría
+  fecha_upload_gestoria?: string; // fecha en que se marcó como subida
 }
 
 export interface FacturaExtended extends Factura {

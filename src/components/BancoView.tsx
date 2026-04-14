@@ -219,7 +219,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
   const [swipeIndex, setSwipeIndex]   = useState(0);
   const [swipeStats, setSwipeStats]   = useState({ linked: 0, skipped: 0 });
 
-  const n8nUrl = data.config?.n8nUrlBanco || '';
+  const psd2Url = data.config?.n8nUrlBanco || '';
 
   // ─── Stats saldo ─────────────────────────────────────────────────────────
   const stats = useMemo(() => {
@@ -401,10 +401,10 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
 
   // ─── SYNC PSD2 con estado claro ──────────────────────────────────────────
   const handleApiSync = async () => {
-    if (!n8nUrl) { setPsd2Status('no-config'); return; }
+    if (!psd2Url) { setPsd2Status('no-config'); return; }
     setIsApiSyncing(true); setPsd2Status('idle');
     try {
-      const result = await proxyFetch(n8nUrl, { method:'POST', body:{ action:'sync_banca_march' } });
+      const result = await proxyFetch(psd2Url, { method:'POST', body:{ action:'sync_banca_march' } });
       if (result?.movements) {
         const newData = JSON.parse(JSON.stringify(data));
         if (!newData.banco) newData.banco = [];
@@ -420,7 +420,7 @@ export const BancoView = ({ data, onSave }: BancoViewProps) => {
         setPsd2Status('ok');
         toast.success(`✅ PSD2: ${added} movimientos nuevos importados.`);
       } else { setPsd2Status('ok'); toast.success('✅ PSD2: El banco ya está al día.'); }
-    } catch { setPsd2Status('error'); toast.error('❌ Error conectando con N8N/PSD2.'); }
+    } catch { setPsd2Status('error'); toast.error('❌ Error conectando con PSD2.'); }
     finally { setIsApiSyncing(false); }
   };
 
@@ -794,7 +794,7 @@ REGLAS: "importe": positivo=ingreso, negativo=gasto. "fecha": YYYY-MM-DD. Ignora
             </button>
 
             {/* SYNC PSD2 */}
-            {n8nUrl && (
+            {psd2Url && (
               <button onClick={handleApiSync} disabled={isApiSyncing}
                 className={cn("px-4 py-2 rounded-xl text-[10px] font-black transition flex items-center gap-2 border disabled:opacity-60",
                   psd2Status === 'ok' ? "bg-emerald-50 text-emerald-700 border-emerald-200" :

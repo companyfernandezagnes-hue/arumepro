@@ -1,5 +1,5 @@
 // ==========================================
-// 📧 gmailDirectSync.ts — Gmail sync directo (sin n8n)
+// 📧 gmailDirectSync.ts — Gmail sync directo via API
 // Usa Gmail REST API con OAuth2 desde el navegador
 // ==========================================
 

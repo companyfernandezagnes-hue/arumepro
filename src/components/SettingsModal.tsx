@@ -200,13 +200,13 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
     if (!config.telegramToken || !config.telegramChatId)
       return void toast.warning('Falta el Token o el Chat ID para probar Telegram.');
     try {
-      // Envío DIRECTO a Telegram API — sin n8n
+      // Envío DIRECTO a Telegram API
       const res = await fetch(`https://api.telegram.org/bot${config.telegramToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chat_id: config.telegramChatId,
-          text: '🍶 *TEST DE CONEXIÓN EXITOSO*\n\nArume PRO está conectado a Telegram vía API directa (sin n8n).',
+          text: '🍶 *TEST DE CONEXIÓN EXITOSO*\n\nArume PRO está conectado a Telegram vía API directa.',
           parse_mode: 'Markdown',
         }),
       });
@@ -283,7 +283,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
   const hasMistral  = !!mistralKey.trim();
   const hasIG       = !!igToken.trim();
   const hasTelegram = !!(config.telegramToken && config.telegramChatId);
-  const hasN8n      = !!config.n8nUrlBanco;
+  const hasPSD2     = !!config.n8nUrlBanco;
 
   return (
     <div className="fixed inset-0 z-[9999] flex justify-center items-center p-4 sm:p-6 overflow-y-auto">
@@ -536,18 +536,18 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
             </div>
 
             {/* ══════════════════════════════════════════════════════════════
-                6. WEBHOOKS N8N
+                6. ENDPOINT PSD2 (BANCO)
             ══════════════════════════════════════════════════════════════ */}
             <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200 relative">
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 to-green-400 rounded-t-[2.5rem]" />
-              <SectionTitle icon={LinkIcon} title="Webhooks n8n" color="emerald" />
+              <SectionTitle icon={LinkIcon} title="Endpoint PSD2" color="emerald" />
               <div className="space-y-3">
                 <input type="text" name="n8nUrlBanco" value={config.n8nUrlBanco || ''} onChange={handleChange}
-                  placeholder="Webhook Sincronización Banco PSD2"
+                  placeholder="Endpoint Backend PSD2 (sincronización bancaria)"
                   className="w-full p-3 bg-slate-50 rounded-xl text-[11px] font-mono outline-none border border-slate-200 focus:border-emerald-400 text-slate-500" />
-                <input type="text" name="n8nUrlIA" value={config.n8nUrlIA || ''} onChange={handleChange}
-                  placeholder="Webhook IA Externo (Opcional)"
-                  className="w-full p-3 bg-slate-50 rounded-xl text-[11px] font-mono outline-none border border-slate-200 focus:border-emerald-400 text-slate-500" />
+                <p className="text-[9px] text-slate-400 font-bold leading-tight px-1">
+                  URL del backend que gestiona la sincronización bancaria PSD2. Requiere certificados de servidor.
+                </p>
               </div>
             </div>
 
@@ -706,7 +706,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
             <StatusPill active={hasDeepseek} label="DeepSeek" />
             <StatusPill active={hasMistral}  label="Mistral" />
             <StatusPill active={hasTelegram} label="Telegram" />
-            <StatusPill active={hasN8n}      label="n8n" />
+            <StatusPill active={hasPSD2}     label="PSD2" />
             <StatusPill active={hasIG}       label="Instagram" />
           </div>
           <button

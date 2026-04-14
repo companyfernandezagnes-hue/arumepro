@@ -4,7 +4,7 @@ import {
   CheckCircle2, Clock, Check, Download, Package, 
   X, Layers, ShieldCheck, List, Sparkles, ArrowDownLeft,
   Calendar, Wand2, PieChart, ArrowUpRight, ArrowDownRight,
-  Eye, Save, MailCheck, Webhook, FileText, Inbox, AlertCircle, Bot,
+  Eye, Save, MailCheck, FileText, Inbox, AlertCircle, Bot,
   ChevronLeft, ChevronRight, Users, Loader2, Smartphone, Merge,
   // 🆕 NUEVOS para vista de proveedores
   AlertTriangle, ChevronDown, ChevronUp
@@ -183,7 +183,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
   // ── Estado ────────────────────────────────────────────────────────────────
   // 🆕 'proveedores' añadido al tipo de la pestaña activa
-  const [activeTab,        setActiveTab]        = useState<'pend' | 'hist' | 'proveedores'>('pend');
+  const [activeTab,        setActiveTab]        = useState<'pend' | 'hist' | 'proveedores' | 'gestoria'>('pend');
   const [mode,             setMode]             = useState<'proveedor' | 'socio'>('proveedor');
   const [year,             setYear]             = useState(new Date().getFullYear());
   const [searchQ,          setSearchQ]          = useState('');
@@ -214,6 +214,9 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
   const [expandedProv,     setExpandedProv]     = useState<string | null>(null);
+
+  // 📤 Estado para previsualización de PDF en la pestaña Gestoría
+  const [previewFactura,   setPreviewFactura]   = useState<FacturaExtended | null>(null);
 
   // ── Teclado ───────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -656,17 +659,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           toast.success('📭 Gmail revisado — sin PDFs nuevos.');
         }
       } else {
-        // Fallback: intentar n8n si está configurado
-        const webhookUrl = safeData.config?.n8nUrlAlbaranes || safeData.config?.n8nUrlIA;
-        if (webhookUrl) {
-          await fetch(webhookUrl, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'sync_invoices', timestamp: new Date().toISOString() }),
-          });
-          toast.success('🚀 Señal enviada a n8n (fallback). Conecta Gmail en el Agente para sync directo.');
-        } else {
-          toast.error('⚠️ Conecta Gmail en la pestaña Agente o configura n8n en Ajustes.');
-        }
+        toast.warning('📧 Conecta Gmail en la pestaña Agente para sincronizar facturas automáticamente.');
       }
     } catch (err) { toast.error('❌ Error al sincronizar.'); }
     finally { setIsProcessing(false); }
@@ -679,6 +672,45 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
   // 🆕 Badge: albaranes sueltos totales (para la pestaña Proveedores)
   const albsSueltosTotales = albaranesSeguros.filter(a => a && !a.invoiced).length;
+
+  // ============================================================================
+  // 📤 PARA GESTORÍA — facturas pagadas listas para subir a Bilky
+  // ============================================================================
+  const gestoriaData = useMemo(() => {
+    const pagadas = facturasBoveda.filter(f =>
+      f && (f.paid || f.reconciled) && f.tipo === 'compra'
+    );
+    const conPdf     = pagadas.filter(f => !!f.file_base64);
+    const sinPdf     = pagadas.filter(f => !f.file_base64);
+    const yaSubidas  = conPdf.filter(f => (f as any).uploaded_gestoria === true);
+    const pendientes = conPdf.filter(f => (f as any).uploaded_gestoria !== true);
+    return { conPdf, sinPdf, yaSubidas, pendientes, totalPagadas: pagadas.length };
+  }, [facturasBoveda]);
+
+  const handleToggleGestoria = async (id: string) => {
+    const newData = JSON.parse(JSON.stringify(safeData));
+    const idx = newData.facturas.findIndex((f: any) => f && f.id === id);
+    if (idx !== -1) {
+      const now = (newData.facturas[idx] as any).uploaded_gestoria;
+      (newData.facturas[idx] as any).uploaded_gestoria = !now;
+      (newData.facturas[idx] as any).fecha_upload_gestoria = !now ? DateUtil.today() : undefined;
+      newData.facturas = [...newData.facturas];
+      await onSave(newData);
+      toast.success(!now ? '✅ Marcada como subida a gestoría' : '↩️ Desmarcada de gestoría');
+    }
+  };
+
+  const handleDownloadAllGestoria = () => {
+    // Descargar cada PDF individualmente (sin necesidad de librería ZIP)
+    const toDownload = gestoriaData.pendientes;
+    if (toDownload.length === 0) return toast.warning('No hay PDFs pendientes de subir.');
+    toDownload.forEach((f, i) => {
+      setTimeout(() => {
+        handleDownloadFile(f);
+      }, i * 300); // 300ms de delay entre descargas para que el browser no las bloquee
+    });
+    toast.success(`⬇️ Descargando ${toDownload.length} PDF(s)…`);
+  };
 
   // ============================================================================
   // 🎨 RENDER
@@ -741,6 +773,15 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
               {albsSueltosTotales > 0 && (
                 <span className="bg-amber-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full leading-none">
                   {albsSueltosTotales}
+                </span>
+              )}
+            </button>
+            {/* 📤 Pestaña Gestoría / Bilky */}
+            <button onClick={() => setActiveTab('gestoria')} className={cn('flex-1 px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1.5', activeTab === 'gestoria' ? 'bg-white text-violet-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50')}>
+              📤 Gestoría
+              {gestoriaData.pendientes.length > 0 && (
+                <span className="bg-violet-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full leading-none">
+                  {gestoriaData.pendientes.length}
                 </span>
               )}
             </button>
@@ -1273,10 +1314,202 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
             </motion.div>
           )}
 
+          {/* ════════ PESTAÑA: PARA GESTORÍA / BILKY 📤 ════════ */}
+          {activeTab === 'gestoria' && (
+            <motion.div key="gestoria" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ type: 'spring', damping: 25 }}>
+
+              {/* Resumen + acción masiva */}
+              <div className="bg-gradient-to-br from-violet-50 to-purple-50 rounded-[2rem] border border-violet-200 p-6 mb-6">
+                <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <div className="w-14 h-14 bg-violet-600 rounded-2xl flex items-center justify-center shadow-lg">
+                      <UploadCloud className="w-7 h-7 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-black text-violet-900 tracking-tight">Para Gestoría · Bilky</h3>
+                      <p className="text-[10px] font-bold text-violet-500 uppercase tracking-widest mt-1">
+                        Facturas pagadas listas para subir a tu gestoría
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="text-right">
+                      <p className="text-[9px] font-black text-violet-400 uppercase tracking-widest">Pendientes subir</p>
+                      <p className="text-2xl font-black text-violet-700">{gestoriaData.pendientes.length}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Ya subidas</p>
+                      <p className="text-2xl font-black text-emerald-600">{gestoriaData.yaSubidas.length}</p>
+                    </div>
+                    {gestoriaData.sinPdf.length > 0 && (
+                      <div className="text-right">
+                        <p className="text-[9px] font-black text-amber-400 uppercase tracking-widest">Sin PDF</p>
+                        <p className="text-2xl font-black text-amber-600">{gestoriaData.sinPdf.length}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {gestoriaData.pendientes.length > 0 && (
+                  <button onClick={handleDownloadAllGestoria} className="mt-4 bg-violet-600 hover:bg-violet-500 text-white px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition shadow-lg flex items-center gap-2 active:scale-95">
+                    <Download className="w-4 h-4" /> Descargar todos los PDFs pendientes ({gestoriaData.pendientes.length})
+                  </button>
+                )}
+              </div>
+
+              {/* Flujo de trabajo */}
+              <div className="bg-white rounded-2xl border border-slate-100 p-5 mb-6 shadow-sm">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Tu flujo de trabajo</p>
+                <div className="flex items-center gap-2 flex-wrap text-[10px] font-bold text-slate-500">
+                  <span className="bg-amber-50 text-amber-700 px-3 py-1.5 rounded-lg border border-amber-200">1. Albarán escaneado</span>
+                  <ArrowDownRight className="w-3 h-3 text-slate-300" />
+                  <span className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg border border-blue-200">2. Factura generada</span>
+                  <ArrowDownRight className="w-3 h-3 text-slate-300" />
+                  <span className="bg-rose-50 text-rose-700 px-3 py-1.5 rounded-lg border border-rose-200">3. Verificada por IA</span>
+                  <ArrowDownRight className="w-3 h-3 text-slate-300" />
+                  <span className="bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-lg border border-emerald-200">4. Pagada</span>
+                  <ArrowDownRight className="w-3 h-3 text-slate-300" />
+                  <span className="bg-violet-100 text-violet-700 px-3 py-1.5 rounded-lg border border-violet-300 font-black">5. Descargar PDF → Subir a Bilky</span>
+                </div>
+              </div>
+
+              {/* ── Facturas pendientes de subir a gestoría ── */}
+              {gestoriaData.pendientes.length > 0 && (
+                <div className="mb-6">
+                  <p className="text-[10px] font-black text-violet-600 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                    <UploadCloud className="w-3.5 h-3.5" /> Pendientes de subir a Bilky — {gestoriaData.pendientes.length} facturas
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {gestoriaData.pendientes.map(f => {
+                      const b64 = f.file_base64 || '';
+                      const isPdf = b64.startsWith('data:application/pdf') || (!b64.startsWith('data:image') && b64.length > 200);
+                      const isImage = b64.startsWith('data:image');
+                      const imgSrc = isImage ? b64 : (isPdf ? undefined : undefined);
+
+                      return (
+                        <div key={f.id} className="bg-white rounded-2xl border border-violet-100 overflow-hidden hover:border-violet-300 transition-colors shadow-sm flex flex-col">
+                          {/* Miniatura del documento — clic para previsualizar */}
+                          <button
+                            onClick={() => setPreviewFactura(f)}
+                            className="w-full h-40 bg-gradient-to-br from-violet-50 to-slate-50 flex items-center justify-center relative group overflow-hidden"
+                          >
+                            {imgSrc ? (
+                              <img src={imgSrc} alt="Factura" className="w-full h-full object-contain" />
+                            ) : isPdf ? (
+                              <div className="flex flex-col items-center gap-2">
+                                <FileText className="w-12 h-12 text-violet-300" />
+                                <span className="text-[9px] font-black text-violet-400 uppercase tracking-widest">PDF del proveedor</span>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-center gap-2">
+                                <FileText className="w-12 h-12 text-slate-200" />
+                                <span className="text-[9px] font-black text-slate-300 uppercase">Documento adjunto</span>
+                              </div>
+                            )}
+                            <div className="absolute inset-0 bg-violet-900/0 group-hover:bg-violet-900/10 transition-colors flex items-center justify-center">
+                              <div className="bg-white/90 backdrop-blur rounded-xl px-3 py-1.5 opacity-0 group-hover:opacity-100 transition-opacity shadow-lg flex items-center gap-1.5">
+                                <Eye className="w-3.5 h-3.5 text-violet-600" />
+                                <span className="text-[9px] font-black text-violet-700 uppercase tracking-widest">Ver documento</span>
+                              </div>
+                            </div>
+                          </button>
+
+                          {/* Info + acciones */}
+                          <div className="p-4 flex-1 flex flex-col">
+                            <p className="font-black text-slate-800 text-sm truncate">{f.prov || f.cliente || 'Sin proveedor'}</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5">
+                              {f.date} · {f.num || 'S/N'} · {f.fecha_pago ? `Pagada: ${f.fecha_pago}` : 'Pagada'}
+                            </p>
+                            <p className="font-black text-violet-700 text-lg mt-2">{Num.fmt(Math.abs(Num.parse(f.total) || 0))}</p>
+                            <div className="flex items-center gap-2 mt-3">
+                              <button onClick={() => handleDownloadFile(f)} className="flex-1 bg-violet-50 hover:bg-violet-100 text-violet-600 py-2.5 rounded-xl transition border border-violet-200 font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-1.5">
+                                <Download className="w-3.5 h-3.5" /> Descargar
+                              </button>
+                              <button onClick={() => handleToggleGestoria(f.id)} className="flex-1 bg-violet-600 hover:bg-violet-500 text-white py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition flex items-center justify-center gap-1.5 shadow-sm">
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Subida a Bilky
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Facturas sin PDF adjunto ── */}
+              {gestoriaData.sinPdf.length > 0 && (
+                <div className="mb-6">
+                  <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" /> Pagadas sin PDF adjunto — no se pueden subir aún
+                  </p>
+                  <div className="space-y-2">
+                    {gestoriaData.sinPdf.map(f => (
+                      <div key={f.id} className="bg-amber-50/50 rounded-2xl border border-amber-100 p-4 flex items-center gap-4">
+                        <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center shrink-0">
+                          <AlertCircle className="w-5 h-5 text-amber-500" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-black text-slate-700 text-sm truncate">{f.prov || f.cliente || 'Sin proveedor'}</p>
+                          <p className="text-[10px] text-amber-500 mt-0.5">
+                            {f.date} · {f.num || 'S/N'} — Falta el PDF del correo
+                          </p>
+                        </div>
+                        <p className="font-black text-slate-600 text-sm shrink-0">{Num.fmt(Math.abs(Num.parse(f.total) || 0))}</p>
+                        <button onClick={() => setSelectedInvoice(f)} className="bg-amber-100 hover:bg-amber-200 text-amber-700 p-2.5 rounded-xl transition border border-amber-200" title="Ver detalle">
+                          <Eye className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Facturas ya subidas a gestoría ── */}
+              {gestoriaData.yaSubidas.length > 0 && (
+                <div className="mb-6">
+                  <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5" /> Ya subidas a Bilky — {gestoriaData.yaSubidas.length} facturas
+                  </p>
+                  <div className="space-y-2">
+                    {gestoriaData.yaSubidas.map(f => (
+                      <div key={f.id} className="bg-emerald-50/50 rounded-2xl border border-emerald-100 p-4 flex items-center gap-4">
+                        <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center shrink-0">
+                          <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-black text-slate-700 text-sm truncate">{f.prov || f.cliente || 'Sin proveedor'}</p>
+                          <p className="text-[10px] text-emerald-500 mt-0.5">
+                            {f.date} · {f.num || 'S/N'} · Subida: {(f as any).fecha_upload_gestoria || '—'}
+                          </p>
+                        </div>
+                        <p className="font-black text-emerald-700 text-sm shrink-0">{Num.fmt(Math.abs(Num.parse(f.total) || 0))}</p>
+                        <button onClick={() => handleToggleGestoria(f.id)} className="bg-emerald-100 hover:bg-emerald-200 text-emerald-700 p-2.5 rounded-xl transition border border-emerald-200" title="Desmarcar">
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Estado vacío */}
+              {gestoriaData.totalPagadas === 0 && (
+                <div className="py-24 text-center bg-white rounded-[3rem] border border-slate-100 shadow-sm flex flex-col items-center">
+                  <div className="w-20 h-20 bg-violet-50 rounded-full flex items-center justify-center mb-4 border border-violet-100">
+                    <UploadCloud className="w-10 h-10 text-violet-300" />
+                  </div>
+                  <p className="text-slate-800 font-black text-base uppercase tracking-widest">Sin facturas pagadas</p>
+                  <p className="text-sm font-medium text-slate-400 mt-2">Cuando marques facturas como pagadas, aparecerán aquí listas para subir a Bilky.</p>
+                </div>
+              )}
+
+            </motion.div>
+          )}
+
         </AnimatePresence>
       </div>
 
-      {/* ── AUDITORÍA DOCUMENTAL + N8N ────────────────────────────────────── */}
+      {/* ── AUDITORÍA DOCUMENTAL + AGENTE IA ─────────────────────────────── */}
       <div className="mt-8 bg-slate-900 rounded-[2.5rem] p-6 md:p-8 shadow-2xl relative overflow-hidden flex flex-col lg:flex-row gap-8">
         <div className="absolute top-0 left-0 w-full h-1.5 bg-blue-500" />
 
@@ -1322,21 +1555,21 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           )}
         </div>
 
-        {/* Panel 2: N8N */}
+        {/* Panel 2: Agente IA — Sync Gmail Directo */}
         <div className="lg:w-1/3 w-full border-t lg:border-t-0 lg:border-l border-slate-800 pt-6 lg:pt-0 lg:pl-8 flex flex-col justify-center">
           <div className="bg-indigo-900/30 border border-indigo-500/30 p-6 rounded-3xl text-center flex flex-col items-center">
             <div className="w-14 h-14 bg-indigo-600 rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(79,70,229,0.4)] mb-4">
-              <Webhook className="w-7 h-7 text-white" />
+              <Bot className="w-7 h-7 text-white" />
             </div>
-            <h3 className="text-base font-black text-indigo-100 mb-2">Motor de Automatización</h3>
+            <h3 className="text-base font-black text-indigo-100 mb-2">Agente IA · Gmail</h3>
             <p className="text-[10px] text-indigo-300/80 uppercase font-bold tracking-widest mb-6 leading-relaxed">
               {GmailDirectSync.isAuthenticated()
-                ? 'Sincroniza PDFs de facturas directamente desde Gmail (sin n8n).'
-                : 'Conecta Gmail en la pestaña Agente para sync directo, o usa n8n como fallback.'}
+                ? 'Conectado. Sincroniza PDFs de facturas directamente desde Gmail.'
+                : 'Conecta Gmail en la pestaña Agente para sincronizar facturas automáticamente.'}
             </p>
             <button onClick={handleTriggerSync} disabled={isProcessing} className="w-full bg-indigo-500 hover:bg-indigo-400 text-white font-black text-[10px] uppercase tracking-widest px-6 py-3.5 rounded-xl shadow-lg transition-all flex justify-center items-center gap-2 active:scale-95 disabled:opacity-50">
               {isProcessing ? <Loader2 className="w-4 h-4 animate-spin"/> : <Bot className="w-4 h-4" />}
-              {GmailDirectSync.isAuthenticated() ? '🤖 Sync Gmail Directo' : 'Lanzar Sync'}
+              {GmailDirectSync.isAuthenticated() ? '🤖 Sincronizar Gmail' : '🔗 Conectar Gmail'}
             </button>
           </div>
         </div>
@@ -1449,6 +1682,77 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
                 <button onClick={handleConfirmManualInvoice} disabled={modalForm.selectedAlbs.length === 0 || isProcessing || !modalForm.num.trim()} className="w-full bg-indigo-600 text-white py-4 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2 shadow-lg active:scale-95 transition-all">
                   {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5"/>} Emitir Factura Final
                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── MODAL PREVISUALIZACIÓN PDF/IMAGEN PARA GESTORÍA ────────────── */}
+      <AnimatePresence>
+        {previewFactura && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[600] flex justify-center items-center p-4 bg-slate-900/80 backdrop-blur-md"
+            onClick={() => setPreviewFactura(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }}
+              onClick={e => e.stopPropagation()}
+              className="bg-white w-full max-w-4xl rounded-[2.5rem] shadow-2xl relative flex flex-col max-h-[90vh] overflow-hidden"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between p-6 border-b border-slate-100">
+                <div>
+                  <p className="text-[10px] font-black text-violet-500 uppercase tracking-widest mb-1">Documento original — para subir a Bilky</p>
+                  <h3 className="text-lg font-black text-slate-800">{previewFactura.prov || previewFactura.cliente || 'Sin proveedor'}</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">{previewFactura.date} · {previewFactura.num || 'S/N'} · <span className="font-black text-violet-600">{Num.fmt(Math.abs(Num.parse(previewFactura.total) || 0))}</span></p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => { handleDownloadFile(previewFactura); }} className="bg-violet-50 hover:bg-violet-100 text-violet-600 px-4 py-2.5 rounded-xl transition border border-violet-200 font-black text-[9px] uppercase tracking-widest flex items-center gap-1.5">
+                    <Download className="w-4 h-4" /> Descargar
+                  </button>
+                  <button onClick={() => { handleToggleGestoria(previewFactura.id); setPreviewFactura(null); }} className="bg-violet-600 hover:bg-violet-500 text-white px-4 py-2.5 rounded-xl font-black text-[9px] uppercase tracking-widest transition flex items-center gap-1.5 shadow-sm">
+                    <CheckCircle2 className="w-4 h-4" /> Marcar subida
+                  </button>
+                  <button onClick={() => setPreviewFactura(null)} className="p-2.5 bg-slate-100 rounded-full text-slate-400 hover:text-slate-700 transition">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Contenido: PDF embebido o imagen */}
+              <div className="flex-1 overflow-auto bg-slate-50 p-4 min-h-[400px]">
+                {(() => {
+                  const b64 = previewFactura.file_base64 || '';
+                  const isImage = b64.startsWith('data:image');
+                  const isPdf = b64.startsWith('data:application/pdf');
+                  const rawB64 = b64.includes(',') ? b64 : `data:application/pdf;base64,${b64}`;
+
+                  if (isImage) {
+                    return (
+                      <div className="flex justify-center">
+                        <img src={b64} alt="Factura" className="max-w-full max-h-[70vh] rounded-2xl shadow-lg border border-slate-200" />
+                      </div>
+                    );
+                  }
+                  if (isPdf || b64.length > 200) {
+                    return (
+                      <iframe
+                        src={rawB64}
+                        className="w-full h-[70vh] rounded-2xl border border-slate-200 shadow-lg bg-white"
+                        title="Previsualización factura"
+                      />
+                    );
+                  }
+                  return (
+                    <div className="flex flex-col items-center justify-center py-20 text-center">
+                      <FileText className="w-16 h-16 text-slate-200 mb-4" />
+                      <p className="text-sm font-black text-slate-400">No se puede previsualizar este documento</p>
+                      <p className="text-[10px] text-slate-300 mt-1">Descárgalo para verlo en tu ordenador</p>
+                    </div>
+                  );
+                })()}
               </div>
             </motion.div>
           </motion.div>

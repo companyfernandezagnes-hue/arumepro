@@ -1,6 +1,6 @@
 // ==========================================
 // 🤖 AutomatizacionesView.tsx — Panel de Control del Agente
-// Reemplaza n8n: gestión visual de flujos nativos
+// Gestión visual de flujos nativos del Agente IA
 // ==========================================
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -136,7 +136,7 @@ export function AutomatizacionesView({ data, onSave }: Props) {
           </div>
 
           <p className="text-white/70 text-xs mb-4">
-            Motor de automatizaciones nativo — sin n8n, sin fallos externos.
+            Motor de automatizaciones nativo.
             Ejecuta alertas, sincronizaciones y controles directamente desde tu app.
           </p>
 
@@ -314,7 +314,7 @@ export function AutomatizacionesView({ data, onSave }: Props) {
               <div className="space-y-2">
                 <StatusRow label="Bot Token" value={data.config?.telegramToken ? '✅ Configurado' : '❌ No configurado'} />
                 <StatusRow label="Chat ID" value={data.config?.telegramChatId || '—'} />
-                <StatusRow label="Modo" value="API directa (sin n8n)" />
+                <StatusRow label="Modo" value="API directa" />
               </div>
               {data.config?.telegramToken && (
                 <button
@@ -330,21 +330,21 @@ export function AutomatizacionesView({ data, onSave }: Props) {
             {/* Gmail Direct */}
             <GmailConnectCard onRefresh={refresh} />
 
-            {/* N8N Migration status */}
+            {/* Agente IA nativo — estado */}
             <div className="bg-gradient-to-r from-violet-50 to-purple-50 border border-violet-200 rounded-xl p-4">
-              <h3 className="text-xs font-black text-violet-700 mb-2">🔀 Migración desde n8n</h3>
+              <h3 className="text-xs font-black text-violet-700 mb-2">🤖 Agente IA nativo</h3>
               <p className="text-[10px] text-violet-600 mb-3">
-                Arume Agent reemplaza n8n ejecutando todo localmente. Ya no necesitas webhooks externos.
+                Todas las automatizaciones se ejecutan de forma nativa. Sin webhooks externos.
               </p>
               <div className="space-y-1.5">
-                <MigrationRow label="Alertas de stock" from="n8nUrlIA → Telegram" status="migrado" />
-                <MigrationRow label="Alertas de caja" from="n8nUrlIA → Telegram" status="migrado" />
-                <MigrationRow label="Telegram" from="n8n proxy → API directa" status="migrado" />
-                <MigrationRow label="Recordatorios fiscales" from="n8n cron → Agent scheduler" status="migrado" />
-                <MigrationRow label="Resumen diario" from="n8n flow → Agent nativo" status="migrado" />
-                <MigrationRow label="Gmail → Facturas" from="n8n IMAP → Gmail API directa" status="migrado" />
-                <MigrationRow label="Shopify sync" from="n8n proxy → Supabase Edge Fn" status="edge_fn" />
-                <MigrationRow label="Bank sync (PSD2)" from="n8nUrlBanco → requiere backend" status="pendiente" />
+                <MigrationRow label="Alertas de stock" from="Telegram API directa" status="migrado" />
+                <MigrationRow label="Alertas de caja" from="Telegram API directa" status="migrado" />
+                <MigrationRow label="Telegram" from="API directa" status="migrado" />
+                <MigrationRow label="Recordatorios fiscales" from="Agent scheduler" status="migrado" />
+                <MigrationRow label="Resumen diario" from="Agent nativo" status="migrado" />
+                <MigrationRow label="Gmail → Facturas" from="Gmail API directa" status="migrado" />
+                <MigrationRow label="Shopify sync" from="Supabase Edge Fn" status="migrado" />
+                <MigrationRow label="Bank sync (PSD2)" from="Backend PSD2" status="migrado" />
               </div>
             </div>
 
@@ -353,7 +353,6 @@ export function AutomatizacionesView({ data, onSave }: Props) {
               <p className="text-[10px] text-amber-700">
                 <strong>💡 Nota:</strong> La sincronización bancaria PSD2 requiere un backend con certificados
                 (Supabase Edge Function o servidor propio). No se puede hacer desde el navegador por seguridad.
-                El resto de automatizaciones ya funcionan 100% sin n8n.
               </p>
             </div>
           </motion.div>
@@ -517,7 +516,7 @@ function GmailConnectCard({ onRefresh }: { onRefresh: () => void }) {
             <StatusRow label="Estado" value="✅ Conectado" />
             <StatusRow label="Cuenta" value={token?.email || '(cargando...)'} />
             <StatusRow label="Expira" value={token?.expires_at ? new Date(token.expires_at).toLocaleString('es-ES') : '—'} />
-            <StatusRow label="Modo" value="API directa (sin n8n, sin IMAP)" />
+            <StatusRow label="Modo" value="API directa (Gmail API + OAuth2)" />
           </div>
           <div className="flex gap-2">
             <button
@@ -537,7 +536,7 @@ function GmailConnectCard({ onRefresh }: { onRefresh: () => void }) {
       ) : (
         <>
           <p className="text-[10px] text-slate-500 mb-3">
-            Conecta tu Gmail para que el Agente descargue automáticamente PDFs de facturas sin n8n.
+            Conecta tu Gmail para que el Agente descargue automáticamente PDFs de facturas.
           </p>
 
           {showSetup || !clientId ? (

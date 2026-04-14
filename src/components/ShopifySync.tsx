@@ -95,10 +95,10 @@ const FULFILL_COLORS: Record<string, string> = {
   fulfilled: 'bg-emerald-100 text-emerald-700',
 };
 
-// ── Función proxy para llamadas a Shopify vía n8n ───────────────────────────
+// ── Función proxy para llamadas a Shopify vía Backend Proxy ─────────────────
 // Shopify Admin API no permite llamadas directas desde el browser (CORS).
-// Usamos n8n como proxy: enviamos { action, storeDomain, accessToken, ...params }
-// y n8n hace la llamada real a Shopify.
+// Usamos un backend proxy: enviamos { action, storeDomain, accessToken, ...params }
+// y el proxy hace la llamada real a Shopify.
 async function shopifyProxy(
   webhookUrl: string,
   action: string,
@@ -446,12 +446,12 @@ export const ShopifySync: React.FC<Props> = ({ data, onSave }) => {
               </div>
 
               <div>
-                <label className="text-xs font-bold text-gray-500 uppercase block mb-1">URL Proxy n8n</label>
+                <label className="text-xs font-bold text-gray-500 uppercase block mb-1">URL Backend Proxy</label>
                 <input value={formWebhook} onChange={e => setFormWebhook(e.target.value)}
-                  placeholder="https://tu-n8n.com/webhook/shopify-proxy"
+                  placeholder="https://tu-backend.com/webhook/shopify-proxy"
                   className="w-full border rounded-xl px-4 py-3 text-sm font-mono focus:ring-2 focus:ring-emerald-300 focus:outline-none" />
                 <p className="text-[10px] text-gray-400 mt-1">
-                  Endpoint n8n que hace de proxy a la Shopify Admin API (necesario por CORS)
+                  Endpoint backend que hace de proxy a la Shopify Admin API (necesario por CORS)
                 </p>
               </div>
 
@@ -471,19 +471,19 @@ export const ShopifySync: React.FC<Props> = ({ data, onSave }) => {
             </div>
           </div>
 
-          {/* Guía de setup n8n */}
+          {/* Guía de setup proxy */}
           <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 space-y-3">
             <h4 className="font-bold text-emerald-800 flex items-center gap-2 text-sm">
-              <Info className="w-4 h-4" /> Cómo configurar el proxy n8n
+              <Info className="w-4 h-4" /> Cómo configurar el Backend Proxy
             </h4>
             <div className="text-xs text-emerald-700 space-y-2">
-              <p><strong>1.</strong> En n8n, crea un nuevo Workflow con un nodo <strong>Webhook</strong> (método POST)</p>
-              <p><strong>2.</strong> Añade un nodo <strong>HTTP Request</strong> que llame a la Shopify Admin API:</p>
+              <p><strong>1.</strong> Configura un endpoint (Edge Function, servidor propio, etc.) que acepte POST</p>
+              <p><strong>2.</strong> El endpoint debe hacer la llamada a la Shopify Admin API:</p>
               <code className="block bg-white rounded-lg p-3 font-mono text-[10px] overflow-x-auto border">
                 {`URL: https://{{storeDomain}}/admin/api/2024-01/{{endpoint}}.json`}<br />
                 {`Header: X-Shopify-Access-Token: {{accessToken}}`}
               </code>
-              <p><strong>3.</strong> El webhook recibe <code>action</code> y enruta:</p>
+              <p><strong>3.</strong> El endpoint recibe <code>action</code> y enruta:</p>
               <ul className="list-disc ml-4 space-y-1 text-[10px]">
                 <li><code>sync_products</code> → GET /products.json?limit=250</li>
                 <li><code>sync_orders</code> → GET /orders.json?status=any&limit=50</li>

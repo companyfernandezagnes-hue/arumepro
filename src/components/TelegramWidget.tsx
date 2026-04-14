@@ -201,7 +201,7 @@ export const TelegramWidget = ({ currentModule, chatId }: TelegramWidgetProps) =
       return;
     }
 
-    // 🚀 2. GESTIÓN DE VIDA PERSONAL (VA A TELEGRAM Y A N8N)
+    // 🚀 2. GESTIÓN DE VIDA PERSONAL (VA A TELEGRAM)
     let telegramSuccess = false;
     if (chatId) {
       try {

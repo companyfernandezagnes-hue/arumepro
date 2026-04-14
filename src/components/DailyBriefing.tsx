@@ -311,7 +311,7 @@ export const DailyBriefing: React.FC<{ data: AppData; onNavigate?: (tab: string)
     // Solo enviar 1 vez al día
     const todayKey = `briefing_sent_${today.toISOString().slice(0, 10)}`;
     if (sessionStorage.getItem(todayKey)) return;
-    // Solo enviar si hay Telegram configurado (directo, sin n8n)
+    // Solo enviar si hay Telegram configurado (API directa)
     const token = data?.config?.telegramToken;
     const chatId = data?.config?.telegramChatId;
     if (!token || !chatId) return;

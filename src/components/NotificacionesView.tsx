@@ -454,7 +454,7 @@ export const NotificacionesView: React.FC<Props> = ({ data, onSave }) => {
               <strong>Cómo funciona:</strong> Las notificaciones push usan la API nativa del navegador y un Service Worker.
               Funcionan incluso con la app cerrada si tienes el navegador abierto en segundo plano.
               En iOS, necesitas añadir la app a la pantalla de inicio (PWA) para recibir push.
-              Las alertas también se envían a <strong>Telegram</strong> vía el webhook de n8n si lo tienes configurado.
+              Las alertas también se envían a <strong>Telegram</strong> vía la API directa del bot si lo tienes configurado.
             </div>
           </div>
         </div>
