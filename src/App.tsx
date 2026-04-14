@@ -184,29 +184,101 @@ type DockItemDef<T extends string> = { key: T; label: string; icon: any; group?:
 
 function MobileTabBar<T extends string>({ items, activeKey, onChange }: { items: DockItemDef<T>[], activeKey: T, onChange: (k:T)=>void }) {
   const groups = useMemo(() => ({
-    main: items.filter(i => (i.group ?? 'main') === 'main'), 
-    fin: items.filter(i => i.group === 'fin'), 
+    main: items.filter(i => (i.group ?? 'main') === 'main'),
+    fin: items.filter(i => i.group === 'fin'),
     ops: items.filter(i => i.group === 'ops'),
   }), [items]);
 
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(true);
+
+  const checkScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 5);
+    setCanScrollRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 5);
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    checkScroll();
+    el.addEventListener('scroll', checkScroll, { passive: true });
+    window.addEventListener('resize', checkScroll);
+    return () => { el.removeEventListener('scroll', checkScroll); window.removeEventListener('resize', checkScroll); };
+  }, [checkScroll]);
+
+  const scrollBy = (dir: number) => {
+    scrollRef.current?.scrollBy({ left: dir * 200, behavior: 'smooth' });
+  };
+
+  // Drag-to-scroll para escritorio
+  const isDragging = useRef(false);
+  const startX = useRef(0);
+  const scrollStart = useRef(0);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    isDragging.current = true;
+    startX.current = e.clientX;
+    scrollStart.current = scrollRef.current?.scrollLeft || 0;
+    e.currentTarget.style.cursor = 'grabbing';
+  };
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging.current || !scrollRef.current) return;
+    const dx = e.clientX - startX.current;
+    scrollRef.current.scrollLeft = scrollStart.current - dx;
+  };
+  const handleMouseUp = (e: React.MouseEvent) => {
+    isDragging.current = false;
+    e.currentTarget.style.cursor = 'grab';
+  };
+
   return (
     <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-[120] bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe shadow-[0_-5px_15px_rgba(0,0,0,0.05)]">
-      <div
-        className="flex items-center overflow-x-auto flex-nowrap px-2 py-1.5 gap-1"
-        style={{ WebkitOverflowScrolling: 'touch', overscrollBehaviorX: 'contain' }}
-        onWheel={(e) => {
-          // Scroll horizontal con rueda del ratón en escritorio
-          if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-            e.currentTarget.scrollLeft += e.deltaY;
-          }
-        }}
-      >
-        {groups.main.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
-        <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
-        {groups.fin.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
-        <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
-        {groups.ops.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
-        <div className="w-2 shrink-0" />
+      <div className="relative">
+        {/* Flecha izquierda */}
+        {canScrollLeft && (
+          <button
+            onClick={() => scrollBy(-1)}
+            className="absolute left-0 top-0 bottom-0 z-10 w-8 bg-gradient-to-r from-white/95 via-white/80 to-transparent flex items-center justify-center"
+          >
+            <svg className="w-4 h-4 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" /></svg>
+          </button>
+        )}
+
+        {/* Flecha derecha */}
+        {canScrollRight && (
+          <button
+            onClick={() => scrollBy(1)}
+            className="absolute right-0 top-0 bottom-0 z-10 w-8 bg-gradient-to-l from-white/95 via-white/80 to-transparent flex items-center justify-center"
+          >
+            <svg className="w-4 h-4 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg>
+          </button>
+        )}
+
+        <div
+          ref={scrollRef}
+          className="flex items-center overflow-x-auto flex-nowrap px-2 py-1.5 gap-1"
+          style={{ WebkitOverflowScrolling: 'touch', overscrollBehaviorX: 'contain', cursor: 'grab', scrollbarWidth: 'thin' }}
+          onWheel={(e) => {
+            if (scrollRef.current && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+              e.preventDefault();
+              scrollRef.current.scrollLeft += e.deltaY;
+            }
+          }}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+        >
+          {groups.main.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
+          <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
+          {groups.fin.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
+          <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
+          {groups.ops.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
+          <div className="w-2 shrink-0" />
+        </div>
       </div>
     </nav>
   );
