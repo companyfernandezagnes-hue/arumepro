@@ -679,6 +679,115 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     finally { setIsProcessing(false); }
   };
 
+  // ── Subida masiva de PDFs de facturas del correo ─────────────────────────
+  const [uploadResults, setUploadResults] = useState<{ name: string; status: 'ok' | 'no-match' | 'error'; msg: string }[]>([]);
+  const [isUploading, setIsUploading]     = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleBulkPDFUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    e.target.value = '';
+    if (!files || files.length === 0) return;
+
+    setIsUploading(true);
+    setUploadResults([]);
+    const results: typeof uploadResults = [];
+    let newData = JSON.parse(JSON.stringify(safeData));
+    let attached = 0;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const fileName = file.name;
+      toast.success(`📄 Procesando ${i + 1}/${files.length}: ${fileName}…`);
+
+      try {
+        // Leer base64
+        const b64: string = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const result = reader.result as string;
+            resolve(result.includes(',') ? result.split(',')[1] : result);
+          };
+          reader.readAsDataURL(file);
+        });
+
+        const mimeType = file.type || 'application/pdf';
+
+        // IA extrae datos del PDF
+        const prompt = `Actúa como un Auditor Contable. Analiza esta factura y devuelve SOLO un JSON estricto sin markdown:
+{"proveedor": "Nombre del emisor", "total": 0.00, "base": 0.00, "iva": 0.00, "fecha": "YYYY-MM-DD", "num_factura": "Número o S/N"}
+Usa punto como separador decimal.`;
+
+        const result = await scanBase64(b64, mimeType, prompt);
+        const rawJson       = result.raw as any;
+        const provDetectado = String(rawJson.proveedor   || '');
+        const totalDetectado= Num.parse(rawJson.total);
+        const baseDetectado = Num.parse(rawJson.base);
+        const ivaDetectado  = Num.parse(rawJson.iva);
+        const fechaDetectada= String(rawJson.fecha       || '');
+        const numDetectado  = String(rawJson.num_factura  || '');
+
+        // Buscar coincidencia en facturas sin PDF adjunto
+        const match = newData.facturas.find((f: any) =>
+          f && !f.file_base64 && f.tipo !== 'caja' && (
+            // Match por total (tolerancia 1€)
+            Math.abs(Num.parse(f.total) - totalDetectado) <= 1.00 ||
+            // Match por número de factura
+            (numDetectado && numDetectado !== 'S/N' && String(f.num || '').toLowerCase().includes(numDetectado.toLowerCase())) ||
+            // Match por proveedor + importe similar (tolerancia 5€)
+            (provDetectado && basicNorm(f.prov || '').includes(basicNorm(provDetectado).substring(0, 6)) && Math.abs(Num.parse(f.total) - totalDetectado) <= 5.00)
+          )
+        );
+
+        if (match) {
+          const fIndex = newData.facturas.findIndex((f: any) => f.id === match.id);
+          if (fIndex > -1) {
+            newData.facturas[fIndex].file_base64 = `data:${mimeType};base64,${b64}`;
+            if (!newData.facturas[fIndex].base && baseDetectado) newData.facturas[fIndex].base = baseDetectado;
+            if (!newData.facturas[fIndex].tax && ivaDetectado)   newData.facturas[fIndex].tax  = ivaDetectado;
+            attached++;
+            results.push({ name: fileName, status: 'ok', msg: `✅ → ${match.prov || provDetectado} · ${match.num || numDetectado} · ${Num.fmt(totalDetectado)}` });
+          }
+        } else {
+          // No hay match → crear factura nueva como borrador
+          const newId = `upload-${Date.now()}-${i}`;
+          const nuevaFactura: any = {
+            id: newId,
+            tipo: 'compra',
+            num: numDetectado !== 'S/N' ? numDetectado : '',
+            date: fechaDetectada || DateUtil.today(),
+            prov: provDetectado,
+            total: totalDetectado,
+            base: baseDetectado || undefined,
+            tax: ivaDetectado || undefined,
+            paid: false,
+            reconciled: false,
+            status: 'parsed',
+            source: 'dropzone',
+            file_base64: `data:${mimeType};base64,${b64}`,
+            unidad_negocio: 'REST',
+          };
+          if (!newData.facturas) newData.facturas = [];
+          newData.facturas.push(nuevaFactura);
+          attached++;
+          results.push({ name: fileName, status: 'no-match', msg: `🆕 Nueva factura: ${provDetectado} · ${Num.fmt(totalDetectado)} — revísala en la Bóveda` });
+        }
+      } catch (err: any) {
+        results.push({ name: fileName, status: 'error', msg: `❌ Error: ${err.message || 'fallo al procesar'}` });
+      }
+    }
+
+    // Guardar todo de golpe
+    if (attached > 0) {
+      newData.facturas = [...newData.facturas];
+      await onSave(newData);
+    }
+
+    setUploadResults(results);
+    setIsUploading(false);
+    toast.success(`📤 ${files.length} PDFs procesados. ${attached} adjuntados/creados.`);
+  };
+
   // ── Totales para la barra de progreso ────────────────────────────────────
   const totalFacturadoCalc = facturasBoveda.filter(f => f.tipo === 'compra').reduce((acc, f) => acc + Math.abs(Num.parse(f.total) || 0), 0);
   const totalPagadoCalc    = facturasBoveda.filter(f => f.tipo === 'compra' && f.paid).reduce((acc, f) => acc + Math.abs(Num.parse(f.total) || 0), 0);
@@ -1152,6 +1261,61 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           {/* ════════ PESTAÑA: PROVEEDORES 🆕 ════════ */}
           {activeTab === 'proveedores' && (
             <motion.div key="proveedores" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ type: 'spring', damping: 25 }}>
+
+              {/* ── Zona de subida masiva de facturas PDF ── */}
+              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-[2rem] border-2 border-dashed border-blue-300 p-6 mb-6 text-center relative">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  multiple
+                  onChange={handleBulkPDFUpload}
+                  className="hidden"
+                />
+                <div className="flex flex-col md:flex-row items-center gap-4">
+                  <div className="flex items-center gap-3 flex-1">
+                    <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shrink-0">
+                      <UploadCloud className="w-6 h-6 text-white" />
+                    </div>
+                    <div className="text-left">
+                      <h3 className="text-sm font-black text-blue-900">Subir facturas del correo</h3>
+                      <p className="text-[10px] text-blue-500 font-bold mt-0.5">
+                        Sube varios PDFs a la vez. La IA los lee, los cruza con tus albaranes y los adjunta automáticamente.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading}
+                    className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition shadow-lg flex items-center gap-2 active:scale-95 disabled:opacity-50 shrink-0"
+                  >
+                    {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
+                    {isUploading ? 'Procesando…' : 'Seleccionar PDFs'}
+                  </button>
+                </div>
+
+                {/* Resultados de la subida */}
+                {uploadResults.length > 0 && (
+                  <div className="mt-4 bg-white rounded-2xl border border-blue-100 p-4 text-left">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Resultados</p>
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                      {uploadResults.map((r, i) => (
+                        <div key={i} className={cn(
+                          'flex items-center gap-2 text-xs px-3 py-2 rounded-xl',
+                          r.status === 'ok' ? 'bg-emerald-50 text-emerald-700' :
+                          r.status === 'no-match' ? 'bg-amber-50 text-amber-700' :
+                          'bg-red-50 text-red-700'
+                        )}>
+                          <span className="font-black shrink-0">{r.status === 'ok' ? '✅' : r.status === 'no-match' ? '🆕' : '❌'}</span>
+                          <span className="font-bold truncate">{r.name}</span>
+                          <span className="text-[10px] ml-auto shrink-0">{r.msg}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <button onClick={() => setUploadResults([])} className="mt-2 text-[9px] font-black text-blue-500 hover:text-blue-700 uppercase tracking-widest">Cerrar resultados</button>
+                  </div>
+                )}
+              </div>
 
               {/* Selector de mes + leyenda */}
               <div className="flex items-center gap-3 mb-5 flex-wrap">
