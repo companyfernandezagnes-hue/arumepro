@@ -644,12 +644,11 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const handleTriggerSync = async () => {
     setIsProcessing(true);
     try {
-      // Primero intentar Gmail directo (Arume Agent)
       if (GmailDirectSync.isAuthenticated()) {
+        // Ya autenticado → sincronizar
         const result = await GmailDirectSync.fetchNewEmails(20);
         if (result.emails.length > 0) {
           const drafts = GmailDirectSync.toEmailDrafts(result.emails);
-          // Guardar en localStorage para el agente
           const existing = JSON.parse(localStorage.getItem('arume_gmail_inbox') || '[]');
           const existingIds = new Set(existing.map((e: any) => e.id));
           const nuevos = drafts.filter(d => !existingIds.has(d.id));
@@ -660,7 +659,21 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           toast.success('📭 Gmail revisado — sin PDFs nuevos.');
         }
       } else {
-        toast.warning('📧 Conecta Gmail en la pestaña Agente para sincronizar facturas automáticamente.');
+        // No autenticado → intentar conectar OAuth
+        try {
+          const token = await GmailDirectSync.authorize();
+          if (token) {
+            toast.success('✅ Gmail conectado. Pulsa de nuevo para sincronizar.');
+          } else {
+            toast.warning('⚠️ No se pudo conectar Gmail. Verifica que tengas un Client ID de Google configurado en la pestaña Agente.');
+          }
+        } catch (err: any) {
+          if (err?.message === 'NO_CLIENT_ID') {
+            toast.warning('🔑 Necesitas configurar un Google Client ID en la pestaña Agente para conectar Gmail directamente.');
+          } else {
+            toast.error('❌ Error al conectar con Gmail.');
+          }
+        }
       }
     } catch (err) { toast.error('❌ Error al sincronizar.'); }
     finally { setIsProcessing(false); }
@@ -1730,8 +1743,8 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
             <h3 className="text-base font-black text-indigo-100 mb-2">Agente IA · Gmail</h3>
             <p className="text-[10px] text-indigo-300/80 uppercase font-bold tracking-widest mb-6 leading-relaxed">
               {GmailDirectSync.isAuthenticated()
-                ? 'Conectado. Sincroniza PDFs de facturas directamente desde Gmail.'
-                : 'Conecta Gmail en la pestaña Agente para sincronizar facturas automáticamente.'}
+                ? 'Conectado. Pulsa para sincronizar PDFs de facturas desde Gmail.'
+                : 'Pulsa para conectar tu cuenta de Gmail y sincronizar facturas automáticamente.'}
             </p>
             <button onClick={handleTriggerSync} disabled={isProcessing} className="w-full bg-indigo-500 hover:bg-indigo-400 text-white font-black text-[10px] uppercase tracking-widest px-6 py-3.5 rounded-xl shadow-lg transition-all flex justify-center items-center gap-2 active:scale-95 disabled:opacity-50">
               {isProcessing ? <Loader2 className="w-4 h-4 animate-spin"/> : <Bot className="w-4 h-4" />}

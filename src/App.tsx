@@ -191,7 +191,16 @@ function MobileTabBar<T extends string>({ items, activeKey, onChange }: { items:
 
   return (
     <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-[120] bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe shadow-[0_-5px_15px_rgba(0,0,0,0.05)]">
-      <div className="flex items-center overflow-x-auto flex-nowrap px-2 py-1.5 gap-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]" style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-x', overscrollBehaviorX: 'contain' }}>
+      <div
+        className="flex items-center overflow-x-auto flex-nowrap px-2 py-1.5 gap-1"
+        style={{ WebkitOverflowScrolling: 'touch', overscrollBehaviorX: 'contain' }}
+        onWheel={(e) => {
+          // Scroll horizontal con rueda del ratón en escritorio
+          if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+            e.currentTarget.scrollLeft += e.deltaY;
+          }
+        }}
+      >
         {groups.main.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
         <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
         {groups.fin.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
