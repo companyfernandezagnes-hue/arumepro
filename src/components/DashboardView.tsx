@@ -7,7 +7,7 @@ import {
   CreditCard, Package, Clock, ExternalLink, CalendarCheck
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Num } from '../services/engine';
+import { Num, ArumeEngine } from '../services/engine';
 import { cn } from '../lib/utils';
 import { AppData } from '../types';
 import { supabase } from '../services/supabase';
@@ -639,6 +639,142 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
           </div>
         </div>
       </div>
+
+      {/* COMPARATIVA INTERANUAL */}
+      {(() => {
+        const currentYear = new Date().getFullYear();
+        const currentMonth = new Date().getMonth() + 1; // 1-12
+        const prevYear = currentYear - 1;
+
+        // Current year YTD (months 1..currentMonth)
+        let cytdIngresos = 0, cytdGastos = 0, cytdNeto = 0;
+        for (let m = 1; m <= currentMonth; m++) {
+          const p = ArumeEngine.getProfit(data, m, currentYear);
+          cytdIngresos += p.ingresos?.total ?? 0;
+          cytdGastos   += p.gastos?.total ?? 0;
+          cytdNeto     += p.neto ?? 0;
+        }
+
+        // Previous year same period (months 1..currentMonth)
+        let pySameIngresos = 0, pySameGastos = 0, pySameNeto = 0;
+        for (let m = 1; m <= currentMonth; m++) {
+          const p = ArumeEngine.getProfit(data, m, prevYear);
+          pySameIngresos += p.ingresos?.total ?? 0;
+          pySameGastos   += p.gastos?.total ?? 0;
+          pySameNeto     += p.neto ?? 0;
+        }
+
+        // Previous year full (months 1..12)
+        let pyFullIngresos = 0, pyFullGastos = 0, pyFullNeto = 0;
+        for (let m = 1; m <= 12; m++) {
+          const p = ArumeEngine.getProfit(data, m, prevYear);
+          pyFullIngresos += p.ingresos?.total ?? 0;
+          pyFullGastos   += p.gastos?.total ?? 0;
+          pyFullNeto     += p.neto ?? 0;
+        }
+
+        const cytdMargen = cytdIngresos > 0 ? (cytdNeto / cytdIngresos) * 100 : 0;
+        const pySameMargen = pySameIngresos > 0 ? (pySameNeto / pySameIngresos) * 100 : 0;
+        const pyFullMargen = pyFullIngresos > 0 ? (pyFullNeto / pyFullIngresos) * 100 : 0;
+
+        const pctChangeIng = pySameIngresos !== 0 ? ((cytdIngresos - pySameIngresos) / Math.abs(pySameIngresos)) * 100 : 0;
+        const pctChangeGas = pySameGastos !== 0 ? ((cytdGastos - pySameGastos) / Math.abs(pySameGastos)) * 100 : 0;
+        const pctChangeNeto = pySameNeto !== 0 ? ((cytdNeto - pySameNeto) / Math.abs(pySameNeto)) * 100 : 0;
+
+        const rows = [
+          { label: `${currentYear} (hasta hoy)`, ingresos: cytdIngresos, gastos: cytdGastos, neto: cytdNeto, margen: cytdMargen, highlight: true },
+          { label: `${prevYear} (mismo periodo)`, ingresos: pySameIngresos, gastos: pySameGastos, neto: pySameNeto, margen: pySameMargen, highlight: false },
+          { label: `${prevYear} (año completo)`, ingresos: pyFullIngresos, gastos: pyFullGastos, neto: pyFullNeto, margen: pyFullMargen, highlight: false },
+        ];
+
+        const renderPctBadge = (pct: number, invertColor?: boolean) => {
+          const positive = invertColor ? pct <= 0 : pct >= 0;
+          return (
+            <span className={cn('inline-flex items-center gap-0.5 text-[10px] font-black rounded-full px-2 py-0.5',
+              positive ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
+            )}>
+              {pct >= 0 ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+              {Math.abs(Num.round2(pct)).toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
+            </span>
+          );
+        };
+
+        return (
+          <div className="bg-white p-6 md:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-indigo-500" />
+                Comparativa Interanual
+              </h3>
+              {pySameIngresos > 0 && (
+                <div className={cn('flex items-center gap-1.5 text-xs font-black px-3 py-1.5 rounded-full',
+                  pctChangeNeto >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                )}>
+                  {pctChangeNeto >= 0
+                    ? <TrendingUp className="w-4 h-4" />
+                    : <TrendingDown className="w-4 h-4" />
+                  }
+                  {pctChangeNeto >= 0 ? 'Mejorando' : 'Empeorando'} vs {prevYear}
+                </div>
+              )}
+            </div>
+            <div className="overflow-x-auto -mx-2 px-2" style={{ WebkitOverflowScrolling: 'touch' }}>
+              <table className="w-full text-left" style={{ minWidth: '520px' }}>
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <th className="text-[10px] font-black text-slate-400 uppercase tracking-widest pb-3 pr-4">Periodo</th>
+                    <th className="text-[10px] font-black text-slate-400 uppercase tracking-widest pb-3 pr-4 text-right">Ingresos</th>
+                    <th className="text-[10px] font-black text-slate-400 uppercase tracking-widest pb-3 pr-4 text-right">Gastos</th>
+                    <th className="text-[10px] font-black text-slate-400 uppercase tracking-widest pb-3 pr-4 text-right">Beneficio Neto</th>
+                    <th className="text-[10px] font-black text-slate-400 uppercase tracking-widest pb-3 text-right">Margen %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, i) => (
+                    <tr key={i} className={cn('border-b border-slate-50 last:border-0', row.highlight && 'bg-indigo-50/40')}>
+                      <td className={cn('py-3 pr-4 text-xs font-bold whitespace-nowrap', row.highlight ? 'text-indigo-700' : 'text-slate-600')}>
+                        {row.label}
+                      </td>
+                      <td className="py-3 pr-4 text-right">
+                        <span className="text-xs font-black text-slate-700 tabular-nums">{Num.fmt(Num.round2(row.ingresos))}</span>
+                      </td>
+                      <td className="py-3 pr-4 text-right">
+                        <span className="text-xs font-black text-slate-700 tabular-nums">{Num.fmt(Num.round2(row.gastos))}</span>
+                      </td>
+                      <td className="py-3 pr-4 text-right">
+                        <span className={cn('text-xs font-black tabular-nums', row.neto >= 0 ? 'text-emerald-600' : 'text-rose-600')}>
+                          {Num.fmt(Num.round2(row.neto))}
+                        </span>
+                      </td>
+                      <td className="py-3 text-right">
+                        <span className={cn('text-xs font-black tabular-nums', row.margen >= 0 ? 'text-emerald-600' : 'text-rose-600')}>
+                          {Num.round2(row.margen).toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {/* Row for % change */}
+                  {pySameIngresos > 0 && (
+                    <tr className="bg-slate-50/50">
+                      <td className="py-3 pr-4 text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">
+                        % Variación
+                      </td>
+                      <td className="py-3 pr-4 text-right">{renderPctBadge(pctChangeIng)}</td>
+                      <td className="py-3 pr-4 text-right">{renderPctBadge(pctChangeGas, true)}</td>
+                      <td className="py-3 pr-4 text-right">{renderPctBadge(pctChangeNeto)}</td>
+                      <td className="py-3 text-right">
+                        <span className={cn('text-[10px] font-black tabular-nums', cytdMargen >= pySameMargen ? 'text-emerald-600' : 'text-rose-600')}>
+                          {cytdMargen >= pySameMargen ? '+' : ''}{Num.round2(cytdMargen - pySameMargen).toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} pp
+                        </span>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* EMAILS GENERALES */}
       {(loadingEmails || generalEmails.length > 0) && (
