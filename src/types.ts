@@ -419,6 +419,5 @@ export interface AppData {
   pagos_socios?: PagosSocios;            // ✅ reparto beneficios + comisiones B2B
   cuentas_internas?: MovimientoInterno[]; // ✅ librito privado familiar
   priceHistory?: PriceHistoryItem[];
-  diario?: Cierre[];                      // Alias legacy de cierres
   lastSync?: number;
 }

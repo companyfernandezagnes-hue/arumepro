@@ -42,7 +42,7 @@ export const CierreContableView: React.FC<CierreContableViewProps> = ({ data, on
       if (cierreOficial) return { ...cierreOficial.snapshot, isClosed: true, id: cierreOficial.id, fecha_cierre: cierreOficial.fecha_cierre, gastosBancoNoContabilizado: 0 };
       const targetMonth = i + 1;
       let ventas = 0;
-      const cajas = [...(data?.cierres||[]), ...(data?.diario||[])];
+      const cajas = data?.cierres || [];
       cajas.forEach((c:any) => {
         const d = extractMonthYear(c.date || c.fecha);
         if (d.year === year && d.month === targetMonth) {

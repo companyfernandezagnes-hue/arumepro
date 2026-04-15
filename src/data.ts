@@ -68,7 +68,6 @@ export const INITIAL_DATA: AppData = {
   cierres_mensuales: [],
   albaranes: [],
   activos: [],
-  diario: [],
   priceHistory: [],
   control_pagos: {}
 };

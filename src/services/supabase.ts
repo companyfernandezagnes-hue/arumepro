@@ -95,7 +95,11 @@ const enforceSchema = (d: any): AppData => {
                     facturas: Array.isArray(safeData.facturas) ? safeData.facturas.map(normalizeFactura) : [],
                     albaranes: Array.isArray(safeData.albaranes) ? safeData.albaranes.map(normalizeAlbaran) : [],
                                       banco: Array.isArray(safeData.banco) ? safeData.banco.map(normalizeBankMovement) : [],
-            cierres: Array.isArray(safeData.cierres) ? safeData.cierres : [],
+            // Migración: fusionar `diario` legacy en `cierres` al cargar
+            cierres: [
+                ...(Array.isArray(safeData.cierres) ? safeData.cierres : []),
+                ...(Array.isArray(safeData.diario) ? safeData.diario : []),
+            ],
                     cierres_mensuales: Array.isArray(safeData.cierres_mensuales) ? safeData.cierres_mensuales : [],
                     gastos_fijos: Array.isArray(safeData.gastos_fijos) ? safeData.gastos_fijos : [],
                     activos: Array.isArray(safeData.activos) ? safeData.activos : [],
@@ -104,7 +108,6 @@ const enforceSchema = (d: any): AppData => {
                     recetas: Array.isArray(safeData.recetas) ? safeData.recetas : [],
                     ingredientes: Array.isArray(safeData.ingredientes) ? safeData.ingredientes : [],
                     priceHistory: Array.isArray(safeData.priceHistory) ? safeData.priceHistory : [],
-                    diario: Array.isArray(safeData.diario) ? safeData.diario : [],
                     kardex: Array.isArray(safeData.kardex) ? safeData.kardex : [],
                     proveedores: Array.isArray(safeData.proveedores) ? safeData.proveedores : [],
                     presupuestos: Array.isArray(safeData.presupuestos) ? safeData.presupuestos : [],
