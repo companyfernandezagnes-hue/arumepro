@@ -73,7 +73,102 @@ export class GmailDirectSync {
   static isAuthenticated(): boolean {
     const token = GmailDirectSync.getToken();
     if (!token) return false;
-    return token.expires_at > Date.now();
+    // Consideramos válido si queda >1 minuto de vida (margen para renovar)
+    return token.expires_at > Date.now() + 60_000;
+  }
+
+  /**
+   * Carga dinámicamente el script de Google Identity Services si no está presente.
+   */
+  private static _gisLoading: Promise<void> | null = null;
+  private static _loadGis(): Promise<void> {
+    if (typeof window === 'undefined') return Promise.reject(new Error('NO_WINDOW'));
+    const w = window as any;
+    if (w.google?.accounts?.oauth2) return Promise.resolve();
+    if (GmailDirectSync._gisLoading) return GmailDirectSync._gisLoading;
+    GmailDirectSync._gisLoading = new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[data-gis]') as HTMLScriptElement | null;
+      if (existing) {
+        existing.addEventListener('load', () => resolve());
+        existing.addEventListener('error', () => reject(new Error('GIS_LOAD_FAIL')));
+        return;
+      }
+      const s = document.createElement('script');
+      s.src = 'https://accounts.google.com/gsi/client';
+      s.async = true;
+      s.defer = true;
+      s.dataset.gis = '1';
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error('GIS_LOAD_FAIL'));
+      document.head.appendChild(s);
+    });
+    return GmailDirectSync._gisLoading;
+  }
+
+  /**
+   * Renovación silenciosa del access_token usando Google Identity Services.
+   * Si la sesión Google sigue activa en el navegador, NO muestra popup.
+   * Devuelve el nuevo token o null si no se pudo renovar silenciosamente.
+   */
+  static async silentRenew(): Promise<GmailToken | null> {
+    const clientId = GmailDirectSync.getClientId();
+    if (!clientId) return null;
+    try {
+      await GmailDirectSync._loadGis();
+    } catch {
+      return null;
+    }
+    const w = window as any;
+    if (!w.google?.accounts?.oauth2) return null;
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (tok: GmailToken | null) => {
+        if (settled) return;
+        settled = true;
+        resolve(tok);
+      };
+      try {
+        const client = w.google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: SCOPES,
+          prompt: '', // sin popup si la sesión Google está activa
+          callback: (response: any) => {
+            if (response?.access_token) {
+              const existing = GmailDirectSync.getToken();
+              const token: GmailToken = {
+                access_token: response.access_token,
+                expires_at: Date.now() + (parseInt(response.expires_in) || 3600) * 1000,
+                email: existing?.email,
+                refresh_token: existing?.refresh_token,
+              };
+              GmailDirectSync.saveToken(token);
+              finish(token);
+            } else {
+              finish(null);
+            }
+          },
+          error_callback: () => finish(null),
+        });
+        client.requestAccessToken({ prompt: '' });
+        // Failsafe: si en 10s no hay respuesta, damos por fallida la renovación silenciosa
+        setTimeout(() => finish(null), 10_000);
+      } catch {
+        finish(null);
+      }
+    });
+  }
+
+  /**
+   * Garantiza un access_token válido. Si está por expirar, intenta renovarlo
+   * silenciosamente. Devuelve el token válido o null si hay que re-autorizar.
+   */
+  static async ensureValidToken(): Promise<GmailToken | null> {
+    const token = GmailDirectSync.getToken();
+    if (token && token.expires_at > Date.now() + 60_000) return token;
+    const renewed = await GmailDirectSync.silentRenew();
+    if (renewed) return renewed;
+    return null;
   }
 
   /**
@@ -182,8 +277,8 @@ export class GmailDirectSync {
    * Devuelve los mensajes con sus PDFs extraídos en base64.
    */
   static async fetchNewEmails(maxResults = 20): Promise<GmailSyncResult> {
-    const token = GmailDirectSync.getToken();
-    if (!token || token.expires_at < Date.now()) {
+    const token = await GmailDirectSync.ensureValidToken();
+    if (!token) {
       return { emails: [], total: 0, pdfs: 0, error: 'Token expirado — re-autoriza Gmail' };
     }
 
@@ -318,7 +413,7 @@ export class GmailDirectSync {
    * Marca un mensaje como leído en Gmail
    */
   static async markAsRead(messageId: string): Promise<boolean> {
-    const token = GmailDirectSync.getToken();
+    const token = await GmailDirectSync.ensureValidToken();
     if (!token) return false;
 
     try {
