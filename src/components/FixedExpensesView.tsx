@@ -27,7 +27,6 @@ const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string
 const COMMITMENT_TYPES = [
   { id: 'expense',     name: 'Gasto Deducible',        icon: FileDown,    color: 'text-rose-600',    bg: 'bg-rose-50',    border: 'border-rose-100'    },
   { id: 'income',      name: 'Ingreso Fijo',            icon: FileUp,      color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-100' },
-  { id: 'payroll',     name: 'Personal y Seguros Soc.', icon: UserCircle,  color: 'text-fuchsia-600', bg: 'bg-fuchsia-50', border: 'border-fuchsia-100' },
   { id: 'tax',         name: 'Tributo / AEAT',          icon: Scale,       color: 'text-amber-600',   bg: 'bg-amber-50',   border: 'border-amber-100'   },
   { id: 'grant',       name: 'Subvención',              icon: Target,      color: 'text-blue-600',    bg: 'bg-blue-50',    border: 'border-blue-100'    },
   { id: 'debt',        name: 'Préstamo / Deuda',        icon: Landmark,    color: 'text-purple-600',  bg: 'bg-purple-50',  border: 'border-purple-100'  },
@@ -485,18 +484,6 @@ Instrucciones:
           </div>
         </div>
 
-        <div className="bg-fuchsia-50 p-6 rounded-[2.5rem] shadow-sm border border-fuchsia-100 flex items-center justify-between relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1.5 h-full bg-fuchsia-500" />
-          <div className="flex flex-col pl-4">
-            <p className="text-[9px] font-black text-fuchsia-600 uppercase tracking-widest mb-1">Coste Laboral Mes</p>
-            <p className="text-3xl font-black text-fuchsia-700">{Num.fmt(stats.dueRealPersonal)}</p>
-            <p className="text-[10px] text-fuchsia-500/70 font-bold mt-1">Nóminas y Seguros Sociales</p>
-          </div>
-          <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-sm shrink-0">
-            <UserCircle className="w-5 h-5 text-fuchsia-500" />
-          </div>
-        </div>
-
         <div className="bg-emerald-50 p-6 rounded-[2.5rem] shadow-sm border border-emerald-100 flex items-center justify-between relative overflow-hidden">
           <div className="absolute top-0 left-0 w-1.5 h-full bg-emerald-500" />
           <div className="flex flex-col pl-4">
@@ -527,35 +514,6 @@ Instrucciones:
           </div>
 
           <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto no-scrollbar">
-
-            <input ref={nominasInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleNominasPDFChange} />
-
-            {/* ✅ FIX 3: spinner inline en el botón de importar nóminas */}
-            <button
-              onClick={() => nominasInputRef.current?.click()}
-              disabled={isProcessingNominas}
-              className={cn(
-                'flex-1 md:flex-none px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border flex items-center justify-center gap-2 whitespace-nowrap',
-                isProcessingNominas
-                  ? 'bg-fuchsia-100 text-fuchsia-400 border-fuchsia-200 cursor-wait'
-                  : 'bg-fuchsia-600 text-white border-fuchsia-600 hover:bg-fuchsia-700 shadow-sm active:scale-95'
-              )}
-            >
-              {isProcessingNominas
-                ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Leyendo PDF…</>
-                : <><UserCircle className="w-3.5 h-3.5" /> Importar Nóminas</>
-              }
-            </button>
-
-            <button
-              onClick={() => setShowPayrollOnly(!showPayrollOnly)}
-              className={cn(
-                'flex-1 md:flex-none px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border flex items-center justify-center gap-2 whitespace-nowrap',
-                showPayrollOnly ? 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200 shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
-              )}
-            >
-              <UserCircle className="w-3.5 h-3.5" /> {showPayrollOnly ? 'Ver Todo' : 'Solo Personal'}
-            </button>
 
             <button
               onClick={() => setShowDueOnly(!showDueOnly)}
