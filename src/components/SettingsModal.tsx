@@ -514,29 +514,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
             </div>
 
             {/* ══════════════════════════════════════════════════════════════
-                5. CORREOS IMAP
-            ══════════════════════════════════════════════════════════════ */}
-            <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200 relative">
-              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-rose-400 to-red-400 rounded-t-[2.5rem]" />
-              <SectionTitle icon={Mail} title="Correos IMAP" color="rose" badge="App Password" />
-              <div className="space-y-3">
-                <input type="email" name="imapUser" value={config.imapUser || ''} onChange={handleChange}
-                  placeholder="Tu correo (ej: facturas@gmail.com)"
-                  className="w-full p-3 bg-slate-50 rounded-xl text-xs font-bold outline-none border border-slate-200 focus:border-rose-400 text-slate-700" />
-                <SecretInput
-                  value={config.imapPass || ''}
-                  onChange={v => setConfig(p => ({ ...p, imapPass: v }))}
-                  placeholder="Contraseña de Aplicación (16 letras)"
-                  colorClass="slate"
-                />
-                <p className="text-[9px] text-slate-400 font-bold leading-tight px-1">
-                  Genera una "Contraseña de aplicación" en tu cuenta Google. No uses tu contraseña habitual.
-                </p>
-              </div>
-            </div>
-
-            {/* ══════════════════════════════════════════════════════════════
-                6. ENDPOINT PSD2 (BANCO)
+                5. ENDPOINT PSD2 (BANCO)
             ══════════════════════════════════════════════════════════════ */}
             <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200 relative">
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 to-green-400 rounded-t-[2.5rem]" />

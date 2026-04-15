@@ -428,8 +428,7 @@ export default function App() {
       next.config = { 
         objetivoMensual: 45000, 
         n8nUrlBanco: "", 
-        n8nUrlIA: "", 
-        emailGeneral: "",
+        n8nUrlIA: "",
         reparto: {
           sociedadPrincipal: [
             { nombre: 'Jerónimo', porcentaje: 50 },

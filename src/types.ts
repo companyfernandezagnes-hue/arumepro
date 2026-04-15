@@ -17,8 +17,6 @@ export interface AppConfig {
   sufijo?: string;
   appUrl?: string;
   driveUrl?: string;
-  imapUser?: string;
-  imapPass?: string;
   repartoDeliveryCocinero?: number;
   repartoDeliveryAdmin?: number;
   reparto?: {
@@ -30,8 +28,6 @@ export interface AppConfig {
   n8nUrlAlbaranes?: string;
   telegramToken?: string;
   telegramChatId?: string;
-  emailFacturas?: string;
-  emailGeneral?: string;
   supabaseInboxUrl?: string;
   supabaseInboxKey?: string;
   supabasePersonalUrl?: string;
