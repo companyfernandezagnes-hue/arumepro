@@ -208,7 +208,11 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
           const pendienteReciente = isOverdueOnce(g, today, currentPagos);
           if (!tocaEsteMes && !pendienteReciente) return false;
         }
-        if (showPayrollOnly && g.type !== 'payroll' && g.cat !== 'personal') return false;
+        // Ocultamos nóminas/SS aquí — se gestionan en el módulo Nóminas.
+        // Con el toggle "Solo personal" se pueden ver igualmente si se necesita.
+        const isPayroll = g.type === 'payroll' || g.cat === 'personal';
+        if (!showPayrollOnly && isPayroll) return false;
+        if (showPayrollOnly && !isPayroll) return false;
         return (g.name || g.concepto || '').toLowerCase().includes(searchTerm.toLowerCase());
       })
       .sort((a: any, b: any) => {
