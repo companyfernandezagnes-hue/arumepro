@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useDeferredValue } from 'react';
+import React, { useState, useMemo, useEffect, useDeferredValue, useRef } from 'react';
 import { 
   Building2, Search, Trash2, UploadCloud, Zap, 
   CheckCircle2, Clock, Check, Download, Package, 
