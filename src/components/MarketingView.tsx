@@ -103,7 +103,7 @@ const REDES = [
   { id: 'gmb',       label: 'Google',    emoji: '🌐', color: 'from-emerald-500 to-teal-500',   hint: 'Local SEO · palabras clave · máx 1.500 chars',                         maxChars: 1500, bestHours: '10:00' },
 ] as const;
 type RedId = 'instagram' | 'facebook' | 'tiktok' | 'gmb';
-type TabKey = 'studio' | 'calendar' | 'reviews' | 'drive' | 'telegram' | 'historia';
+type TabKey = 'auto' | 'studio' | 'calendar' | 'reviews' | 'drive' | 'telegram' | 'historia';
 
 interface Post {
   id           : string;
@@ -186,7 +186,7 @@ export const MarketingView = ({ data }: { data?: AppData }) => {
   const BRAND = BRANDS[brand] ?? BRANDS['restaurante'];
 
   // ── Tabs ──────────────────────────────────────────────────────────────────
-  const [tab, setTab] = useState<TabKey>('studio');
+  const [tab, setTab] = useState<TabKey>('auto');
 
   // ── Studio ────────────────────────────────────────────────────────────────
   const [red,        setRed]        = useState<RedId>('instagram');
@@ -808,6 +808,7 @@ Solo el texto del post, sin comillas.`;
         {/* Tabs */}
         <nav className="flex gap-1 bg-slate-100 p-1 rounded-lg w-full overflow-x-auto">
           {([
+            { key:'auto',     icon:Sparkles,    label:'Agente Auto'},
             { key:'studio',   icon:Wand2,       label:'Studio IA'  },
             { key:'calendar', icon:CalendarDays, label:'Calendario' },
             { key:'reviews',  icon:Star,         label:'Reseñas'    },
@@ -842,6 +843,19 @@ Solo el texto del post, sin comillas.`;
       </header>
 
       <AnimatePresence mode="wait">
+
+        {/* ═══════════ TAB AGENTE AUTO ═══════════ */}
+        {tab === 'auto' && (
+          <motion.div key="auto" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-8}}>
+            <AutoAgentPanel
+              brand={brand}
+              BRAND={BRAND}
+              platos={platos}
+              posts={posts}
+              savePostToDB={savePostToDB}
+            />
+          </motion.div>
+        )}
 
         {/* ═══════════ TAB STUDIO IA ═══════════ */}
         {tab === 'studio' && (
@@ -1721,6 +1735,333 @@ Solo el texto del post, sin comillas.`;
         )}
 
       </AnimatePresence>
+    </div>
+  );
+};
+
+// ════════════════════════════════════════════════════════════════════════════
+// 🤖 AGENTE AUTO — pipeline completo: subir foto → mejorar → analizar →
+//    caption IG/TikTok/Google → hashtags → agendar → preview para aprobar
+// ════════════════════════════════════════════════════════════════════════════
+interface AutoAgentPanelProps {
+  brand: BrandId;
+  BRAND: typeof BRANDS[BrandId];
+  platos: any[];
+  posts: Post[];
+  savePostToDB: (post: Post) => Promise<void>;
+}
+
+interface AutoResult {
+  originalB64: string;
+  enhancedB64: string;         // puede ser === originalB64 si no se pudo mejorar
+  enhancedWorked: boolean;
+  identification: string;      // qué es (plato, ambiente…)
+  captionIG: string;
+  captionTikTok: string;
+  captionGoogle: string;
+  hashtags: string;
+  suggestedDate: string;       // YYYY-MM-DD
+  reasoningDate: string;
+}
+
+const AutoAgentPanel: React.FC<AutoAgentPanelProps> = ({ brand, BRAND, platos, posts, savePostToDB }) => {
+  const [stage, setStage] = useState<'idle'|'uploading'|'enhancing'|'identifying'|'writing'|'scheduling'|'done'|'error'>('idle');
+  const [progress, setProgress] = useState<string>('');
+  const [error, setError] = useState<string>('');
+  const [result, setResult] = useState<AutoResult | null>(null);
+  const [selectedRed, setSelectedRed] = useState<RedId>('instagram');
+  const [approved, setApproved] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const findNextFreeDate = (): { date: string; reason: string } => {
+    // Busca el siguiente día sin posts ya programados. Si todos los próximos
+    // 14 días están ocupados, usa el día con menos posts.
+    const today = new Date();
+    const counts: Record<string, number> = {};
+    for (const p of posts) counts[p.date] = (counts[p.date] || 0) + 1;
+    for (let i = 1; i <= 14; i++) {
+      const d = new Date(today); d.setDate(today.getDate() + i);
+      const ds = d.toISOString().slice(0, 10);
+      if (!counts[ds]) return { date: ds, reason: `próximo hueco libre (${d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short' })})` };
+    }
+    // Fallback
+    const d = new Date(today); d.setDate(today.getDate() + 3);
+    return { date: d.toISOString().slice(0, 10), reason: 'en 3 días (agenda ocupada)' };
+  };
+
+  const runPipeline = async (file: File) => {
+    setError(''); setResult(null); setApproved(false);
+    try {
+      setStage('uploading'); setProgress('Subiendo foto…');
+      const b64 = await toBase64(file);
+      const mime = file.type || 'image/jpeg';
+
+      // ── 1. MEJORAR FOTO (Gemini 2.5 Flash Image / Nano Banana) ────────────
+      setStage('enhancing'); setProgress('Mejorando luz, color y nitidez…');
+      const gemKey = keys.gemini();
+      let enhancedB64 = b64;
+      let enhancedWorked = false;
+      if (gemKey) {
+        try {
+          const pureB64 = b64.replace(/^data:[^;]+;base64,/, '');
+          const editPrompt = `Improve this real restaurant photo for social media. Enhance lighting, color balance, contrast and sharpness. Keep the food/scene EXACTLY as it is — do not add, remove or change any element. No text, no watermark. Photorealistic, natural look.`;
+          const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image-preview:generateContent?key=${gemKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ role: 'user', parts: [
+                  { text: editPrompt },
+                  { inlineData: { mimeType: mime, data: pureB64 } },
+                ]}],
+                generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+              }),
+            },
+          );
+          if (res.ok) {
+            const d = await res.json();
+            const parts = d?.candidates?.[0]?.content?.parts || [];
+            for (const p of parts) {
+              if (p.inlineData?.mimeType?.startsWith('image/')) {
+                enhancedB64 = `data:${p.inlineData.mimeType};base64,${p.inlineData.data}`;
+                enhancedWorked = true;
+                break;
+              }
+            }
+          }
+        } catch { /* si falla, seguimos con la original */ }
+      }
+
+      // ── 2. IDENTIFICAR QUÉ ES ─────────────────────────────────────────────
+      setStage('identifying'); setProgress('Identificando el contenido…');
+      const idPrompt = `Describe en UNA sola frase corta (máx 15 palabras) qué aparece en esta foto de un restaurante japonés. Solo la descripción, sin introducción.`;
+      const idRes = await scanBase64(b64, mime, idPrompt);
+      const idText = (idRes?.raw?.copy as string) || (idRes?.raw?.description as string) || (typeof idRes?.raw === 'string' ? idRes.raw : JSON.stringify(idRes?.raw || {}));
+      const identification = (idText || 'Contenido del restaurante').replace(/^["']|["']$/g, '').trim().slice(0, 200);
+
+      // ── 3. CAPTIONS + HASHTAGS ────────────────────────────────────────────
+      setStage('writing'); setProgress('Escribiendo captions para IG, TikTok y Google…');
+      const platosText = platos.slice(0, 10).map((p: any) => p?.nombre || p?.name).filter(Boolean).join(', ');
+      const copyPrompt = `Eres el community manager de ${BRAND.nombre}.
+Estilo: ${BRAND.estilo}
+Tono: ${BRAND.tono}
+La foto muestra: "${identification}".
+${platosText ? `Platos actuales de la carta: ${platosText}.` : ''}
+
+Genera EXACTAMENTE este JSON válido (sin markdown, sin comentarios):
+{
+  "instagram": "caption para Instagram — máx 150 palabras, gancho en 1ª línea, emojis sutiles, CTA al final",
+  "tiktok": "caption para TikTok — máx 60 palabras, directo, punchy, 1-2 emojis",
+  "google": "descripción para Google My Business — máx 80 palabras, neutra y informativa, sin emojis",
+  "hashtags": "8-12 hashtags separados por espacios, empezando por #ArumeSakeBar"
+}`;
+      const copyRes = await askAI([{ role: 'user', content: copyPrompt }]);
+      let captions = { instagram: '', tiktok: '', google: '', hashtags: BRAND.hashtags };
+      try {
+        const raw = (copyRes.text || '').trim().replace(/^```json\s*|\s*```$/g, '').replace(/^```\s*|\s*```$/g, '');
+        const parsed = JSON.parse(raw);
+        captions = {
+          instagram: parsed.instagram || '',
+          tiktok: parsed.tiktok || '',
+          google: parsed.google || '',
+          hashtags: parsed.hashtags || BRAND.hashtags,
+        };
+      } catch {
+        // Fallback: usa el texto entero como caption IG
+        captions.instagram = (copyRes.text || '').trim();
+      }
+
+      // ── 4. PROGRAMAR FECHA ────────────────────────────────────────────────
+      setStage('scheduling'); setProgress('Buscando hueco en el calendario…');
+      const { date, reason } = findNextFreeDate();
+
+      setResult({
+        originalB64: b64,
+        enhancedB64,
+        enhancedWorked,
+        identification,
+        captionIG: captions.instagram,
+        captionTikTok: captions.tiktok,
+        captionGoogle: captions.google,
+        hashtags: captions.hashtags,
+        suggestedDate: date,
+        reasoningDate: reason,
+      });
+      setStage('done');
+    } catch (e: any) {
+      setError(e?.message || String(e));
+      setStage('error');
+    }
+  };
+
+  const captionFor = (red: RedId): string => {
+    if (!result) return '';
+    if (red === 'instagram') return `${result.captionIG}\n\n${result.hashtags}`;
+    if (red === 'tiktok')    return `${result.captionTikTok}\n\n${result.hashtags}`;
+    return result.captionGoogle;
+  };
+
+  const handleApproveAndSave = async () => {
+    if (!result) return;
+    const post: Post = {
+      id: uid(),
+      date: result.suggestedDate,
+      time: '19:00',
+      red: selectedRed,
+      brand,
+      copy: captionFor(selectedRed),
+      formato: 'Post',
+      imageUrl: result.enhancedB64,
+      published: false,
+      recycled: false,
+    };
+    await savePostToDB(post);
+    setApproved(true);
+    toast.success('Post agendado en el calendario ✨');
+  };
+
+  const reset = () => {
+    setResult(null); setStage('idle'); setError(''); setApproved(false);
+    if (inputRef.current) inputRef.current.value = '';
+  };
+
+  // ── UI ────────────────────────────────────────────────────────────────────
+  const isRunning = stage !== 'idle' && stage !== 'done' && stage !== 'error';
+
+  return (
+    <div className="space-y-4">
+      <div className={cn('p-5 rounded-2xl bg-gradient-to-br text-white shadow-lg', BRAND.color)}>
+        <div className="flex items-start gap-3">
+          <Sparkles className="w-6 h-6 shrink-0"/>
+          <div>
+            <h3 className="text-sm font-black uppercase tracking-widest">Agente Auto</h3>
+            <p className="text-xs opacity-90 mt-1">Sube 1 foto real → en 30 segundos tienes post mejorado, caption para IG/TikTok/Google, hashtags y fecha sugerida.</p>
+          </div>
+        </div>
+      </div>
+
+      {!result && stage === 'idle' && (
+        <div className="border-2 border-dashed border-slate-200 rounded-2xl p-10 text-center bg-white hover:border-fuchsia-300 transition">
+          <Camera className="w-12 h-12 mx-auto text-slate-300 mb-3"/>
+          <p className="text-sm font-bold text-slate-600 mb-1">Sube una foto real del restaurante, plato o ambiente</p>
+          <p className="text-[10px] text-slate-400 mb-4">El agente la mejora SIN inventar nada: solo luz, color y contraste.</p>
+          <input ref={inputRef} type="file" accept="image/*" className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) runPipeline(f); }}/>
+          <button onClick={() => inputRef.current?.click()}
+            className={cn('px-6 py-3 rounded-xl text-white font-black text-xs uppercase tracking-widest bg-gradient-to-r shadow-md hover:scale-105 transition', BRAND.color)}>
+            <Upload className="w-4 h-4 inline mr-2"/> Subir foto
+          </button>
+        </div>
+      )}
+
+      {isRunning && (
+        <div className="bg-white rounded-2xl p-8 border border-slate-100 shadow-sm">
+          <div className="flex items-center gap-4">
+            <Loader2 className="w-8 h-8 animate-spin text-fuchsia-500 shrink-0"/>
+            <div className="flex-1">
+              <p className="text-sm font-black text-slate-700">{progress}</p>
+              <div className="flex gap-2 mt-3">
+                {['uploading','enhancing','identifying','writing','scheduling'].map((s) => (
+                  <div key={s} className={cn('h-1.5 flex-1 rounded-full transition-all',
+                    s === stage ? 'bg-fuchsia-500 animate-pulse' :
+                    ['uploading','enhancing','identifying','writing','scheduling'].indexOf(s) < ['uploading','enhancing','identifying','writing','scheduling'].indexOf(stage) ? 'bg-fuchsia-400' : 'bg-slate-200')}/>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {stage === 'error' && (
+        <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5"/>
+          <div className="flex-1">
+            <p className="text-sm font-black text-rose-700">Algo falló</p>
+            <p className="text-xs text-rose-600 mt-1">{error}</p>
+            <button onClick={reset} className="mt-3 px-3 py-1.5 bg-white border border-rose-200 text-rose-600 rounded-lg text-[10px] font-black uppercase tracking-widest">Reintentar</button>
+          </div>
+        </div>
+      )}
+
+      {result && stage === 'done' && (
+        <div className="space-y-4">
+          {/* Fotos before/after */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="bg-white rounded-2xl p-3 border border-slate-100">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Original</p>
+              <img src={result.originalB64} alt="original" className="w-full rounded-xl"/>
+            </div>
+            <div className={cn('rounded-2xl p-3 border-2', result.enhancedWorked ? 'border-fuchsia-300 bg-fuchsia-50' : 'border-slate-100 bg-white')}>
+              <p className="text-[10px] font-black text-fuchsia-600 uppercase tracking-widest mb-2 flex items-center gap-1">
+                <Sparkles className="w-3 h-3"/> {result.enhancedWorked ? 'Mejorada' : 'Sin cambios (API no disponible)'}
+              </p>
+              <img src={result.enhancedB64} alt="enhanced" className="w-full rounded-xl"/>
+            </div>
+          </div>
+
+          {/* Qué es + fecha */}
+          <div className="bg-white rounded-2xl p-4 border border-slate-100 space-y-2">
+            <div className="flex items-start gap-2">
+              <Lightbulb className="w-4 h-4 text-amber-500 shrink-0 mt-0.5"/>
+              <div className="flex-1">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Identificación</p>
+                <p className="text-sm text-slate-700">{result.identification}</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-2 pt-2 border-t border-slate-100">
+              <CalendarDays className="w-4 h-4 text-fuchsia-500 shrink-0 mt-0.5"/>
+              <div className="flex-1">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Fecha sugerida</p>
+                <p className="text-sm text-slate-700 font-bold">{result.suggestedDate}</p>
+                <p className="text-[10px] text-slate-400">{result.reasoningDate}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Selector red + caption */}
+          <div className="bg-white rounded-2xl p-4 border border-slate-100 space-y-3">
+            <div className="flex gap-2">
+              {(['instagram','tiktok','google'] as RedId[]).map(r => (
+                <button key={r} onClick={() => setSelectedRed(r)}
+                  className={cn('flex-1 px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition',
+                    selectedRed === r ? 'bg-fuchsia-500 text-white shadow' : 'bg-slate-50 text-slate-500 hover:bg-slate-100')}>
+                  {r === 'instagram' ? '📸 Instagram' : r === 'tiktok' ? '🎬 TikTok' : '📍 Google'}
+                </button>
+              ))}
+            </div>
+            <div className="bg-slate-50 rounded-xl p-3">
+              <p className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">{captionFor(selectedRed)}</p>
+            </div>
+            <button onClick={() => { navigator.clipboard.writeText(captionFor(selectedRed)); toast.success('Copiado al portapapeles'); }}
+              className="text-[10px] font-black text-fuchsia-600 hover:text-fuchsia-700 uppercase tracking-widest flex items-center gap-1">
+              <Copy className="w-3 h-3"/> Copiar caption
+            </button>
+          </div>
+
+          {/* Acciones */}
+          {!approved ? (
+            <div className="flex gap-2">
+              <button onClick={reset}
+                className="flex-1 px-4 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-slate-50">
+                Descartar y subir otra
+              </button>
+              <button onClick={handleApproveAndSave}
+                className={cn('flex-1 px-4 py-3 rounded-xl text-white text-[11px] font-black uppercase tracking-widest bg-gradient-to-r shadow-md hover:scale-[1.02] transition flex items-center justify-center gap-2', BRAND.color)}>
+                <CheckCircle2 className="w-4 h-4"/> Agendar en calendario
+              </button>
+            </div>
+          ) : (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-center gap-3">
+              <CheckCircle2 className="w-5 h-5 text-emerald-500"/>
+              <p className="text-sm font-black text-emerald-700 flex-1">Post agendado para el {result.suggestedDate}</p>
+              <button onClick={reset} className="px-3 py-1.5 bg-white border border-emerald-200 text-emerald-600 rounded-lg text-[10px] font-black uppercase tracking-widest">
+                Subir otra
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
