@@ -410,7 +410,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
       </AnimatePresence>
 
       {/* ── PANEL DIAGNÓSTICO VOZ ── borrar cuando funcione correctamente ── */}
-      <div className="bg-white border border-slate-200 rounded-[2rem] p-4 space-y-3">
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Mic className="w-4 h-4 text-indigo-500"/>
@@ -485,7 +485,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
       <AnimatePresence>
         {diasSinCierre >= 1 && (
           <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
-            className="bg-amber-50 border border-amber-200 rounded-[2rem] px-6 py-4 flex items-center justify-between gap-4">
+            className="bg-amber-50 border border-amber-200 rounded-2xl px-6 py-4 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 bg-amber-100 rounded-xl flex items-center justify-center flex-shrink-0">
                 <Clock className="w-5 h-5 text-amber-600"/>
@@ -508,29 +508,27 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         )}
       </AnimatePresence>
 
-      {/* HEADER */}
-      <header className="flex justify-between items-center bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100">
+      {/* HEADER EDITORIAL */}
+      <header className="flex flex-col md:flex-row justify-between md:items-end gap-4 bg-white p-6 rounded-2xl shadow-sm border border-[color:var(--arume-gray-100)]">
         <div>
-          <h2 className="text-xl font-black text-slate-800">Caja y Arqueo (Sobres)</h2>
-          <div className="flex items-center gap-2 mt-1 flex-wrap">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Ventas</p>
+          <h2 className="font-serif text-2xl md:text-3xl font-semibold tracking-tight mt-1">Caja y arqueo</h2>
+          <div className="flex items-center gap-2 mt-3 flex-wrap">
             {estadoCierreHoy.restCerrado ? (
-              <span className="flex items-center gap-1.5 text-[10px] font-black text-emerald-700 bg-emerald-100 border border-emerald-200 px-3 py-1 rounded-full uppercase tracking-widest">
-                <CheckCircle2 className="w-3 h-3"/> Restaurante cerrado · {Num.fmt(estadoCierreHoy.ventaRest!)}
+              <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-ok)] bg-[color:var(--arume-ok)]/10 border border-[color:var(--arume-ok)]/20 px-3 py-1 rounded-full tabular-nums">
+                <CheckCircle2 className="w-3 h-3"/> Restaurante · {Num.fmt(estadoCierreHoy.ventaRest!)}
               </span>
             ) : (
-              <span className="flex items-center gap-1.5 text-[10px] font-black text-slate-400 bg-slate-100 border border-slate-200 px-3 py-1 rounded-full uppercase tracking-widest">
+              <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gray-500)] bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)] px-3 py-1 rounded-full">
                 <Clock className="w-3 h-3"/> Restaurante pendiente
               </span>
             )}
             {estadoCierreHoy.shopCerrado && (
-              <span className="flex items-center gap-1.5 text-[10px] font-black text-emerald-700 bg-emerald-100 border border-emerald-200 px-3 py-1 rounded-full uppercase tracking-widest">
+              <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-ok)] bg-[color:var(--arume-ok)]/10 border border-[color:var(--arume-ok)]/20 px-3 py-1 rounded-full tabular-nums">
                 <CheckCircle2 className="w-3 h-3"/> Tienda · {Num.fmt(estadoCierreHoy.ventaShop!)}
               </span>
             )}
           </div>
-          <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest mt-1 flex items-center gap-1">
-            <SplitSquareHorizontal className="w-3 h-3"/> Inteligencia Arume Pro
-          </p>
         </div>
         <div className="flex gap-2 bg-slate-100 p-1.5 rounded-2xl">
           <button onClick={() => handleMonthChange(-1)} className="p-2 hover:bg-white rounded-xl transition text-slate-600"><ChevronLeft className="w-5 h-5"/></button>
@@ -563,11 +561,11 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
 
       {/* KPI CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-slate-900 p-6 rounded-[2.5rem] text-white shadow-xl">
+        <div className="bg-slate-900 p-6 rounded-2xl text-white shadow-xl">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Facturación {nombreMes}</p>
           <p className="text-4xl font-black mt-2">{Num.fmt(kpis.total)}</p>
         </div>
-        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center gap-2">
+        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-center gap-2">
           {[
             { label: 'Tarjeta',  val: kpis.tarj, total: kpis.total, color: 'bg-indigo-500', Icon: CreditCard },
             { label: 'Efectivo', val: kpis.efec,  total: kpis.total, color: 'bg-emerald-500', Icon: Banknote  },
@@ -583,7 +581,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
             </div>
           ))}
         </div>
-        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col justify-center">
+        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col justify-center">
           <div className="flex justify-between text-[10px] font-bold text-slate-600 mb-1">
             <span className="flex items-center gap-1"><Truck className="w-3 h-3"/> Delivery</span>
             <span>{Num.fmt(kpis.apps)}</span>
@@ -719,7 +717,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
             {/* Notas */}
             <div className="relative">
               <textarea value={form.notas} onChange={e => setForm({ ...form, notas: e.target.value })}
-                className="w-full p-5 bg-slate-50 rounded-[2rem] text-xs min-h-[100px] outline-none border border-slate-100 focus:bg-white transition-all"
+                className="w-full p-5 bg-slate-50 rounded-2xl text-xs min-h-[100px] outline-none border border-slate-100 focus:bg-white transition-all"
                 placeholder="Notas del día (incidencias, eventos especiales...)"/>
               {form.notas && (
                 <button onClick={() => setForm({ ...form, notas: '' })} className="absolute top-5 right-5 text-slate-300 hover:text-rose-500 transition-colors">
@@ -730,7 +728,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
 
             {/* Botón cerrar caja */}
             <button onClick={handleSaveCierre} disabled={isSaving}
-              className={cn('w-full mt-2 py-6 text-white rounded-[2rem] font-black text-base shadow-2xl transition-all transform active:scale-95 disabled:opacity-50',
+              className={cn('w-full mt-2 py-6 text-white rounded-2xl font-black text-base shadow-2xl transition-all transform active:scale-95 disabled:opacity-50',
                 estadoCierreHoy.restCerrado
                   ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/20'
                   : 'bg-slate-900 hover:bg-indigo-700 shadow-slate-900/20')}>
@@ -746,7 +744,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
           <div className="lg:w-72 space-y-4">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Escanear Ticket con IA</label>
             <label className={cn(
-              'flex flex-col items-center justify-center w-full h-48 rounded-[2rem] border-2 border-dashed cursor-pointer transition-all',
+              'flex flex-col items-center justify-center w-full h-48 rounded-2xl border-2 border-dashed cursor-pointer transition-all',
               scanStatus === 'loading' ? 'border-indigo-300 bg-indigo-50'  :
               scanStatus === 'success' ? 'border-emerald-300 bg-emerald-50' :
               scanStatus === 'error'   ? 'border-rose-300 bg-rose-50'       :
@@ -771,7 +769,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
             )}
 
             {/* Resumen en vivo */}
-            <div className="bg-slate-900 p-5 rounded-[2rem] text-white space-y-2">
+            <div className="bg-slate-900 p-5 rounded-2xl text-white space-y-2">
               <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Resumen en Vivo</p>
               {[
                 { label: 'Efectivo',    val: Num.parse(form.efectivo), color: 'text-emerald-400' },

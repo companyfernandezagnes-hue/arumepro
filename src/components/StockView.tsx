@@ -236,59 +236,49 @@ Responde de forma profesional y directa. Máximo 100 palabras.`;
         <ValoracionStock data={data} unit={activeUnit} />
       ) : (<>
 
-      {/* ── HEADER DINÁMICO ──────────────────────────────────────────────── */}
-      <header className={cn(
-        'p-8 rounded-[3rem] shadow-xl text-white flex flex-col md:flex-row justify-between items-center gap-6 relative overflow-hidden transition-colors duration-500',
-        activeConfig.color
-      )}>
-        <div className="absolute top-0 right-0 p-8 opacity-10 scale-150 transform -translate-y-8 translate-x-8">
-          <ActiveIcon className="w-40 h-40" />
-        </div>
+      {/* ── HEADER EDITORIAL ──────────────────────────────────────────────── */}
+      <header className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-[color:var(--arume-gray-100)] flex flex-col md:flex-row justify-between gap-6">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Tienda · Inventario</p>
+          <h2 className="font-serif text-2xl md:text-3xl font-semibold tracking-tight mt-1">{activeConfig.name}</h2>
+          <p className="text-sm text-[color:var(--arume-gray-500)] mt-1">Control aislado por unidad de negocio</p>
 
-        <div className="z-10 text-center md:text-left">
-          <h2 className="text-3xl font-black tracking-tighter">{activeConfig.name}</h2>
-          <p className="text-xs font-bold uppercase tracking-[0.3em] flex items-center justify-center md:justify-start gap-2 mt-2 opacity-80">
-            <SplitSquareHorizontal className="w-4 h-4" />
-            Control de Inventario Aislado
-          </p>
-
-          {/* 🆕 KPIs inline en el header */}
-          <div className="flex items-center gap-3 mt-3 flex-wrap justify-center md:justify-start">
-            <span className="text-[10px] font-black bg-white/20 px-3 py-1 rounded-full">
+          <div className="flex items-center gap-2 mt-4 flex-wrap">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)] px-3 py-1.5 rounded-full tabular-nums">
               {kpis.refs} refs · {kpis.uds} uds
             </span>
-            <span className="text-[10px] font-black bg-white/20 px-3 py-1 rounded-full">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)] px-3 py-1.5 rounded-full tabular-nums">
               Coste stock: {Num.fmt(kpis.coste)}
             </span>
             {activeUnit === 'SHOP' && (
-              <span className="text-[10px] font-black bg-white/20 px-3 py-1 rounded-full">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)] px-3 py-1.5 rounded-full tabular-nums">
                 PVP estimado: {Num.fmt(kpis.pvp)}
               </span>
             )}
             {kpis.criticos > 0 && (
-              <span className="text-[10px] font-black bg-rose-500 px-3 py-1 rounded-full animate-pulse">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-accent)] text-white px-3 py-1.5 rounded-full">
                 ⚠ {kpis.criticos} bajo mínimo
               </span>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-3 z-10 flex-wrap justify-center">
+        <div className="flex items-center gap-2 flex-wrap justify-start md:justify-end md:self-end">
           <button onClick={handlePredictStock} disabled={isPredicting}
-            className="px-6 py-3 bg-white/20 hover:bg-white/30 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 backdrop-blur-sm disabled:opacity-50">
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-gold)] text-[color:var(--arume-ink)] hover:brightness-95 transition disabled:opacity-50 active:scale-[0.98]">
             {isPredicting
-              ? <RefreshCw className="w-4 h-4 animate-spin" />
-              : <Zap className="w-4 h-4" />}
+              ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              : <Zap className="w-3.5 h-3.5" />}
             Estrategia IA
           </button>
           <button onClick={() => setShowCriticalOnly(!showCriticalOnly)}
             className={cn(
-              'px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2',
+              'inline-flex items-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] transition active:scale-[0.98]',
               showCriticalOnly
-                ? 'bg-white text-rose-600 shadow-xl'
-                : 'bg-slate-900/20 hover:bg-slate-900/40 backdrop-blur-sm'
+                ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)]'
+                : 'bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)] text-[color:var(--arume-gray-600)] hover:bg-[color:var(--arume-gray-100)]'
             )}>
-            <AlertCircle className="w-4 h-4" /> Stock Bajo
+            <AlertCircle className="w-3.5 h-3.5" /> Stock bajo
           </button>
         </div>
       </header>
@@ -326,7 +316,7 @@ Responde de forma profesional y directa. Máximo 100 palabras.`;
           {/* Respuesta IA */}
           {prediction && (
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-              className={cn('border p-6 rounded-[2rem] relative', activeConfig.bg)}>
+              className={cn('border p-6 rounded-2xl relative', activeConfig.bg)}>
               <button onClick={() => setPrediction(null)}
                 className="absolute top-3 right-3 text-slate-300 hover:text-slate-500 text-lg leading-none">✕</button>
               <h4 className={cn('font-black text-xs uppercase mb-2 flex items-center gap-2', activeConfig.text)}>
@@ -355,7 +345,7 @@ Responde de forma profesional y directa. Máximo 100 palabras.`;
                     exit={{ opacity: 0, scale: 0.9 }}
                     onClick={() => { setSelectedIng(ing); setAdjustValue(0); }}
                     className={cn(
-                      'p-6 rounded-[2.5rem] border-2 transition-all cursor-pointer group relative overflow-hidden',
+                      'p-6 rounded-2xl border-2 transition-all cursor-pointer group relative overflow-hidden',
                       critico
                         ? 'bg-white border-rose-200 hover:border-rose-400'
                         : 'bg-white border-slate-50 hover:border-slate-200 shadow-sm hover:shadow-xl'

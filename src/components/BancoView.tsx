@@ -736,30 +736,30 @@ REGLAS: "importe": positivo=ingreso, negativo=gasto. "fecha": YYYY-MM-DD. Ignora
   return (
     <div className="animate-fade-in space-y-6 pb-24 max-w-[1600px] mx-auto">
 
-      {/* ── HEADER ────────────────────────────────────────────────────────── */}
-      <header className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 relative overflow-hidden">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center relative z-10 gap-4">
+      {/* ── HEADER EDITORIAL ──────────────────────────────────────────────── */}
+      <header className="bg-white p-6 rounded-2xl shadow-sm border border-[color:var(--arume-gray-100)] relative overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-end relative z-10 gap-6">
           <div>
-            <h2 className="text-2xl font-black text-slate-800 tracking-tighter flex items-center gap-2">
-              <Landmark className="w-6 h-6 text-indigo-600"/> Banco Inteligente
-            </h2>
-            <p className="text-[10px] font-black text-slate-400 uppercase mt-1">Banca March · Conciliación & Análisis</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Dinero</p>
+            <h2 className="font-serif text-2xl md:text-3xl font-semibold tracking-tight mt-1">Banco</h2>
+            <p className="text-sm text-[color:var(--arume-gray-500)] mt-1">Banca March · conciliación y análisis</p>
           </div>
-          <div className="flex items-center gap-6 text-right flex-wrap justify-end">
+          <div className="flex items-end gap-8 flex-wrap justify-end">
             <div className="hidden md:block">
-              <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Conciliado</p>
-              <div className="w-32 h-2 bg-slate-100 rounded-full overflow-hidden">
-                <div className="h-full bg-emerald-500 transition-all duration-1000" style={{ width:`${stats.percent}%` }}/>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gray-500)] mb-1.5">Conciliado</p>
+              <div className="w-32 h-1.5 bg-[color:var(--arume-gray-100)] rounded-full overflow-hidden">
+                <div className="h-full bg-[color:var(--arume-ok)] transition-all duration-1000" style={{ width:`${stats.percent}%` }}/>
               </div>
-              <p className="text-[9px] text-slate-400 mt-1">{stats.matched}/{stats.total} mov. {new Date().getFullYear()}</p>
+              <p className="text-[11px] text-[color:var(--arume-gray-400)] mt-1 tabular-nums">{stats.matched}/{stats.total} mov. {new Date().getFullYear()}</p>
             </div>
             <div>
-              <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Saldo Confirmado</p>
-              <span className="text-3xl font-black text-slate-800">{Num.fmt(stats.saldo)}</span>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gray-500)]">Saldo confirmado</p>
+              <p className="font-serif text-3xl font-semibold tabular-nums mt-1">{Num.fmt(stats.saldo)}</p>
             </div>
             <div>
-              <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Saldo Real (inc. pdte.)</p>
-              <span className={cn("text-xl font-black", stats.saldoReal >= stats.saldo ? "text-emerald-600" : "text-rose-500")}>{Num.fmt(stats.saldoReal)}</span>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gray-500)]">Saldo real</p>
+              <p className={cn("font-serif text-xl font-semibold tabular-nums mt-1",
+                stats.saldoReal >= stats.saldo ? "text-[color:var(--arume-ok)]" : "text-[color:var(--arume-accent)]")}>{Num.fmt(stats.saldoReal)}</p>
             </div>
           </div>
         </div>
@@ -985,7 +985,7 @@ REGLAS: "importe": positivo=ingreso, negativo=gasto. "fecha": YYYY-MM-DD. Ignora
       {activeTab === 'insights' && (
         <motion.div initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
               <h3 className="text-sm font-black text-slate-800 mb-1 flex items-center gap-2">
                 <TrendingUp className="w-4 h-4 text-emerald-500"/> Cajas TPV Pendientes
               </h3>
@@ -1002,7 +1002,7 @@ REGLAS: "importe": positivo=ingreso, negativo=gasto. "fecha": YYYY-MM-DD. Ignora
               ) : <p className="text-xs text-slate-400 text-center py-6">No hay TPVs pendientes. ✅</p>}
             </div>
 
-            <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col justify-center items-center text-center">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-center items-center text-center">
               <h3 className="text-sm font-black text-slate-800 mb-1 flex items-center gap-2 justify-center">
                 <TrendingDown className="w-4 h-4 text-rose-500"/> Previsión a 7 Días
               </h3>
@@ -1016,7 +1016,7 @@ REGLAS: "importe": positivo=ingreso, negativo=gasto. "fecha": YYYY-MM-DD. Ignora
 
           {/* 🆕 Movimientos Previstos */}
           {movimientosPrevistos.length > 0 && (
-            <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
               <h3 className="text-sm font-black text-slate-800 mb-1 flex items-center gap-2">
                 <Clock className="w-4 h-4 text-violet-500"/> Movimientos Previstos del Mes
               </h3>
@@ -1290,7 +1290,7 @@ REGLAS: "importe": positivo=ingreso, negativo=gasto. "fecha": YYYY-MM-DD. Ignora
                                 <EnergyBeam sourceId={`bank-preview-${selectedItem.id}`} targetId={matchIdStr} isActive={isHov}/>
                                 <div id={matchIdStr}
                                   onMouseEnter={() => setHoveredMatch(m.id)} onMouseLeave={() => setHoveredMatch(null)}
-                                  className={cn('relative z-20 flex justify-between items-center p-4 rounded-[2rem] border-2 hover:shadow-md transition-all bg-white',
+                                  className={cn('relative z-20 flex justify-between items-center p-4 rounded-2xl border-2 hover:shadow-md transition-all bg-white',
                                     isHov ? 'border-emerald-400 shadow-emerald-200/50 shadow-lg scale-[1.02]' : 'border-slate-200 hover:border-indigo-200')}>
                                   <div>
                                     <span className={cn('text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded',

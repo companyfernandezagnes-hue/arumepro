@@ -440,24 +440,22 @@ Todos los importes SIN símbolo €, con punto decimal. Si algún campo no apare
   return (
     <div className="animate-fade-in space-y-6 pb-24">
 
-      {/* ── Header ── */}
-      <header className="bg-gradient-to-br from-fuchsia-600 to-purple-700 p-8 rounded-[3rem] shadow-xl text-white relative overflow-hidden">
-        <div className="absolute top-0 right-0 opacity-10 scale-150 translate-x-16 -translate-y-8">
-          <Users className="w-48 h-48" />
-        </div>
+      {/* ── HEADER EDITORIAL NIGHT ── */}
+      <header className="relative overflow-hidden bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] p-6 md:p-8 rounded-2xl shadow-[0_12px_40px_rgba(11,11,12,0.18)]">
+        <div className="absolute top-0 left-0 w-full h-[2px] bg-[color:var(--arume-gold)]/80"/>
+        <div className="absolute -right-20 -top-20 w-64 h-64 rounded-full bg-[color:var(--arume-gold)]/5 pointer-events-none"/>
         <div className="relative z-10">
-          <h2 className="text-3xl font-black tracking-tight">Nóminas y Seguridad Social</h2>
-          <p className="text-xs font-bold uppercase tracking-[0.3em] mt-2 opacity-80">
-            Gestión de Personal · Celoso de Palma SL
-          </p>
-          <div className="flex items-center gap-3 mt-4 flex-wrap">
-            <span className="text-[10px] font-black bg-white/20 px-3 py-1 rounded-full">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-[color:var(--arume-gold)]">Personal</p>
+          <h2 className="font-serif text-3xl md:text-4xl font-semibold tracking-tight mt-2">Nóminas y Seguridad Social</h2>
+          <p className="text-sm text-white/60 mt-1">Celoso de Palma SL</p>
+          <div className="flex items-center gap-2 mt-5 flex-wrap">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.15em] bg-white/5 border border-white/10 px-3 py-1.5 rounded-full">
               {kpis.activos} empleados activos
             </span>
-            <span className="text-[10px] font-black bg-white/20 px-3 py-1 rounded-full">
-              Coste acumulado {year}: {Num.fmt(kpis.totalCoste)}
+            <span className="text-[11px] font-semibold uppercase tracking-[0.15em] bg-white/5 border border-white/10 px-3 py-1.5 rounded-full tabular-nums">
+              Coste {year}: {Num.fmt(kpis.totalCoste)}
             </span>
-            <span className="text-[10px] font-black bg-white/20 px-3 py-1 rounded-full">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.15em] bg-white/5 border border-white/10 px-3 py-1.5 rounded-full tabular-nums">
               Media mensual: {Num.fmt(kpis.mediaCoste)}
             </span>
           </div>
