@@ -294,23 +294,23 @@ export const CierreContableView: React.FC<CierreContableViewProps> = ({ data, on
   const now = new Date();
   return (
     <div className="animate-fade-in space-y-3 pb-20 max-w-[1600px] mx-auto">
-      <header className="bg-white px-4 py-3 rounded-xl shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-indigo-500 to-purple-600"/>
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-indigo-600 text-white rounded-lg shadow-sm"><ShieldCheck className="w-5 h-5"/></div>
-          <div>
-            <h2 className="text-sm font-black text-slate-800 tracking-tight">Cierre Contable P&L</h2>
-            <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-[0.15em]">Auditoría & Rentabilidad</p>
-          </div>
+      <header className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-[color:var(--arume-gray-100)] flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Cierres · Contable</p>
+          <h2 className="font-serif text-2xl md:text-3xl font-semibold tracking-tight mt-1 flex items-center gap-2">
+            <ShieldCheck className="w-6 h-6 text-[color:var(--arume-gray-400)]"/> Cierre contable P&L
+          </h2>
+          <p className="text-sm text-[color:var(--arume-gray-500)] mt-1">Auditoría y rentabilidad</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button onClick={handleExportYear} disabled={isExporting} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg font-black text-[10px] uppercase tracking-widest hover:bg-emerald-100 transition border border-emerald-200 disabled:opacity-50">
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={handleExportYear} disabled={isExporting}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)] text-[color:var(--arume-gray-600)] hover:bg-[color:var(--arume-gray-100)] transition disabled:opacity-50">
             {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <Download className="w-3.5 h-3.5"/>} P&G Excel
           </button>
-          <div className="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-200">
-            <button onClick={()=>setYear(y=>y-1)} className="p-1.5 bg-white hover:bg-slate-50 rounded-md transition shadow-sm text-slate-600"><ChevronLeft className="w-3.5 h-3.5"/></button>
-            <span className="px-3 font-black text-sm text-slate-800 tabular-nums">{year}</span>
-            <button onClick={()=>setYear(y=>y+1)} className="p-1.5 bg-white hover:bg-slate-50 rounded-md transition shadow-sm text-slate-600"><ChevronRight className="w-3.5 h-3.5"/></button>
+          <div className="flex items-center bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)] rounded-full p-0.5">
+            <button onClick={()=>setYear(y=>y-1)} className="p-1.5 hover:bg-white rounded-full transition text-[color:var(--arume-gray-500)]"><ChevronLeft className="w-3.5 h-3.5"/></button>
+            <span className="px-3 font-semibold text-sm tabular-nums">{year}</span>
+            <button onClick={()=>setYear(y=>y+1)} className="p-1.5 hover:bg-white rounded-full transition text-[color:var(--arume-gray-500)]"><ChevronRight className="w-3.5 h-3.5"/></button>
           </div>
         </div>
       </header>
@@ -329,75 +329,78 @@ export const CierreContableView: React.FC<CierreContableViewProps> = ({ data, on
       )}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
         <div className="lg:col-span-5 flex flex-col gap-3">
-          <div className="bg-slate-900 p-5 rounded-xl text-white shadow-xl relative overflow-hidden flex-1">
-            <div className="absolute -right-3 -bottom-3 text-white/5"><Target className="w-32 h-32"/></div>
-            <div className="relative z-10">
-              <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest flex items-center gap-1 mb-1.5"><Scale className="w-3.5 h-3.5"/> Break-Even</p>
-              <h3 className="text-3xl font-black tracking-tighter tabular-nums mb-0.5">{Num.fmt(puntoEquilibrio)}</h3>
-              <p className="text-[10px] font-bold text-slate-400">Facturación YTD mínima para cubrir fijos <span className="text-white">({Num.fmt(kpis.fijos)})</span></p>
-              <div className="mt-4 pt-3 border-t border-white/10 flex justify-between items-end">
-                <div>
-                  <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-0.5">Margen Contribución</p>
-                  <p className="text-xl font-black tabular-nums">{Num.round2(margenContribucionPct*100)}%</p>
-                </div>
-                <div>
-                  {kpis.ventas >= puntoEquilibrio && puntoEquilibrio > 0
-                    ? <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-1 rounded text-[9px] font-black uppercase">¡En Beneficios!</span>
-                    : <span className="bg-rose-500/20 text-rose-400 border border-rose-500/30 px-2 py-1 rounded text-[9px] font-black uppercase">En Pérdidas</span>}
-                </div>
+          {/* Break-even card — night elegante con dorado */}
+          <div className="relative overflow-hidden bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] p-6 rounded-2xl flex-1">
+            <div className="absolute top-0 left-0 w-[2px] h-full bg-[color:var(--arume-gold)]"/>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gold)] flex items-center gap-1.5"><Scale className="w-3.5 h-3.5"/> Break-even</p>
+            <p className="font-serif text-3xl md:text-4xl font-semibold tabular-nums mt-2">{Num.fmt(puntoEquilibrio)}</p>
+            <p className="text-sm text-white/50 mt-1">Facturación YTD mínima para cubrir fijos <span className="text-white/80 tabular-nums">({Num.fmt(kpis.fijos)})</span></p>
+            <div className="mt-5 pt-4 border-t border-white/10 flex justify-between items-end">
+              <div>
+                <p className="text-[10px] font-semibold text-white/50 uppercase tracking-[0.2em] mb-1">Margen contribución</p>
+                <p className="font-serif text-2xl font-semibold tabular-nums">{Num.round2(margenContribucionPct*100)}%</p>
+              </div>
+              <div>
+                {kpis.ventas >= puntoEquilibrio && puntoEquilibrio > 0
+                  ? <span className="bg-emerald-400/20 text-emerald-300 border border-emerald-400/30 px-3 py-1 rounded-full text-[10px] font-semibold uppercase tracking-[0.15em]">En beneficios</span>
+                  : <span className="bg-rose-400/20 text-rose-300 border border-rose-400/30 px-3 py-1 rounded-full text-[10px] font-semibold uppercase tracking-[0.15em]">En pérdidas</span>}
               </div>
             </div>
           </div>
+          {/* KPIs secundarios */}
           <div className="grid grid-cols-2 gap-3">
-            <div className={cn('p-3 rounded-xl border shadow-sm', foodCostPct>35?'bg-rose-50 border-rose-100':'bg-white border-slate-200')}>
-              <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-1">Coste M.P.</p>
-              <p className={cn('text-2xl font-black tabular-nums', foodCostPct>35?'text-rose-600':'text-slate-800')}>{Num.round2(foodCostPct)}%</p>
-              <div className="w-full bg-slate-100 h-1 rounded-full mt-2 overflow-hidden">
-                <div className={cn('h-full', foodCostPct>35?'bg-rose-500':'bg-emerald-400')} style={{width:`${Math.min(foodCostPct,100)}%`}}/>
+            <div className="p-5 rounded-2xl border border-[color:var(--arume-gray-100)] bg-white shadow-sm">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Coste M.P.</p>
+              <p className={cn('font-serif text-2xl font-semibold tabular-nums mt-2',
+                foodCostPct > 35 ? 'text-[color:var(--arume-danger)]' : 'text-[color:var(--arume-ink)]')}>{Num.round2(foodCostPct)}%</p>
+              <div className="w-full bg-[color:var(--arume-gray-100)] h-1 rounded-full mt-3 overflow-hidden">
+                <div className={cn('h-full', foodCostPct>35 ? 'bg-[color:var(--arume-danger)]' : 'bg-[color:var(--arume-ok)]')} style={{width:`${Math.min(foodCostPct,100)}%`}}/>
               </div>
-              <p className="text-[8px] font-bold text-slate-400 uppercase mt-1.5 text-right">Ideal &lt;35%</p>
+              <p className="text-[10px] text-[color:var(--arume-gray-400)] mt-2 text-right">Ideal &lt;35%</p>
             </div>
-            <div className={cn('p-3 rounded-xl border shadow-sm', kpis.resultado>=0?'bg-indigo-50 border-indigo-100':'bg-rose-50 border-rose-100')}>
-              <p className={cn('text-[9px] font-black uppercase tracking-widest flex items-center gap-0.5 mb-1', kpis.resultado>=0?'text-indigo-500':'text-rose-500')}><Wallet className="w-3 h-3"/> Neto YTD</p>
-              <p className={cn('text-xl font-black tabular-nums tracking-tight', kpis.resultado>=0?'text-indigo-700':'text-rose-700')}>{Num.fmt(kpis.resultado)}</p>
-              <p className={cn('text-[9px] font-bold uppercase mt-1.5', kpis.resultado>=0?'text-indigo-400':'text-rose-400')}>Margen: {Num.round2(margenNeto)}%</p>
+            <div className="p-5 rounded-2xl border border-[color:var(--arume-gray-100)] bg-white shadow-sm">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)] flex items-center gap-1"><Wallet className="w-3 h-3"/> Neto YTD</p>
+              <p className={cn('font-serif text-2xl font-semibold tabular-nums mt-2',
+                kpis.resultado >= 0 ? 'text-[color:var(--arume-ok)]' : 'text-[color:var(--arume-danger)]')}>{Num.fmt(kpis.resultado)}</p>
+              <p className="text-[10px] text-[color:var(--arume-gray-400)] mt-3">Margen {Num.round2(margenNeto)}%</p>
             </div>
           </div>
         </div>
-        <div className="lg:col-span-7 bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col">
-          <div className="flex justify-between items-center mb-3">
-            <div>
-              <h3 className="text-xs font-black text-slate-800 flex items-center gap-1.5"><Activity className="w-4 h-4 text-indigo-500"/> P&L {year}</h3>
-              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Ingresos vs Gastos vs Neto</p>
-            </div>
+        {/* Gráfico P&L */}
+        <div className="lg:col-span-7 bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-[color:var(--arume-gray-100)] flex flex-col">
+          <div className="mb-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Evolución</p>
+            <h3 className="font-serif text-xl font-semibold mt-1 flex items-center gap-2"><Activity className="w-5 h-5 text-[color:var(--arume-gray-400)]"/> P&L {year}</h3>
+            <p className="text-sm text-[color:var(--arume-gray-500)]">Ingresos · gastos · resultado neto</p>
           </div>
           <div className="flex-1 min-h-[220px]">
             <ResponsiveContainer width="100%" height="100%" minHeight={220}>
               <ComposedChart data={chartData} margin={{top:6,right:0,left:-24,bottom:0}}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
-                <XAxis dataKey="name" tick={{fontSize:9,fill:'#94a3b8',fontWeight:'bold'}} axisLine={false} tickLine={false}/>
-                <YAxis tick={{fontSize:9,fill:'#94a3b8',fontWeight:'bold'}} axisLine={false} tickLine={false} tickFormatter={v=>`${v/1000}k`}/>
-                <RechartsTooltip contentStyle={{borderRadius:8,border:'none',boxShadow:'0 4px 12px rgba(0,0,0,0.1)'}} formatter={(v:number,n:string)=>[Num.fmt(v),n]} labelStyle={{fontWeight:'black',color:'#1e293b',marginBottom:'2px'}}/>
-                <Bar dataKey="Gastos" fill="#fb7185" radius={[3,3,0,0]} maxBarSize={22}/>
-                <Bar dataKey="Ventas" fill="#34d399" radius={[3,3,0,0]} maxBarSize={22}/>
-                <Line type="monotone" dataKey="Neto" stroke="#4f46e5" strokeWidth={2.5} dot={{r:3,strokeWidth:2,fill:'#fff'}}/>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ECECE9"/>
+                <XAxis dataKey="name" tick={{fontSize:11,fill:'#8C8C84',fontWeight:600}} axisLine={false} tickLine={false}/>
+                <YAxis tick={{fontSize:11,fill:'#8C8C84',fontWeight:600}} axisLine={false} tickLine={false} tickFormatter={v=>`${v/1000}k`}/>
+                <RechartsTooltip contentStyle={{borderRadius:12,border:'1px solid #ECECE9',boxShadow:'0 12px 40px rgba(11,11,12,0.12)',background:'#FAFAF7'}} formatter={(v:number,n:string)=>[Num.fmt(v),n]} labelStyle={{fontWeight:600,color:'#0B0B0C'}}/>
+                <Bar dataKey="Gastos" fill="#8B1E2B" radius={[3,3,0,0]} maxBarSize={22} opacity={0.85}/>
+                <Bar dataKey="Ventas" fill="#15803D" radius={[3,3,0,0]} maxBarSize={22} opacity={0.85}/>
+                <Line type="monotone" dataKey="Neto" stroke="#0B0B0C" strokeWidth={2.5} dot={{r:3,strokeWidth:2,fill:'#C9A86A'}}/>
               </ComposedChart>
             </ResponsiveContainer>
           </div>
         </div>
       </div>
-      <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-4 flex gap-3 items-start">
-        <div className="bg-white p-2 rounded-lg shadow-sm shrink-0"><Lightbulb className="w-5 h-5 text-amber-500"/></div>
+      {/* Diagnóstico */}
+      <div className="bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)] rounded-2xl p-5 flex gap-3 items-start">
+        <div className="bg-white p-2 rounded-full shadow-sm shrink-0"><Lightbulb className="w-5 h-5 text-[color:var(--arume-gold)]"/></div>
         <div>
-          <h4 className="text-xs font-black text-indigo-900 mb-0.5">Diagnóstico Financiero</h4>
-          <p className="text-[10px] font-bold text-indigo-700/80 leading-relaxed">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Diagnóstico financiero</p>
+          <p className="text-sm text-[color:var(--arume-ink)] leading-relaxed mt-1">
             {kpis.ventas === 0
               ? 'Aún no hay datos de ventas registrados este año.'
               : kpis.resultado < 0
-                ? `Estás por debajo del break-even. Faltan ${Num.fmt(puntoEquilibrio-kpis.ventas)} en ventas para entrar en beneficios.`
+                ? <>Estás por debajo del break-even. Faltan <b className="tabular-nums">{Num.fmt(puntoEquilibrio-kpis.ventas)}</b> en ventas para entrar en beneficios.</>
                 : foodCostPct > 35
-                  ? `¡En beneficios! Pero el coste de M.P. (${Num.round2(foodCostPct)}%) es alto. Revisa los Platos Perro.`
-                  : '¡Excelente salud financiera! Coste de M.P. óptimo y superando el break-even.'}
+                  ? <>En beneficios, pero el coste de M.P. (<b>{Num.round2(foodCostPct)}%</b>) es alto. Revisa los platos perro.</>
+                  : 'Excelente salud financiera. Coste de M.P. óptimo y superando el break-even.'}
           </p>
         </div>
       </div>
