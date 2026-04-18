@@ -4,7 +4,8 @@ import {
   TrendingDown, TrendingUp, Building2, Hotel, ShoppingBag, Users, SplitSquareHorizontal,
   ChevronLeft, ChevronRight, CheckCircle2, Mail, Loader2,
   Sparkles, Coffee, ChefHat, AlertTriangle, Zap,
-  CreditCard, Package, Clock, ExternalLink, CalendarCheck
+  CreditCard, Package, Clock, ExternalLink, CalendarCheck,
+  Landmark, Receipt, Bell, Plus, Upload,
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Num, ArumeEngine } from '../services/engine';
@@ -361,6 +362,44 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
   // ── Helpers render ────────────────────────────────────────────────────────
   const lowStock           = ingredientes.filter((i:any) => Num.parse(i?.stock??i?.stockActual??0) <= Num.parse(i?.min??i?.stockMinimo??0));
   const facturasPendientes = facturas.filter((f:any) => !f?.paid && f?.status!=='draft' && f?.tipo!=='caja' && !String(f?.num||'').startsWith('Z'));
+
+  // ── Saldo banco en vivo ───────────────────────────────────────────────────
+  const saldoBanco = useMemo(() => {
+    const saldoInicial = Num.parse((safeData.config as any)?.saldoInicial || 0);
+    const movs = Array.isArray(safeData.banco) ? safeData.banco : [];
+    return saldoInicial + movs.reduce((s, m: any) => s + Num.parse(m.amount || 0), 0);
+  }, [safeData.banco, safeData.config]);
+
+  // ── Ticket medio del periodo ──────────────────────────────────────────────
+  const ticketMedio = useMemo(() => {
+    const periodCierres = cierres.filter((c: any) => {
+      const d = safeParseDate(c.date);
+      if (d.getFullYear() !== selectedYear) return false;
+      if (viewMode === 'month')   return d.getMonth() === selectedMonth;
+      if (viewMode === 'quarter') return Math.floor(d.getMonth()/3)+1 === selectedQuarter;
+      return true;
+    });
+    const totalVenta = periodCierres.reduce((s, c: any) => s + Num.parse(c.totalVenta || c.totalVentas || 0), 0);
+    const totalTickets = periodCierres.reduce((s, c: any) => s + Num.parse(c.numTickets || c.tickets || 0), 0);
+    if (totalTickets > 0) return Num.round2(totalVenta / totalTickets);
+    // Si no hay nº de tickets, fallback: ventas / días con cierre
+    return periodCierres.length > 0 ? Num.round2(totalVenta / periodCierres.length) : 0;
+  }, [cierres, viewMode, selectedMonth, selectedQuarter, selectedYear]);
+
+  // ── Facturas que vencen hoy o ya vencidas ────────────────────────────────
+  const hoyISO = new Date().toISOString().slice(0, 10);
+  const facturasHoy = facturas.filter((f: any) => {
+    if (f.paid) return false;
+    if (f.tipo === 'caja') return false;
+    const due = f.dueDate || f.date;
+    return due && due <= hoyISO;
+  });
+  const importeHoy = facturasHoy.reduce((s, f: any) => s + Num.parse(f.total || 0), 0);
+
+  // ── Saludo según hora del día ────────────────────────────────────────────
+  const horaActual = new Date().getHours();
+  const saludo = horaActual < 6 ? 'Buenas noches' : horaActual < 13 ? 'Buenos días' : horaActual < 20 ? 'Buenas tardes' : 'Buenas noches';
+  const fechaHoy = new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
   // 🚨 Alerta privada: albaranes con IVA > 300€ sin socio asignado.
   // Síntoma de gasto personal colado por el CIF de la empresa sin trazabilidad
   // → peligro para el librito familiar. Agnès quiere verlo en el dashboard.
@@ -387,79 +426,191 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
   return (
     <div className="space-y-6 animate-fade-in pb-24 max-w-[1600px] mx-auto px-2 sm:px-0">
 
-      {/* HEADER */}
-      <div className="bg-slate-900 p-6 md:p-8 rounded-[2.5rem] flex flex-col md:flex-row items-center justify-between shadow-xl text-white overflow-hidden relative gap-6">
-        <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-emerald-400 via-indigo-500 to-rose-500"/>
-        <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none"><SplitSquareHorizontal className="w-48 h-48"/></div>
-        <div className="relative z-10 flex-1 text-center md:text-left">
-          <h2 className="text-2xl md:text-3xl font-black tracking-tight flex items-center justify-center md:justify-start gap-3">
-            <LayoutDashboard className="w-8 h-8 text-indigo-400"/> Consolidado del Grupo
-          </h2>
-          <p className="text-[10px] sm:text-xs text-indigo-300 font-bold uppercase tracking-[0.2em] mt-2">Métricas de Rentabilidad Multilocal</p>
+      {/* ═════════════ HERO OSCURO — estilo editorial Arume ═════════════ */}
+      <div className="relative overflow-hidden rounded-3xl bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] p-6 md:p-10 shadow-[0_12px_40px_rgba(11,11,12,0.2)]">
+        {/* acento dorado fino arriba */}
+        <div className="absolute top-0 left-0 w-full h-[2px] bg-[color:var(--arume-gold)]/80"/>
+        {/* patrón sutil decorativo */}
+        <div className="absolute -right-20 -top-20 w-72 h-72 rounded-full bg-[color:var(--arume-gold)]/5 pointer-events-none"/>
+
+        <div className="relative flex flex-col md:flex-row md:items-end md:justify-between gap-6">
+          {/* Saludo + fecha */}
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-[color:var(--arume-gold)]">Arume Pro</p>
+            <h1 className="mt-2 font-serif text-3xl md:text-5xl font-semibold tracking-tight">{saludo}</h1>
+            <p className="mt-2 text-sm text-white/60 capitalize">{fechaHoy}</p>
+          </div>
+
+          {/* Selector de periodo, limpio */}
+          <div className="flex flex-col gap-2 md:items-end">
+            <div className="inline-flex items-center gap-1 bg-white/5 border border-white/10 rounded-full p-1 w-fit">
+              {(['month','quarter','year'] as const).map(m => (
+                <button key={m} onClick={()=>setViewMode(m)}
+                  className={cn('px-4 py-1.5 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] transition',
+                    viewMode===m ? 'bg-[color:var(--arume-gold)] text-[color:var(--arume-ink)]' : 'text-white/60 hover:text-white')}>
+                  {m==='month'?'Mes':m==='quarter'?'Trimestre':'Año'}
+                </button>
+              ))}
+            </div>
+            <div className="inline-flex items-center gap-3">
+              <button onClick={handlePrev} className="p-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 transition"><ChevronLeft className="w-4 h-4"/></button>
+              <span className="font-serif text-lg font-semibold tracking-tight capitalize min-w-[140px] text-center">{periodLabel}</span>
+              <button onClick={handleNext} className="p-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 transition"><ChevronRight className="w-4 h-4"/></button>
+            </div>
+          </div>
         </div>
-        <div className="relative z-10 flex flex-col items-center gap-3 bg-slate-800/80 p-3 rounded-[2rem] border border-slate-700/50 w-full md:w-auto shadow-inner backdrop-blur-md">
-          <div className="flex gap-1 bg-slate-900 p-1.5 rounded-[1.5rem] w-full justify-center shadow-inner border border-slate-800">
-            {(['month','quarter','year'] as const).map(m => (
-              <button key={m} onClick={()=>setViewMode(m)}
-                className={cn('px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all',
-                  viewMode===m ? 'bg-indigo-500 text-white shadow-md' : 'text-slate-400 hover:text-white hover:bg-slate-800')}>
-                {m==='month'?'Mes':m==='quarter'?'Trim.':'Año'}
+
+        {/* KPIs dentro del hero — 4 métricas clave con separadores verticales */}
+        <div className="relative mt-8 grid grid-cols-2 md:grid-cols-4 gap-px bg-white/10 rounded-2xl overflow-hidden">
+          <button onClick={() => onNavigate?.('diario')} className="bg-[color:var(--arume-night)] p-5 text-left hover:bg-white/5 transition group">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/50">Ingresos</p>
+            <p className="mt-2 font-serif text-2xl md:text-3xl font-semibold tabular-nums">{Num.fmt(stats.ingresos.total||0)}</p>
+            {renderTrend(stats.ingresos.total, previousPeriodStats.ingresos.total)}
+          </button>
+          <button onClick={() => onNavigate?.('banco')} className="bg-[color:var(--arume-night)] p-5 text-left hover:bg-white/5 transition group">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/50">Saldo banco</p>
+            <p className={cn('mt-2 font-serif text-2xl md:text-3xl font-semibold tabular-nums', saldoBanco < 0 && 'text-rose-300')}>{Num.fmt(saldoBanco)}</p>
+            <p className="mt-1 text-[10px] text-white/40">En vivo</p>
+          </button>
+          <button onClick={() => onNavigate?.('tesoreria')} className="bg-[color:var(--arume-night)] p-5 text-left hover:bg-white/5 transition group">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/50">Margen neto</p>
+            <p className={cn('mt-2 font-serif text-2xl md:text-3xl font-semibold tabular-nums', stats.neto >= 0 ? 'text-emerald-300' : 'text-rose-300')}>{Num.fmt(stats.neto||0)}</p>
+            {renderTrend(stats.neto, previousPeriodStats.neto)}
+          </button>
+          <button onClick={() => onNavigate?.('informes')} className="bg-[color:var(--arume-night)] p-5 text-left hover:bg-white/5 transition group">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/50">Prime Cost <span className="text-white/30">· ideal 60%</span></p>
+            <p className={cn('mt-2 font-serif text-2xl md:text-3xl font-semibold tabular-nums',
+              stats.ratios.primeCost <= 60 ? 'text-emerald-300' : stats.ratios.primeCost <= 70 ? 'text-amber-300' : 'text-rose-300')}>
+              {safeFixed(stats.ratios.primeCost)}%
+            </p>
+            <p className="mt-1 text-[10px] text-white/40">F.C {safeFixed(stats.ratios.foodCost)}% · L.C {safeFixed(stats.ratios.laborCost)}%</p>
+          </button>
+        </div>
+      </div>
+
+      {/* ═════════════ HOY TOCA — alertas accionables solo si hay algo ═════════════ */}
+      {(facturasHoy.length > 0 || lowStock.length > 0 || saldoBanco < 1000) && (
+        <div className="bg-[color:var(--arume-paper)] border border-[color:var(--arume-gray-200)] rounded-2xl p-5 space-y-3">
+          <div className="flex items-center gap-2">
+            <Bell className="w-4 h-4 text-[color:var(--arume-accent)]"/>
+            <h3 className="font-serif text-lg font-semibold tracking-tight">Hoy toca</h3>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {facturasHoy.length > 0 && (
+              <button onClick={() => onNavigate?.('compras')}
+                className="text-left bg-white border border-[color:var(--arume-gray-100)] rounded-xl p-4 hover:border-[color:var(--arume-accent)]/30 hover:shadow-sm transition">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-accent)]">Pagos vencidos · {facturasHoy.length}</p>
+                <p className="mt-2 font-serif text-2xl font-semibold tabular-nums">{Num.fmt(importeHoy)}</p>
+                <p className="mt-1 text-[11px] text-[color:var(--arume-gray-500)]">Facturas que vencen hoy o antes →</p>
               </button>
-            ))}
+            )}
+            {lowStock.length > 0 && (
+              <button onClick={() => onNavigate?.('stock')}
+                className="text-left bg-white border border-[color:var(--arume-gray-100)] rounded-xl p-4 hover:border-[color:var(--arume-warn)]/30 hover:shadow-sm transition">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-warn)]">Stock bajo · {lowStock.length}</p>
+                <p className="mt-2 font-serif text-2xl font-semibold truncate">{lowStock.slice(0,2).map((i:any)=>i.n||i.nombre).join(', ')}{lowStock.length>2?'…':''}</p>
+                <p className="mt-1 text-[11px] text-[color:var(--arume-gray-500)]">Revisar y pedir →</p>
+              </button>
+            )}
+            {saldoBanco < 1000 && saldoBanco >= 0 && (
+              <button onClick={() => onNavigate?.('banco')}
+                className="text-left bg-white border border-[color:var(--arume-gray-100)] rounded-xl p-4 hover:border-[color:var(--arume-warn)]/30 hover:shadow-sm transition">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-warn)]">Saldo ajustado</p>
+                <p className="mt-2 font-serif text-2xl font-semibold tabular-nums">{Num.fmt(saldoBanco)}</p>
+                <p className="mt-1 text-[11px] text-[color:var(--arume-gray-500)]">Menos de 1.000€ en banco →</p>
+              </button>
+            )}
+            {saldoBanco < 0 && (
+              <button onClick={() => onNavigate?.('banco')}
+                className="text-left bg-white border border-[color:var(--arume-danger)]/30 rounded-xl p-4 hover:shadow-sm transition">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-danger)]">Saldo negativo</p>
+                <p className="mt-2 font-serif text-2xl font-semibold tabular-nums text-[color:var(--arume-danger)]">{Num.fmt(saldoBanco)}</p>
+                <p className="mt-1 text-[11px] text-[color:var(--arume-gray-500)]">Urgente — revisar banco →</p>
+              </button>
+            )}
           </div>
-          <div className="flex items-center justify-between w-full px-3 py-1">
-            <button onClick={handlePrev} className="p-2.5 hover:bg-indigo-500 hover:text-white text-indigo-300 bg-slate-700 rounded-full transition shadow-sm"><ChevronLeft className="w-5 h-5"/></button>
-            <span className="font-black text-sm uppercase tracking-widest text-white text-center whitespace-nowrap truncate w-32 sm:w-40">{periodLabel}</span>
-            <button onClick={handleNext} className="p-2.5 hover:bg-indigo-500 hover:text-white text-indigo-300 bg-slate-700 rounded-full transition shadow-sm"><ChevronRight className="w-5 h-5"/></button>
+        </div>
+      )}
+
+      {/* ═════════════ ACCIONES RÁPIDAS ═════════════ */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <button onClick={() => onNavigate?.('diario')}
+          className="flex items-center gap-3 bg-white border border-[color:var(--arume-gray-100)] rounded-xl px-4 py-3 hover:border-[color:var(--arume-ink)]/30 hover:shadow-sm transition group">
+          <div className="w-10 h-10 rounded-full bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] flex items-center justify-center group-hover:bg-[color:var(--arume-gold)] group-hover:text-[color:var(--arume-ink)] transition">
+            <Wallet className="w-4 h-4"/>
           </div>
+          <div className="text-left">
+            <p className="font-semibold text-sm">Cerrar caja</p>
+            <p className="text-[11px] text-[color:var(--arume-gray-500)]">Fin del día</p>
+          </div>
+        </button>
+        <button onClick={() => onNavigate?.('importador')}
+          className="flex items-center gap-3 bg-white border border-[color:var(--arume-gray-100)] rounded-xl px-4 py-3 hover:border-[color:var(--arume-ink)]/30 hover:shadow-sm transition group">
+          <div className="w-10 h-10 rounded-full bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] flex items-center justify-center group-hover:bg-[color:var(--arume-gold)] group-hover:text-[color:var(--arume-ink)] transition">
+            <Upload className="w-4 h-4"/>
+          </div>
+          <div className="text-left">
+            <p className="font-semibold text-sm">Subir factura</p>
+            <p className="text-[11px] text-[color:var(--arume-gray-500)]">PDF o foto</p>
+          </div>
+        </button>
+        <button onClick={() => onNavigate?.('banco')}
+          className="flex items-center gap-3 bg-white border border-[color:var(--arume-gray-100)] rounded-xl px-4 py-3 hover:border-[color:var(--arume-ink)]/30 hover:shadow-sm transition group">
+          <div className="w-10 h-10 rounded-full bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] flex items-center justify-center group-hover:bg-[color:var(--arume-gold)] group-hover:text-[color:var(--arume-ink)] transition">
+            <Landmark className="w-4 h-4"/>
+          </div>
+          <div className="text-left">
+            <p className="font-semibold text-sm">Conciliar banco</p>
+            <p className="text-[11px] text-[color:var(--arume-gray-500)]">Cuadrar movs.</p>
+          </div>
+        </button>
+        <button onClick={() => onNavigate?.('marketing')}
+          className="flex items-center gap-3 bg-white border border-[color:var(--arume-gray-100)] rounded-xl px-4 py-3 hover:border-[color:var(--arume-ink)]/30 hover:shadow-sm transition group">
+          <div className="w-10 h-10 rounded-full bg-[color:var(--arume-gold)] text-[color:var(--arume-ink)] flex items-center justify-center group-hover:scale-105 transition">
+            <Sparkles className="w-4 h-4"/>
+          </div>
+          <div className="text-left">
+            <p className="font-semibold text-sm">Nuevo post</p>
+            <p className="text-[11px] text-[color:var(--arume-gray-500)]">Agente Auto</p>
+          </div>
+        </button>
+      </div>
+
+      {/* ═════════════ MÉTRICAS OPERATIVAS ═════════════ */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="bg-white border border-[color:var(--arume-gray-100)] rounded-2xl p-5">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Ticket medio</p>
+          <p className="mt-2 font-serif text-2xl font-semibold tabular-nums">{Num.fmt(ticketMedio)}</p>
+          <p className="mt-1 text-[11px] text-[color:var(--arume-gray-400)]">Promedio periodo</p>
+        </div>
+        <div className="bg-white border border-[color:var(--arume-gray-100)] rounded-2xl p-5">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Coste laboral</p>
+          <p className={cn('mt-2 font-serif text-2xl font-semibold tabular-nums',
+            stats.ratios.laborCost <= 30 ? 'text-[color:var(--arume-ok)]' : stats.ratios.laborCost <= 40 ? 'text-[color:var(--arume-warn)]' : 'text-[color:var(--arume-danger)]')}>
+            {safeFixed(stats.ratios.laborCost)}%
+          </p>
+          <p className="mt-1 text-[11px] text-[color:var(--arume-gray-400)]">Ideal &lt;30%</p>
+        </div>
+        <div className="bg-white border border-[color:var(--arume-gray-100)] rounded-2xl p-5">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Food cost</p>
+          <p className={cn('mt-2 font-serif text-2xl font-semibold tabular-nums',
+            stats.ratios.foodCost <= 30 ? 'text-[color:var(--arume-ok)]' : stats.ratios.foodCost <= 35 ? 'text-[color:var(--arume-warn)]' : 'text-[color:var(--arume-danger)]')}>
+            {safeFixed(stats.ratios.foodCost)}%
+          </p>
+          <p className="mt-1 text-[11px] text-[color:var(--arume-gray-400)]">Ideal &lt;30%</p>
+        </div>
+        <div className="bg-white border border-[color:var(--arume-gray-100)] rounded-2xl p-5">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Gastos totales</p>
+          <p className="mt-2 font-serif text-2xl font-semibold tabular-nums">{Num.fmt(stats.gastos.total||0)}</p>
+          {renderTrend(stats.gastos.total, previousPeriodStats.gastos.total)}
         </div>
       </div>
 
       {/* 🆕 PULSO DEL DÍA */}
       <PulsoDelDia data={data} onNavigate={onNavigate} />
 
-      {/* DAILY BRIEFING — ahora con onNavigate conectado */}
+      {/* DAILY BRIEFING */}
       <DailyBriefing data={data} onNavigate={onNavigate} />
-
-      {/* KPIs — Deeplinks: click lleva al módulo detalle */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <button type="button" onClick={() => onNavigate?.('diario')}
-          className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center text-left hover:border-indigo-300 hover:shadow-md transition group">
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center justify-between">
-            Ingresos Totales
-            <Wallet className="w-4 h-4 text-slate-300 group-hover:text-indigo-500 transition"/>
-          </p>
-          <h3 className="text-3xl font-black text-slate-800 mt-1 tracking-tighter">{Num.fmt(stats.ingresos.total||0)}</h3>
-          {renderTrend(stats.ingresos.total, previousPeriodStats.ingresos.total)}
-          <span className="text-[9px] font-bold text-slate-400 mt-2 uppercase tracking-widest group-hover:text-indigo-500 transition">Ver Caja Diaria →</span>
-        </button>
-        <button type="button" onClick={() => onNavigate?.('compras')}
-          className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center text-left hover:border-rose-300 hover:shadow-md transition group">
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 flex items-center justify-between">
-            Gastos Operativos
-            <TrendingDown className="w-4 h-4 text-slate-300 group-hover:text-rose-500 transition"/>
-          </p>
-          <h3 className="text-3xl font-black text-slate-800 mt-1 tracking-tighter">{Num.fmt(stats.gastos.total||0)}</h3>
-          {renderTrend(stats.gastos.total, previousPeriodStats.gastos.total)}
-          <span className="text-[9px] font-bold text-slate-400 mt-2 uppercase tracking-widest group-hover:text-rose-500 transition">Ver Compras →</span>
-        </button>
-        <button type="button" onClick={() => onNavigate?.('tesoreria')}
-          className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden flex flex-col justify-center text-left hover:shadow-md transition group">
-          <div className={cn('absolute right-0 top-0 w-2 h-full', stats.neto>=0?'bg-emerald-400':'bg-rose-400')}/>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Margen Neto (Cash)</p>
-          <h3 className={cn('text-3xl font-black mt-1 tracking-tighter', stats.neto>=0?'text-emerald-600':'text-rose-600')}>{Num.fmt(stats.neto||0)}</h3>
-          {renderTrend(stats.neto, previousPeriodStats.neto)}
-          <span className="text-[9px] font-bold text-slate-400 mt-2 uppercase tracking-widest group-hover:text-indigo-500 transition">Ver Tesorería →</span>
-        </button>
-        <button type="button" onClick={() => onNavigate?.('informes')}
-          className="bg-indigo-600 p-6 rounded-[2rem] shadow-md text-white flex flex-col justify-center relative overflow-hidden text-left hover:bg-indigo-700 transition group">
-          <Sparkles className="absolute -right-4 -bottom-4 w-20 h-20 text-white opacity-10"/>
-          <p className="text-[10px] font-black text-indigo-200 uppercase tracking-widest mb-1">Prime Cost (Ideal 60%)</p>
-          <h3 className="text-3xl font-black mt-1 tracking-tighter">{safeFixed(stats.ratios.primeCost)}%</h3>
-          <p className="text-[10px] font-bold text-indigo-200 mt-2 uppercase tracking-widest">F.C: {safeFixed(stats.ratios.foodCost)}% | L.C: {safeFixed(stats.ratios.laborCost)}%</p>
-          <span className="text-[9px] font-bold text-indigo-200 mt-2 uppercase tracking-widest group-hover:text-white transition">Ver Informes →</span>
-        </button>
-      </div>
 
       {/* PROYECCIÓN IA */}
       {projection && (
