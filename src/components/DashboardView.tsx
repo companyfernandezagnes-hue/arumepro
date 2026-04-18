@@ -612,45 +612,55 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
       {/* DAILY BRIEFING */}
       <DailyBriefing data={data} onNavigate={onNavigate} />
 
-      {/* PROYECCIÓN IA */}
+      {/* PROYECCIÓN IA — rediseño night + dorado */}
       {projection && (
-        <div className="bg-gradient-to-br from-slate-900 to-indigo-900 p-6 rounded-[2rem] shadow-xl text-white flex flex-col md:flex-row items-center justify-between gap-6 border border-indigo-500/30">
+        <div className="relative overflow-hidden bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] p-6 rounded-2xl border border-white/5 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="absolute top-0 left-0 w-[2px] h-full bg-[color:var(--arume-gold)]"/>
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center backdrop-blur-md">
-              <Sparkles className="w-6 h-6 text-amber-300"/>
+            <div className="w-11 h-11 rounded-full bg-[color:var(--arume-gold)]/15 flex items-center justify-center">
+              <Sparkles className="w-5 h-5 text-[color:var(--arume-gold)]"/>
             </div>
             <div>
-              <h3 className="text-sm font-black uppercase tracking-widest text-indigo-200">IA Predictiva Arume</h3>
-              <p className="text-lg font-bold">Proyección a final de mes</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gold)]">IA Predictiva</p>
+              <p className="font-serif text-xl font-semibold mt-0.5">Proyección a fin de mes</p>
             </div>
           </div>
-          <div className="flex gap-6 text-right">
-            <div><p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Ingresos Est.</p><p className="text-xl font-black text-emerald-400">{Num.fmt(projection.inc)}</p></div>
-            <div><p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Gastos Est.</p><p className="text-xl font-black text-rose-400">{Num.fmt(projection.exp)}</p></div>
+          <div className="flex gap-8 text-right">
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.2em] text-white/50 font-semibold">Ingresos est.</p>
+              <p className="font-serif text-2xl font-semibold text-emerald-300 tabular-nums mt-1">{Num.fmt(projection.inc)}</p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-[0.2em] text-white/50 font-semibold">Gastos est.</p>
+              <p className="font-serif text-2xl font-semibold text-rose-300 tabular-nums mt-1">{Num.fmt(projection.exp)}</p>
+            </div>
           </div>
         </div>
       )}
 
-      {/* GRÁFICO */}
-      <div className="bg-white p-6 md:p-8 rounded-[3rem] border border-slate-100 shadow-sm w-full overflow-hidden">
-        <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest flex items-center gap-2 mb-6">
-          <TrendingUp className="w-5 h-5 text-indigo-500"/>
-          Evolución de Ventas — {periodLabel}
-        </h3>
+      {/* GRÁFICO — tarjeta clara, tipografía editorial */}
+      <div className="bg-white p-6 md:p-8 rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm w-full overflow-hidden">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Evolución de ventas</p>
+            <h3 className="font-serif text-xl font-semibold capitalize mt-1">{periodLabel}</h3>
+          </div>
+          <TrendingUp className="w-5 h-5 text-[color:var(--arume-gray-400)]"/>
+        </div>
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%" minHeight={200}>
             <AreaChart data={chartData} margin={{top:5,right:5,left:-20,bottom:0}}>
               <defs>
                 <linearGradient id="gradV" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#4f46e5" stopOpacity={0.2}/>
-                  <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
+                  <stop offset="5%"  stopColor="#C9A86A" stopOpacity={0.35}/>
+                  <stop offset="95%" stopColor="#C9A86A" stopOpacity={0}/>
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
-              <XAxis dataKey="name" tick={{fontSize:10,fill:'#94a3b8',fontWeight:'bold'}} axisLine={false} tickLine={false}/>
-              <YAxis tick={{fontSize:10,fill:'#94a3b8',fontWeight:'bold'}} axisLine={false} tickLine={false} tickFormatter={v=>`${(v/1000).toFixed(0)}k`}/>
-              <Tooltip contentStyle={{borderRadius:16,border:'none',boxShadow:'0 10px 15px -3px rgba(0,0,0,0.1)'}} formatter={(v:number)=>[Num.fmt(v),'Ventas']} labelStyle={{fontWeight:'black',color:'#1e293b'}}/>
-              <Area type="monotone" dataKey="venta" stroke="#4f46e5" strokeWidth={3} fill="url(#gradV)" activeDot={{r:5,strokeWidth:0}}/>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ECECE9"/>
+              <XAxis dataKey="name" tick={{fontSize:11,fill:'#8C8C84',fontWeight:600}} axisLine={false} tickLine={false}/>
+              <YAxis tick={{fontSize:11,fill:'#8C8C84',fontWeight:600}} axisLine={false} tickLine={false} tickFormatter={v=>`${(v/1000).toFixed(0)}k`}/>
+              <Tooltip contentStyle={{borderRadius:12,border:'1px solid #ECECE9',boxShadow:'0 12px 40px rgba(11,11,12,0.12)',background:'#FAFAF7'}} formatter={(v:number)=>[Num.fmt(v),'Ventas']} labelStyle={{fontWeight:600,color:'#0B0B0C'}}/>
+              <Area type="monotone" dataKey="venta" stroke="#0B0B0C" strokeWidth={2.5} fill="url(#gradV)" activeDot={{r:5,strokeWidth:0,fill:'#C9A86A'}}/>
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -660,8 +670,9 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
         {/* DESGLOSE GASTOS */}
-        <div className="bg-white p-6 md:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
-          <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6">Desglose de Gastos</h3>
+        <div className="bg-white p-6 md:p-8 rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Desglose</p>
+          <h3 className="font-serif text-xl font-semibold mb-5 mt-1">Gastos por categoría</h3>
           <div className="space-y-4">
             {[
               { label:'Materia Prima', val:stats.gastos.comida,   color:'bg-emerald-400', icon:ChefHat   },
@@ -691,8 +702,9 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
         </div>
 
         {/* INGRESOS POR UNIDAD */}
-        <div className="bg-white p-6 md:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
-          <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6">Ingresos por Unidad</h3>
+        <div className="bg-white p-6 md:p-8 rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Ingresos</p>
+          <h3 className="font-serif text-xl font-semibold mb-5 mt-1">Por unidad de negocio</h3>
           <div className="space-y-3">
             {BUSINESS_UNITS.filter(u => u.id!=='CORP').map(unit => {
               const val = stats.ingresos[unit.id as keyof typeof stats.ingresos] as number || 0;
@@ -720,8 +732,11 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
         </div>
 
         {/* ALERTAS ACCIONABLES */}
-        <div className="bg-white p-6 md:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col gap-3">
-          <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Requiere Acción</h3>
+        <div className="bg-white p-6 md:p-8 rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm flex flex-col gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Alertas</p>
+            <h3 className="font-serif text-xl font-semibold mt-1">Requiere acción</h3>
+          </div>
           <div className="flex-1 space-y-2">
             {lowStock.length > 0 && (
               <button onClick={() => onNavigate?.('stock')}
@@ -851,12 +866,12 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
         };
 
         return (
-          <div className="bg-white p-6 md:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+          <div className="bg-white p-6 md:p-8 rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
-                <TrendingUp className="w-5 h-5 text-indigo-500" />
-                Comparativa Interanual
-              </h3>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Comparativa</p>
+                <h3 className="font-serif text-xl font-semibold mt-1">Año actual vs anterior</h3>
+              </div>
               {pySameIngresos > 0 && (
                 <div className={cn('flex items-center gap-1.5 text-xs font-black px-3 py-1.5 rounded-full',
                   pctChangeNeto >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
@@ -929,11 +944,14 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
 
       {/* EMAILS GENERALES */}
       {(loadingEmails || generalEmails.length > 0) && (
-        <div className="bg-white p-6 md:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
-          <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2">
-            <Mail className="w-4 h-4 text-indigo-400"/>
-            Bandeja de Entrada General
-          </h3>
+        <div className="bg-white p-6 md:p-8 rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm">
+          <div className="mb-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Correo</p>
+            <h3 className="font-serif text-xl font-semibold mt-1 flex items-center gap-2">
+              <Mail className="w-4 h-4 text-[color:var(--arume-gray-400)]"/>
+              Bandeja de entrada
+            </h3>
+          </div>
           {loadingEmails ? (
             <div className="flex items-center gap-2 text-slate-400 py-4"><Loader2 className="w-4 h-4 animate-spin"/><span className="text-xs font-bold">Cargando correos...</span></div>
           ) : (
