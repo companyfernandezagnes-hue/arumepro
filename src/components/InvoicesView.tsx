@@ -884,80 +884,86 @@ Usa punto como separador decimal.`;
   return (
     <div className="animate-fade-in space-y-4 pb-32 relative max-w-[1600px] mx-auto text-xs">
 
-      {/* ── PÍLDORAS RESUMEN ─────────────────────────────────────────────── */}
-      <AnimatePresence mode="wait">
-        {activeTab === 'hist' && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="mb-4">
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-              <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.1 }} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center">
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Facturado (B2B)</p>
-                <p className="text-xl font-black text-slate-800">{Num.fmt(totalFacturadoCalc)}</p>
-              </motion.div>
-              <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.2 }} className="bg-white p-4 rounded-2xl border border-rose-100 shadow-sm flex flex-col justify-center">
-                <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest mb-1">Pendiente Pago</p>
-                <p className="text-xl font-black text-rose-600">{Num.fmt(totalFacturadoCalc - totalPagadoCalc)}</p>
-              </motion.div>
-              <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ delay: 0.3 }} className="bg-white p-4 rounded-2xl border border-emerald-100 shadow-sm flex flex-col justify-center">
-                <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mb-1">Total Pagado</p>
-                <p className="text-xl font-black text-emerald-600">{Num.fmt(totalPagadoCalc)}</p>
-              </motion.div>
-            </div>
-            <div className="mt-3 bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex items-center gap-4">
-              <PieChart className="w-4 h-4 text-slate-400" />
-              <div className="flex-1 h-2 bg-rose-100 rounded-full overflow-hidden">
-                <div className="h-full bg-emerald-500 transition-all duration-1000" style={{ width: `${progressPercent}%` }} />
-              </div>
-              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{progressPercent.toFixed(0)}% Pagado</span>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* ── HEADER ───────────────────────────────────────────────────────── */}
-      <header className="bg-white/90 backdrop-blur-md rounded-[2rem] border border-slate-200 shadow-sm p-4 md:p-5 flex flex-col xl:flex-row justify-between gap-4 relative z-40 items-center sticky top-4">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200">
-            <FileText className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <h2 className="text-xl font-black text-slate-800 tracking-tight leading-none">Facturación Global</h2>
-            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1">Crea o revisa facturas finales</p>
-          </div>
+      {/* ── HEADER EDITORIAL ─────────────────────────────────────────────── */}
+      <header className="bg-white rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm p-5 md:p-6 flex flex-col xl:flex-row justify-between gap-5 relative z-40 sticky top-4">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Compras</p>
+          <h2 className="font-serif text-2xl md:text-3xl font-semibold tracking-tight mt-1">Facturación</h2>
+          <p className="text-sm text-[color:var(--arume-gray-500)] mt-1">Agrupa albaranes, crea facturas y prepara la gestoría</p>
         </div>
+
         <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
-          {/* 🆕 Tres pestañas — las dos originales + Proveedores */}
-          <div className="flex items-center bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-full md:w-auto">
-            <button onClick={() => setActiveTab('pend')} className={cn('flex-1 px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all', activeTab === 'pend' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50')}>
-              📦 Agrupar Albaranes
+          {/* Pestañas — pills minimalistas */}
+          <div className="flex items-center bg-[color:var(--arume-gray-50)] p-1 rounded-full border border-[color:var(--arume-gray-100)] w-full md:w-auto">
+            <button onClick={() => setActiveTab('pend')}
+              className={cn('flex-1 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] transition',
+                activeTab === 'pend' ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] shadow-sm' : 'text-[color:var(--arume-gray-500)] hover:text-[color:var(--arume-ink)]')}>
+              Agrupar
             </button>
-            <button onClick={() => setActiveTab('hist')} className={cn('flex-1 px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all', activeTab === 'hist' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50')}>
-              💰 Bóveda (Excel)
+            <button onClick={() => setActiveTab('hist')}
+              className={cn('flex-1 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] transition',
+                activeTab === 'hist' ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] shadow-sm' : 'text-[color:var(--arume-gray-500)] hover:text-[color:var(--arume-ink)]')}>
+              Bóveda
             </button>
-            {/* 🆕 Pestaña Proveedores con badge de albaranes sueltos */}
-            <button onClick={() => setActiveTab('proveedores')} className={cn('flex-1 px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1.5', activeTab === 'proveedores' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50')}>
-              🏪 Proveedores
+            <button onClick={() => setActiveTab('proveedores')}
+              className={cn('flex-1 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] transition flex items-center justify-center gap-1.5',
+                activeTab === 'proveedores' ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] shadow-sm' : 'text-[color:var(--arume-gray-500)] hover:text-[color:var(--arume-ink)]')}>
+              Proveedores
               {albsSueltosTotales > 0 && (
-                <span className="bg-amber-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full leading-none">
+                <span className={cn('text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none',
+                  activeTab === 'proveedores' ? 'bg-[color:var(--arume-gold)] text-[color:var(--arume-ink)]' : 'bg-[color:var(--arume-accent)] text-white')}>
                   {albsSueltosTotales}
                 </span>
               )}
             </button>
-            {/* 📤 Pestaña Gestoría / Bilky */}
-            <button onClick={() => setActiveTab('gestoria')} className={cn('flex-1 px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1.5', activeTab === 'gestoria' ? 'bg-white text-violet-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50')}>
-              📤 Gestoría
+            <button onClick={() => setActiveTab('gestoria')}
+              className={cn('flex-1 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] transition flex items-center justify-center gap-1.5',
+                activeTab === 'gestoria' ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] shadow-sm' : 'text-[color:var(--arume-gray-500)] hover:text-[color:var(--arume-ink)]')}>
+              Gestoría
               {gestoriaData.pendientes.length > 0 && (
-                <span className="bg-violet-500 text-white text-[8px] font-black px-1.5 py-0.5 rounded-full leading-none">
+                <span className={cn('text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none',
+                  activeTab === 'gestoria' ? 'bg-[color:var(--arume-gold)] text-[color:var(--arume-ink)]' : 'bg-[color:var(--arume-accent)] text-white')}>
                   {gestoriaData.pendientes.length}
                 </span>
               )}
             </button>
           </div>
-          <div className="w-px h-8 bg-slate-200 hidden md:block mx-1" />
-          <button onClick={() => setIsExportModalOpen(true)} className="px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-all flex items-center gap-2 shadow-sm active:scale-95">
-            <Download className="w-4 h-4" /> Excel Gestoría
+
+          <button onClick={() => setIsExportModalOpen(true)}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-gold)] text-[color:var(--arume-ink)] hover:brightness-95 transition active:scale-[0.98]">
+            <Download className="w-3.5 h-3.5" /> Excel gestoría
           </button>
         </div>
       </header>
+
+      {/* ── PÍLDORAS RESUMEN — solo en Bóveda ────────────────────────────── */}
+      <AnimatePresence mode="wait">
+        {activeTab === 'hist' && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="bg-white p-5 rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Total facturado B2B</p>
+                <p className="font-serif text-2xl font-semibold mt-2 tabular-nums">{Num.fmt(totalFacturadoCalc)}</p>
+              </div>
+              <div className="bg-white p-5 rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-accent)]">Pendiente pago</p>
+                <p className="font-serif text-2xl font-semibold mt-2 tabular-nums text-[color:var(--arume-accent)]">{Num.fmt(totalFacturadoCalc - totalPagadoCalc)}</p>
+              </div>
+              <div className="bg-white p-5 rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-ok)]">Total pagado</p>
+                <p className="font-serif text-2xl font-semibold mt-2 tabular-nums text-[color:var(--arume-ok)]">{Num.fmt(totalPagadoCalc)}</p>
+              </div>
+            </div>
+            <div className="mt-3 bg-white border border-[color:var(--arume-gray-100)] rounded-xl p-3 shadow-sm flex items-center gap-4">
+              <PieChart className="w-4 h-4 text-[color:var(--arume-gray-400)]" />
+              <div className="flex-1 h-1.5 bg-[color:var(--arume-gray-100)] rounded-full overflow-hidden">
+                <div className="h-full bg-[color:var(--arume-ok)] transition-all duration-1000" style={{ width: `${progressPercent}%` }} />
+              </div>
+              <span className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gray-500)] tabular-nums">{progressPercent.toFixed(0)}% pagado</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── FILTROS — solo visibles en pend e hist, no en proveedores ─────── */}
       {activeTab !== 'proveedores' && (
