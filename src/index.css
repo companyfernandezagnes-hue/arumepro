@@ -1,13 +1,40 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&display=swap');
 @import "tailwindcss";
 
 @theme {
   --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Fraunces", ui-serif, Georgia, serif;
+}
+
+/* ===================================================================
+ * 🎨 ARUME DESIGN SYSTEM — CSS Variables
+ * Fuente única de verdad. Ver src/lib/design.ts para la equivalencia TS.
+ * =================================================================== */
+:root {
+  --arume-ink:     #0B0B0C;
+  --arume-paper:   #FAFAF7;
+  --arume-night:   #131317;
+  --arume-gold:    #C9A86A;
+  --arume-accent:  #8B1E2B;
+  --arume-ok:      #15803D;
+  --arume-warn:    #B45309;
+  --arume-danger:  #991B1B;
+  --arume-info:    #1E40AF;
+  --arume-gray-50:  #F7F7F5;
+  --arume-gray-100: #ECECE9;
+  --arume-gray-200: #D8D8D3;
+  --arume-gray-300: #B8B8B1;
+  --arume-gray-400: #8C8C84;
+  --arume-gray-500: #656560;
+  --arume-gray-600: #474744;
+  --arume-gray-700: #2E2E2C;
+  --arume-gray-800: #1C1C1B;
+  --arume-gray-900: #0E0E0D;
 }
 
 @layer base {
   body {
-    @apply bg-[#f8fafc] text-slate-900 font-sans antialiased m-0 p-0;
+    @apply bg-[color:var(--arume-paper)] text-[color:var(--arume-ink)] font-sans antialiased m-0 p-0;
     -webkit-tap-highlight-color: transparent;
   }
 }
