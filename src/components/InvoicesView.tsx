@@ -967,28 +967,38 @@ Usa punto como separador decimal.`;
 
       {/* ── FILTROS — solo visibles en pend e hist, no en proveedores ─────── */}
       {activeTab !== 'proveedores' && (
-        <div className="bg-white px-5 py-3 rounded-2xl shadow-sm border border-slate-200 flex flex-col lg:flex-row items-center justify-between gap-3 relative z-30">
+        <div className="bg-white px-5 py-3 rounded-2xl shadow-sm border border-[color:var(--arume-gray-100)] flex flex-col lg:flex-row items-center justify-between gap-3 relative z-30">
           <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
-            <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200">
-              <button onClick={() => setMode('proveedor')} className={cn('px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all', mode === 'proveedor' ? 'bg-white text-slate-800 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-100')}>Proveedor</button>
-              <button onClick={() => setMode('socio')}     className={cn('px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all', mode === 'socio'     ? 'bg-white text-slate-800 shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-100')}>Socio</button>
+            {/* Modo proveedor/socio — pills */}
+            <div className="flex items-center gap-1 bg-[color:var(--arume-gray-50)] p-1 rounded-full border border-[color:var(--arume-gray-100)]">
+              <button onClick={() => setMode('proveedor')}
+                className={cn('px-3 py-1 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] transition',
+                  mode === 'proveedor' ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)]' : 'text-[color:var(--arume-gray-500)] hover:text-[color:var(--arume-ink)]')}>Proveedor</button>
+              <button onClick={() => setMode('socio')}
+                className={cn('px-3 py-1 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] transition',
+                  mode === 'socio' ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)]' : 'text-[color:var(--arume-gray-500)] hover:text-[color:var(--arume-ink)]')}>Socio</button>
             </div>
-            <select value={selectedUnit} onChange={e => setSelectedUnit(e.target.value as any)} className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-widest outline-none text-slate-700 focus:border-indigo-400 cursor-pointer">
-              <option value="ALL">Todas las Unidades</option>
+            {/* Selector unidad */}
+            <select value={selectedUnit} onChange={e => setSelectedUnit(e.target.value as any)}
+              className="bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)] rounded-full px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.15em] outline-none text-[color:var(--arume-ink)] focus:border-[color:var(--arume-ink)] cursor-pointer">
+              <option value="ALL">Todas las unidades</option>
               <option value="REST">Restaurante</option>
               <option value="DLV">Catering</option>
               <option value="SHOP">Tienda Sake</option>
               <option value="CORP">Corporativo</option>
             </select>
-            <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl p-0.5">
-              <button className="p-1.5 text-indigo-600 hover:bg-white rounded-lg transition-colors" onClick={() => setYear(y => y - 1)}><ChevronLeft className="w-4 h-4"/></button>
-              <span className="px-3 text-xs font-black text-slate-700">{year}</span>
-              <button className="p-1.5 text-indigo-600 hover:bg-white rounded-lg transition-colors" onClick={() => setYear(y => y + 1)}><ChevronRight className="w-4 h-4"/></button>
+            {/* Año */}
+            <div className="flex items-center bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)] rounded-full p-0.5">
+              <button className="p-1.5 text-[color:var(--arume-gray-500)] hover:text-[color:var(--arume-ink)] hover:bg-white rounded-full transition" onClick={() => setYear(y => y - 1)}><ChevronLeft className="w-3.5 h-3.5"/></button>
+              <span className="px-3 text-xs font-semibold tabular-nums">{year}</span>
+              <button className="p-1.5 text-[color:var(--arume-gray-500)] hover:text-[color:var(--arume-ink)] hover:bg-white rounded-full transition" onClick={() => setYear(y => y + 1)}><ChevronRight className="w-3.5 h-3.5"/></button>
             </div>
           </div>
           <div className="relative w-full lg:w-72">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input value={searchQ} onChange={e => setSearchQ(e.target.value)} placeholder="Buscar factura, proveedor..." className="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-bold outline-none focus:bg-white focus:border-indigo-400 transition-all" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[color:var(--arume-gray-400)]" />
+            <input value={searchQ} onChange={e => setSearchQ(e.target.value)}
+              placeholder="Buscar factura, proveedor…"
+              className="w-full pl-9 pr-4 py-2 rounded-full bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)] text-xs outline-none focus:bg-white focus:border-[color:var(--arume-ink)] transition" />
           </div>
         </div>
       )}
@@ -1018,7 +1028,7 @@ Usa punto como separador decimal.`;
               {/* ── PANEL DE PREVISUALIZACIÓN Y EDICIÓN ── */}
               <AnimatePresence>
                 {autoGroupPreview && (
-                  <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }} className="mb-6 bg-white border-2 border-indigo-200 rounded-[2rem] p-6 shadow-xl overflow-hidden">
+                  <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }} className="mb-6 bg-white border-2 border-indigo-200 rounded-2xl p-6 shadow-xl overflow-hidden">
 
                     <div className="flex justify-between items-start mb-4">
                       <div>
@@ -1213,7 +1223,7 @@ Usa punto como separador decimal.`;
               {!autoGroupPreview && (
                 <>
                   {pendingGroups.length > 0 ? pendingGroups.map(([mk, dataGroup]) => (
-                    <div key={mk} className="mb-6 bg-white p-5 rounded-[2.5rem] shadow-sm border border-slate-100">
+                    <div key={mk} className="mb-6 bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
                       <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2 px-2">
                         <Calendar className="w-4 h-4 text-indigo-500" /> {dataGroup.name}
                       </h3>
@@ -1269,7 +1279,7 @@ Usa punto como separador decimal.`;
             <motion.div key="proveedores" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ type: 'spring', damping: 25 }}>
 
               {/* ── Zona de subida masiva de facturas PDF ── */}
-              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-[2rem] border-2 border-dashed border-blue-300 p-6 mb-6 text-center relative">
+              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border-2 border-dashed border-blue-300 p-6 mb-6 text-center relative">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -1546,7 +1556,7 @@ Usa punto como separador decimal.`;
             <motion.div key="gestoria" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ type: 'spring', damping: 25 }}>
 
               {/* Resumen + acción masiva */}
-              <div className="bg-gradient-to-br from-violet-50 to-purple-50 rounded-[2rem] border border-violet-200 p-6 mb-6">
+              <div className="bg-gradient-to-br from-violet-50 to-purple-50 rounded-2xl border border-violet-200 p-6 mb-6">
                 <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
                   <div className="flex items-center gap-4">
                     <div className="w-14 h-14 bg-violet-600 rounded-2xl flex items-center justify-center shadow-lg">
@@ -1859,7 +1869,7 @@ Usa punto como separador decimal.`;
       </div>
 
       {/* ── AUDITORÍA DOCUMENTAL + AGENTE IA ─────────────────────────────── */}
-      <div className="mt-8 bg-slate-900 rounded-[2.5rem] p-6 md:p-8 shadow-2xl relative overflow-hidden flex flex-col lg:flex-row gap-8">
+      <div className="mt-8 bg-slate-900 rounded-2xl p-6 md:p-8 shadow-2xl relative overflow-hidden flex flex-col lg:flex-row gap-8">
         <div className="absolute top-0 left-0 w-full h-1.5 bg-blue-500" />
 
         {/* Panel 1: Auditoría de correos */}
@@ -1928,7 +1938,7 @@ Usa punto como separador decimal.`;
       <AnimatePresence>
         {isExportModalOpen && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[500] flex justify-center items-center p-4 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsExportModalOpen(false)}>
-            <motion.div initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} onClick={e => e.stopPropagation()} className="bg-white w-full max-w-md rounded-[2rem] p-8 shadow-2xl border border-slate-200">
+            <motion.div initial={{ scale: 0.95, y: 10 }} animate={{ scale: 1, y: 0 }} onClick={e => e.stopPropagation()} className="bg-white w-full max-w-md rounded-2xl p-8 shadow-2xl border border-slate-200">
               <div className="flex items-center justify-between mb-6">
                 <h3 className="text-xl font-black text-slate-800">Exportar a Excel</h3>
                 <button onClick={() => setIsExportModalOpen(false)} className="p-2 bg-slate-100 rounded-full text-slate-400 hover:text-slate-700 transition"><X className="w-5 h-5"/></button>
@@ -1959,7 +1969,7 @@ Usa punto como separador decimal.`;
       <AnimatePresence>
         {selectedGroup && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[500] flex justify-center items-center p-4 bg-slate-900/60 backdrop-blur-sm" onClick={() => setSelectedGroup(null)}>
-            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} onClick={e => e.stopPropagation()} className="bg-white w-full max-w-2xl rounded-[2.5rem] p-6 md:p-8 shadow-2xl relative flex flex-col max-h-[85vh]">
+            <motion.div initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} onClick={e => e.stopPropagation()} className="bg-white w-full max-w-2xl rounded-2xl p-6 md:p-8 shadow-2xl relative flex flex-col max-h-[85vh]">
               <button onClick={() => setSelectedGroup(null)} className="absolute top-6 right-6 p-2 bg-slate-100 rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition"><X className="w-5 h-5"/></button>
 
               <div className="border-b border-slate-100 pb-4 mb-4 pr-10">
@@ -2048,7 +2058,7 @@ Usa punto como separador decimal.`;
             <motion.div
               initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }}
               onClick={e => e.stopPropagation()}
-              className="bg-white w-full max-w-4xl rounded-[2.5rem] shadow-2xl relative flex flex-col max-h-[90vh] overflow-hidden"
+              className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl relative flex flex-col max-h-[90vh] overflow-hidden"
             >
               {/* Header */}
               <div className="flex items-center justify-between p-6 border-b border-slate-100">
