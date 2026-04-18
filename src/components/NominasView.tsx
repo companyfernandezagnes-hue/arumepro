@@ -271,6 +271,7 @@ export const NominasView: React.FC<Props> = ({ data, onSave }) => {
     setImportResults([]);
     const results: typeof importResults = [];
     const nuevas: NominaRegistro[] = [];
+    const nuevosTrabajadores: Trabajador[] = [];
 
     const prompt = `Eres un experto en nóminas españolas. Extrae de esta nómina los siguientes campos y devuelve SOLO un JSON válido sin markdown ni comentarios:
 {
@@ -323,10 +324,14 @@ Todos los importes SIN símbolo €, con punto decimal. Si algún campo no apare
         const nomLow = nombre.toLowerCase();
         const trab = plantilla.find(t => t.nombre.toLowerCase().includes(nomLow) || nomLow.includes(t.nombre.toLowerCase()));
 
+        // Si no existe, marcamos para auto-crear ficha mínima en plantilla
+        const trabajadorIdFinal = trab?.id || `trab-auto-${Date.now()}-${i}`;
+        const esNuevo = !trab;
+
         const nomina: NominaRegistro = {
           id: `nom-${Date.now()}-${i}`,
           mes,
-          trabajadorId: trab?.id || '',
+          trabajadorId: trabajadorIdFinal,
           nombre: trab?.nombre || nombre,
           bruto: Num.round2(bruto),
           irpfRetenido: Num.round2(irpf),
@@ -337,21 +342,54 @@ Todos los importes SIN símbolo €, con punto decimal. Si algún campo no apare
         };
 
         nuevas.push(nomina);
+
+        if (esNuevo) {
+          // Guardamos una ficha mínima que se creará al guardar en lote
+          nuevosTrabajadores.push({
+            id: trabajadorIdFinal,
+            nombre,
+            puesto: '',
+            contrato: 'indefinido',
+            jornada: 'completa',
+            fechaAlta: `${mes}-01`,
+            salarioBrutoAnual: 0,
+            grupoSS: '',
+            irpfPct: bruto > 0 ? Num.round2((irpf / bruto) * 100) : 0,
+            activo: true,
+            notas: 'Creado automáticamente al importar nómina con IA — completar datos con la gestoría',
+          });
+        }
+
         results.push({
           name: file.name,
           status: 'ok',
-          msg: `${nomina.nombre} · ${mes} · Líquido ${Num.fmt(nomina.liquido)}${trab ? '' : ' (trabajador nuevo)'}`,
+          msg: `${nomina.nombre} · ${mes} · Líquido ${Num.fmt(nomina.liquido)}${esNuevo ? ' · 🆕 ficha creada (completar desde gestoría)' : ''}`,
         });
       } catch (err: any) {
         results.push({ name: file.name, status: 'error', msg: err?.message || 'Error al procesar' });
       }
     }
 
-    // Guardar todas las nóminas nuevas a la vez
-    if (nuevas.length > 0) {
+    // Guardar todas las nóminas + trabajadores nuevos a la vez
+    if (nuevas.length > 0 || nuevosTrabajadores.length > 0) {
       const newData = JSON.parse(JSON.stringify(data));
       if (!newData.nominas_registro) newData.nominas_registro = [];
-      // Evitar duplicados (mismo nombre + mes + bruto)
+      if (!newData.plantilla) newData.plantilla = [];
+
+      // 1) Añadir trabajadores nuevos (evitando duplicar por nombre si ya se añadió en este mismo lote)
+      const yaEnPlantilla = new Set(
+        (newData.plantilla as Trabajador[]).map(t => t.nombre.toLowerCase())
+      );
+      let trabAñadidos = 0;
+      for (const t of nuevosTrabajadores) {
+        if (!yaEnPlantilla.has(t.nombre.toLowerCase())) {
+          newData.plantilla.push(t);
+          yaEnPlantilla.add(t.nombre.toLowerCase());
+          trabAñadidos++;
+        }
+      }
+
+      // 2) Añadir nóminas evitando duplicados (mismo nombre + mes + bruto)
       const existentes = new Set(
         (newData.nominas_registro as NominaRegistro[]).map(n => `${n.nombre}__${n.mes}__${n.bruto.toFixed(2)}`)
       );
@@ -364,7 +402,10 @@ Todos los importes SIN símbolo €, con punto decimal. Si algún campo no apare
         }
       }
       await onSave(newData);
-      toast.success(`${añadidas} nómina${añadidas !== 1 ? 's' : ''} importada${añadidas !== 1 ? 's' : ''} con IA ✨`);
+      const parts: string[] = [];
+      if (añadidas > 0) parts.push(`${añadidas} nómina${añadidas !== 1 ? 's' : ''}`);
+      if (trabAñadidos > 0) parts.push(`${trabAñadidos} trabajador${trabAñadidos !== 1 ? 'es' : ''} nuevo${trabAñadidos !== 1 ? 's' : ''}`);
+      toast.success(parts.join(' + ') + ' importado ✨');
     }
 
     setImportResults(results);
