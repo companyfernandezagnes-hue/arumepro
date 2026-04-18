@@ -764,25 +764,52 @@ export class ArumeAgent {
     }
 
     // Agrupar por item + proveedor y ORDENAR por fecha
-    const grouped: Record<string, { unitPrice: number; date: string }[]> = {};
+    // Guardamos también albaranId para enriquecer el aviso con contexto
+    const grouped: Record<string, { unitPrice: number; date: string; albaranId?: string }[]> = {};
     for (const h of history) {
       const key = `${h.item}__${h.prov}`;
       if (!grouped[key]) grouped[key] = [];
-      grouped[key].push({ unitPrice: h.unitPrice, date: h.date });
+      grouped[key].push({ unitPrice: h.unitPrice, date: h.date, albaranId: h.albaranId });
     }
+
+    // Para resolver albaranId → número de albarán legible
+    const albaranes = data.albaranes || [];
+    const albaranById: Record<string, any> = {};
+    for (const a of albaranes) albaranById[a.id] = a;
+
+    const fmtFecha = (iso?: string) => {
+      if (!iso) return '';
+      try {
+        const d = new Date(iso);
+        return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      } catch { return iso; }
+    };
 
     const anomalias: string[] = [];
     for (const [key, entries] of Object.entries(grouped)) {
       if (entries.length < 2) continue;
       // Ordenar cronológicamente para comparar correctamente
       entries.sort((a, b) => a.date.localeCompare(b.date));
-      const ultimo = entries[entries.length - 1].unitPrice;
-      const anterior = entries[entries.length - 2].unitPrice;
-      if (anterior > 0) {
-        const cambio = ((ultimo - anterior) / anterior) * 100;
+      const last = entries[entries.length - 1];
+      const prev = entries[entries.length - 2];
+      if (prev.unitPrice > 0) {
+        const cambio = ((last.unitPrice - prev.unitPrice) / prev.unitPrice) * 100;
         if (cambio > 15) {
           const [item, prov] = key.split('__');
-          anomalias.push(`${item} (${prov}): +${cambio.toFixed(0)}% (${Num.fmt(anterior)} → ${Num.fmt(ultimo)})`);
+          const alb = last.albaranId ? albaranById[last.albaranId] : null;
+          const albNum = alb?.num ? `${alb.num}` : '';
+          const fecha = fmtFecha(last.date);
+
+          // Mensaje estructurado, legible en Telegram
+          const lineas = [
+            `🛒 ${item}`,
+            `📦 Proveedor: ${prov}`,
+            `📈 +${cambio.toFixed(0)}% (${Num.fmt(prev.unitPrice)} → ${Num.fmt(last.unitPrice)})`,
+          ];
+          if (albNum || fecha) {
+            lineas.push(`🧾 Albarán${albNum ? ' ' + albNum : ''}${fecha ? ' · ' + fecha : ''}`);
+          }
+          anomalias.push(lineas.join('\n'));
         }
       }
     }
@@ -792,8 +819,8 @@ export class ArumeAgent {
       return null;
     }
 
-    const msg = `📈 ${anomalias.length} subidas de precio >15%`;
-    const detalle = anomalias.slice(0, 10).join('\n');
+    const msg = `📈 ${anomalias.length} subida${anomalias.length > 1 ? 's' : ''} de precio >15% detectada${anomalias.length > 1 ? 's' : ''}`;
+    const detalle = anomalias.slice(0, 10).join('\n\n');
 
     await PushService.sendNative(msg, detalle, { type: 'warning', category: 'precios', tag: 'precios-anomalos' });
     await ArumeAgent._sendTelegram(data, `${msg}\n\n${detalle}`);
