@@ -182,6 +182,15 @@ const DEFAULT_FLOWS: FlowDef[] = [
     schedule: 'daily',
   },
   {
+    id: 'facturas_duplicadas',
+    name: 'Detector Facturas Duplicadas',
+    description: 'Avisa si se han subido 2 facturas con mismo proveedor + número + total',
+    icon: '⚠️',
+    category: 'alertas',
+    enabled: true,
+    schedule: '6h',
+  },
+  {
     id: 'resumen_diario',
     name: 'Briefing Matutino (9h)',
     description: 'Cada mañana a las 9h: ventas de ayer, saldo, facturas por pagar, stock, precios anómalos',
@@ -355,6 +364,8 @@ export class ArumeAgent {
           return await ArumeAgent._checkPrecios(data);
         case 'albaranes_sin_factura':
           return await ArumeAgent._checkAlbaranesSinFactura(data);
+        case 'facturas_duplicadas':
+          return await ArumeAgent._checkFacturasDuplicadas(data);
         case 'resumen_diario':
           return await ArumeAgent._resumenDiario(data);
         default:
@@ -854,6 +865,49 @@ export class ArumeAgent {
     await PushService.sendNative(msg, detalle, { type: 'info', category: 'facturas', tag: 'albaranes-pendientes' });
 
     ArumeAgent.logRun('albaranes_sin_factura', 'success', msg, detalle);
+    return null;
+  }
+
+  // ── 12b. Facturas Duplicadas ──
+
+  private static async _checkFacturasDuplicadas(data: AppData): Promise<FlowRun | null> {
+    const facturas = (data.facturas || []).filter((f: any) => f.tipo !== 'caja');
+    if (facturas.length < 2) {
+      ArumeAgent.logRun('facturas_duplicadas', 'success', 'Sin duplicados (<2 facturas)');
+      return null;
+    }
+
+    // Clave: proveedor + num + total (redondeado a 2 decimales)
+    const grupos: Record<string, any[]> = {};
+    for (const f of facturas as any[]) {
+      const prov = (f.prov || f.cliente || '').trim().toLowerCase();
+      const num = (f.num || '').trim().toLowerCase();
+      const total = Num.parse(f.total).toFixed(2);
+      if (!prov || !num) continue;
+      const key = `${prov}__${num}__${total}`;
+      if (!grupos[key]) grupos[key] = [];
+      grupos[key].push(f);
+    }
+
+    const duplicados = Object.entries(grupos).filter(([, arr]) => arr.length > 1);
+    if (duplicados.length === 0) {
+      ArumeAgent.logRun('facturas_duplicadas', 'success', 'Sin facturas duplicadas');
+      return null;
+    }
+
+    const lineas: string[] = [];
+    for (const [, arr] of duplicados.slice(0, 10)) {
+      const f0 = arr[0];
+      lineas.push(`• ${f0.prov || f0.cliente || '¿?'} — Nº ${f0.num} · ${Num.fmt(f0.total)} (${arr.length} copias)`);
+    }
+
+    const msg = `⚠️ ${duplicados.length} factura${duplicados.length > 1 ? 's' : ''} duplicada${duplicados.length > 1 ? 's' : ''} detectada${duplicados.length > 1 ? 's' : ''}`;
+    const detalle = lineas.join('\n') + '\n\nRevisa en Facturas para eliminar las copias.';
+
+    await PushService.sendNative(msg, detalle, { type: 'warning', category: 'facturas', tag: 'facturas-duplicadas' });
+    await ArumeAgent._sendTelegram(data, `${msg}\n\n${detalle}`);
+
+    ArumeAgent.logRun('facturas_duplicadas', 'success', msg, detalle);
     return null;
   }
 
