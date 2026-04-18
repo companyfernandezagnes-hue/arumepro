@@ -180,14 +180,22 @@ function CommandPalette<T extends string>({ open, onClose, items, onSelect, onAc
 /* =======================================================
  * 2. NAVEGACIÓN MÓVIL
  * ======================================================= */
-type DockItemDef<T extends string> = { key: T; label: string; icon: any; group?: 'main'|'fin'|'ops'; shortcut?: string };
+type NavGroup = 'inicio' | 'compras' | 'ventas' | 'dinero' | 'personal' | 'cierres' | 'tienda' | 'marketing' | 'sistema';
+const NAV_GROUPS: NavGroup[] = ['inicio', 'compras', 'ventas', 'dinero', 'personal', 'cierres', 'tienda', 'marketing', 'sistema'];
+type DockItemDef<T extends string> = { key: T; label: string; icon: any; group?: NavGroup; shortcut?: string };
 
 function MobileTabBar<T extends string>({ items, activeKey, onChange }: { items: DockItemDef<T>[], activeKey: T, onChange: (k:T)=>void }) {
-  const groups = useMemo(() => ({
-    main: items.filter(i => (i.group ?? 'main') === 'main'),
-    fin: items.filter(i => i.group === 'fin'),
-    ops: items.filter(i => i.group === 'ops'),
-  }), [items]);
+  const grouped = useMemo(() => {
+    const map: Record<NavGroup, DockItemDef<T>[]> = {
+      inicio: [], compras: [], ventas: [], dinero: [],
+      personal: [], cierres: [], tienda: [], marketing: [], sistema: [],
+    };
+    for (const it of items) {
+      const g: NavGroup = (it.group ?? 'inicio');
+      map[g].push(it);
+    }
+    return map;
+  }, [items]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -227,11 +235,16 @@ function MobileTabBar<T extends string>({ items, activeKey, onChange }: { items:
           className="flex-1 flex items-center overflow-x-auto flex-nowrap py-1.5 gap-1"
           style={{ scrollbarWidth: 'none', msOverflowStyle: 'none', WebkitOverflowScrolling: 'touch' }}
         >
-          {groups.main.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
-          <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
-          {groups.fin.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
-          <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
-          {groups.ops.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
+          {NAV_GROUPS.map((g, gi) => {
+            const list = grouped[g];
+            if (!list || list.length === 0) return null;
+            return (
+              <React.Fragment key={g}>
+                {gi > 0 && <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />}
+                {list.map(it => <MobileTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
+              </React.Fragment>
+            );
+          })}
           <div className="w-2 shrink-0" />
         </div>
 
@@ -293,9 +306,17 @@ function DesktopDock<T extends string>({ items, activeKey, onChange }: { items: 
     return () => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current); };
   }, [visible, hoveringDock]);
 
-  const groups = useMemo(() => ({
-    main: items.filter(i => (i.group ?? 'main') === 'main'), fin: items.filter(i => i.group === 'fin'), ops: items.filter(i => i.group === 'ops'),
-  }), [items]);
+  const grouped = useMemo(() => {
+    const map: Record<NavGroup, DockItemDef<T>[]> = {
+      inicio: [], compras: [], ventas: [], dinero: [],
+      personal: [], cierres: [], tienda: [], marketing: [], sistema: [],
+    };
+    for (const it of items) {
+      const g: NavGroup = (it.group ?? 'inicio');
+      map[g].push(it);
+    }
+    return map;
+  }, [items]);
 
   return (
     <div className="hidden lg:block">
@@ -313,11 +334,16 @@ function DesktopDock<T extends string>({ items, activeKey, onChange }: { items: 
           >
             <div className="bg-white/95 backdrop-blur-md shadow-2xl border border-slate-200/50 rounded-full px-6 py-2 max-w-full overflow-x-auto relative" onMouseEnter={() => setHoveringDock(true)} onMouseLeave={() => { setHoveringDock(false); handleShow(); }}>
               <div className="flex items-center gap-1 no-scrollbar">
-                {groups.main.map(it => <DesktopTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
-                <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
-                {groups.fin.map(it => <DesktopTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
-                <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />
-                {groups.ops.map(it => <DesktopTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
+                {NAV_GROUPS.map((g, gi) => {
+                  const list = grouped[g];
+                  if (!list || list.length === 0) return null;
+                  return (
+                    <React.Fragment key={g}>
+                      {gi > 0 && <div className="w-px h-6 bg-slate-200 mx-1 shrink-0" />}
+                      {list.map(it => <DesktopTabButton key={it.key} item={it} active={it.key === activeKey} onClick={() => onChange(it.key)} />)}
+                    </React.Fragment>
+                  );
+                })}
               </div>
             </div>
           </motion.nav>
@@ -555,28 +581,37 @@ export default function App() {
   }, [handleTabChange]);
 
   const navItems = useMemo<DockItemDef<TabKey>[]>(() => ([
-    { key: 'dashboard',   label: 'Dash',       icon: LayoutDashboard, group: 'main', shortcut: '⌘1' },
-    { key: 'ia',          label: 'IA',          icon: Sparkles,        group: 'main' },
-    { key: 'diario',      label: 'Caja',        icon: Wallet,          group: 'main', shortcut: '⌘2' },
-    { key: 'importador',  label: 'Subir',       icon: Import,          group: 'main' },
-    { key: 'compras',     label: 'Compras',     icon: Receipt,         group: 'fin',  shortcut: '⌘3' },
-    { key: 'banco',       label: 'Banco',       icon: Building2,       group: 'fin',  shortcut: '⌘4' },
-    { key: 'tesoreria',   label: 'Tesorería',   icon: TrendingUp,      group: 'fin'  },
-    { key: 'liquidez',    label: 'Liquidez',    icon: Scale,           group: 'fin'  },
-    { key: 'fixed',       label: 'Fijos',       icon: Zap,             group: 'fin'  },
-    { key: 'nominas',    label: 'Nóminas',    icon: Users,           group: 'fin'  },
-    { key: 'proveedores', label: 'Proveed.',    icon: Users,           group: 'fin'  },
-    { key: 'presupuestos',label: 'Presuptos.',  icon: FileText,        group: 'fin'  },
-    { key: 'librosiva',  label: 'Libros IVA', icon: BookOpen,        group: 'fin'  },
-    { key: 'balance',    label: 'Balance',    icon: Scale,           group: 'fin'  },
-    { key: 'shop',        label: 'Tienda',      icon: ShoppingBag,     group: 'ops'  },
-    { key: 'informes',    label: 'Informes',    icon: PieChart,        group: 'ops'  },
-    { key: 'menus',       label: 'Menús',       icon: ChefHat,         group: 'ops'  },
-    { key: 'stock',       label: 'Stock',       icon: Package,         group: 'ops'  },
-    { key: 'marketing',   label: 'Marketing',   icon: Megaphone,       group: 'ops',  shortcut: '⌘5' },
-    { key: 'notificaciones', label: 'Alertas', icon: Bell,            group: 'ops'  },
-    { key: 'agente',         label: 'Agente',  icon: Bot,             group: 'ops'  },
-    { key: 'cierre',      label: 'Cierre',      icon: Lock,            group: 'ops'  },
+    // 📊 INICIO
+    { key: 'dashboard',   label: 'Dash',       icon: LayoutDashboard, group: 'inicio', shortcut: '⌘1' },
+    { key: 'ia',          label: 'IA',          icon: Sparkles,        group: 'inicio' },
+    // 📥 COMPRAS (entradas, albaranes, facturas, proveedores)
+    { key: 'importador',  label: 'Subir',       icon: Import,          group: 'compras' },
+    { key: 'compras',     label: 'Facturas',    icon: Receipt,         group: 'compras', shortcut: '⌘3' },
+    { key: 'proveedores', label: 'Proveed.',    icon: Users,           group: 'compras' },
+    // 💰 VENTAS (caja, menús, presupuestos)
+    { key: 'diario',      label: 'Caja',        icon: Wallet,          group: 'ventas',  shortcut: '⌘2' },
+    { key: 'menus',       label: 'Menús',       icon: ChefHat,         group: 'ventas'  },
+    { key: 'presupuestos',label: 'Presuptos.',  icon: FileText,        group: 'ventas'  },
+    // 🏦 DINERO (banco, tesorería, liquidez, libros IVA, balance)
+    { key: 'banco',       label: 'Banco',       icon: Building2,       group: 'dinero',  shortcut: '⌘4' },
+    { key: 'tesoreria',   label: 'Tesorería',   icon: TrendingUp,      group: 'dinero'  },
+    { key: 'liquidez',    label: 'Liquidez',    icon: Scale,           group: 'dinero'  },
+    { key: 'librosiva',   label: 'Libros IVA',  icon: BookOpen,        group: 'dinero'  },
+    { key: 'balance',     label: 'Balance',     icon: Scale,           group: 'dinero'  },
+    // 👥 PERSONAL
+    { key: 'nominas',     label: 'Nóminas',     icon: Users,           group: 'personal' },
+    { key: 'fixed',       label: 'Fijos',       icon: Zap,             group: 'personal' },
+    // 📋 CIERRES & INFORMES
+    { key: 'cierre',      label: 'Cierre',      icon: Lock,            group: 'cierres'  },
+    { key: 'informes',    label: 'Informes',    icon: PieChart,        group: 'cierres'  },
+    // 🛒 TIENDA (Shop + Stock)
+    { key: 'shop',        label: 'Tienda',      icon: ShoppingBag,     group: 'tienda'   },
+    { key: 'stock',       label: 'Stock',       icon: Package,         group: 'tienda'   },
+    // 📣 MARKETING
+    { key: 'marketing',   label: 'Marketing',   icon: Megaphone,       group: 'marketing', shortcut: '⌘5' },
+    // ⚙️ SISTEMA (agente, alertas)
+    { key: 'agente',         label: 'Agente',   icon: Bot,             group: 'sistema'  },
+    { key: 'notificaciones', label: 'Alertas',  icon: Bell,            group: 'sistema'  },
   ]), []);
 
   const cmdItems = useMemo<CmdItem<string>[]>(() => [
