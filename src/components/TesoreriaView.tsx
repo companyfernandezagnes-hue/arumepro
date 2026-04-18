@@ -1327,7 +1327,7 @@ export const TesoreriaView: React.FC<TesoreriaViewProps> = ({ data, onSave, onNa
             className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm"
             onClick={e => { if (e.target === e.currentTarget) setShowAddModal(false); }}>
             <motion.div initial={{ y: 40, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 40, opacity: 0 }}
-              className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-6 space-y-4">
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="font-black text-slate-800">{editingCobro ? 'Editar cobro' : 'Nuevo cobro B2B'}</h3>
                 <button onClick={() => setShowAddModal(false)} className="w-8 h-8 bg-slate-100 hover:bg-slate-200 rounded-xl flex items-center justify-center transition">

@@ -483,16 +483,14 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
       </AnimatePresence>
 
       {/* HEADER CON KPIs */}
-      <header className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-        <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 mb-4 border-b border-slate-100 pb-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg border border-indigo-100">
-              <ChefHat className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-800 tracking-tight">Análisis de Carta</h2>
-              <p className="text-[9px] text-slate-500 uppercase mt-0.5">Ingeniería de Menú & Mermas</p>
-            </div>
+      <header className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-[color:var(--arume-gray-100)]">
+        <div className="flex flex-col md:flex-row justify-between md:items-end gap-4 mb-4 border-b border-[color:var(--arume-gray-100)] pb-4">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Ventas · Cocina</p>
+            <h2 className="font-serif text-2xl md:text-3xl font-semibold tracking-tight mt-1 flex items-center gap-2">
+              <ChefHat className="w-6 h-6 text-[color:var(--arume-gray-400)]" /> Análisis de carta
+            </h2>
+            <p className="text-sm text-[color:var(--arume-gray-500)] mt-1">Ingeniería de menú y mermas</p>
           </div>
           
           <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-lg border border-slate-200">

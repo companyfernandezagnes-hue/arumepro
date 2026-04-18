@@ -371,12 +371,11 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
     <div className="animate-fade-in space-y-6 pb-24 max-w-[1600px] mx-auto">
 
       {/* HEADER */}
-      <header className="bg-white p-6 md:p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <header className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-[color:var(--arume-gray-100)] flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
         <div>
-          <h2 className="text-3xl font-black text-slate-800 tracking-tighter">Impuestos & Liquidaciones</h2>
-          <p className="text-xs text-indigo-500 font-bold uppercase tracking-widest mt-1 flex items-center gap-1">
-            <Building2 className="w-3 h-3"/> Panel Fiscal Arume · IVA Caja + B2B Separado
-          </p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Dinero · Fiscal</p>
+          <h2 className="font-serif text-2xl md:text-3xl font-semibold tracking-tight mt-1">Impuestos y liquidaciones</h2>
+          <p className="text-sm text-[color:var(--arume-gray-500)] mt-1">IVA caja + B2B separado</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="bg-slate-50 p-2.5 rounded-2xl border border-slate-200 flex items-center gap-2">
@@ -420,7 +419,7 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
             {/* KPI Cards top */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {/* IVA Repercutido */}
-              <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-md transition-shadow">
+              <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-md transition-shadow">
                 <div className="absolute -right-6 -top-6 w-32 h-32 bg-emerald-50 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform duration-500">
                   <TrendingUp className="w-12 h-12 text-emerald-200"/>
                 </div>
@@ -434,7 +433,7 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
               </div>
 
               {/* IVA Soportado */}
-              <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-md transition-shadow">
+              <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-md transition-shadow">
                 <div className="absolute -right-6 -top-6 w-32 h-32 bg-rose-50 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform duration-500">
                   <TrendingDown className="w-12 h-12 text-rose-200"/>
                 </div>
@@ -448,7 +447,7 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
               </div>
 
               {/* Resultado */}
-              <div className={cn('p-8 rounded-[2.5rem] border shadow-lg relative overflow-hidden flex flex-col justify-center',
+              <div className={cn('p-8 rounded-2xl border shadow-lg relative overflow-hidden flex flex-col justify-center',
                 stats.ivaBalance >= 0 ? 'bg-slate-900 border-slate-800 text-white' : 'bg-amber-500 border-amber-600 text-white')}>
                 <Scale className="absolute -right-4 -top-4 w-32 h-32 opacity-10"/>
                 <div className="relative z-10">
@@ -465,7 +464,7 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
             </div>
 
             {/* 🆕 Desglose por fuente de venta */}
-            <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               <button onClick={() => setShowDetalle(v => !v)}
                 className="w-full flex items-center justify-between px-8 py-5 hover:bg-slate-50 transition">
                 <div className="flex items-center gap-3">
@@ -541,7 +540,7 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
               ].map(k => {
                 const Icon = k.icon;
                 return (
-                  <div key={k.label} className={cn('flex items-center gap-3 p-5 rounded-[2rem] border border-slate-100', k.bg)}>
+                  <div key={k.label} className={cn('flex items-center gap-3 p-5 rounded-2xl border border-slate-100', k.bg)}>
                     <Icon className={cn('w-8 h-8', k.color)}/>
                     <div>
                       <p className="text-2xl font-black text-slate-800">{k.val}</p>
@@ -561,7 +560,7 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
           <motion.div key="equipo" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-8}} className="space-y-6">
 
             {/* Propinas */}
-            <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
+            <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
               <div className="flex items-center justify-between flex-wrap gap-4">
                 <div>
                   <h3 className="text-sm font-black text-slate-800">Propinas Estimadas</h3>
@@ -580,7 +579,7 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
             </div>
 
             {/* Gastos suplidos */}
-            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+            <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm">
               <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
                 <Wallet className="w-5 h-5 text-indigo-500"/> Reembolso gastos personales · {fmt(selectedPeriod)}
               </h3>
@@ -637,7 +636,7 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
 
             {/* KPI Beneficio estimado */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+              <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1">
                   <PiggyBank className="w-3 h-3"/> Beneficio estimado
                 </p>
@@ -647,14 +646,14 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
                 </h3>
                 <p className="text-[10px] text-slate-400 mt-2">Base ventas − Base gastos − Comisiones B2B</p>
               </div>
-              <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+              <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1">
                   <Hotel className="w-3 h-3"/> Base B2B neta
                 </p>
                 <h3 className="text-3xl font-black text-amber-600 tracking-tighter">{Num.fmt(stats.baseB2BNeto)}</h3>
                 <p className="text-[10px] text-slate-400 mt-2">Base imponible B2B − gastos directos DLV</p>
               </div>
-              <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+              <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
                 <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1">
                   <Handshake className="w-3 h-3"/> Total comisiones B2B
                 </p>
@@ -664,7 +663,7 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
             </div>
 
             {/* Fundadores */}
-            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+            <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm">
               <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
                 <Crown className="w-5 h-5 text-amber-500"/> Socios Fundadores · Sociedad Principal
               </h3>
@@ -730,7 +729,7 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
             </div>
 
             {/* Comisionistas B2B */}
-            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+            <div className="bg-white p-8 rounded-2xl border border-slate-100 shadow-sm">
               <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-6 flex items-center gap-2">
                 <Handshake className="w-5 h-5 text-purple-500"/> Comisionistas B2B · Distribución Hoteles
               </h3>
@@ -802,7 +801,7 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
          * ═════════════════════════════════════════════════ */}
         {activeTab === 'export' && (
           <motion.div key="export" initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-8}}
-            className="bg-slate-900 rounded-[2.5rem] p-8 text-white">
+            className="bg-slate-900 rounded-2xl p-8 text-white">
             <h3 className="text-lg font-black mb-6 flex items-center gap-2">
               <Download className="w-5 h-5 text-indigo-400"/> Pack Excel Gestoría · {fmt(selectedPeriod)}
             </h3>

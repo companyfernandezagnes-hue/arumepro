@@ -390,17 +390,16 @@ Celoso de Palma SL`;
     <div className="animate-fade-in space-y-6 pb-24 max-w-[1600px] mx-auto">
 
       {/* HEADER */}
-      <header className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <header className="bg-white p-6 rounded-2xl shadow-sm border border-[color:var(--arume-gray-100)]">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
           <div>
-            <h2 className="text-2xl font-black text-slate-800 tracking-tighter flex items-center gap-2">
-              <FileText className="w-6 h-6 text-indigo-600"/> Presupuestos B2B
-            </h2>
-            <p className="text-[10px] font-black text-slate-400 uppercase mt-1">Hoteles · Eventos · Catering · Corporativo</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Ventas · B2B</p>
+            <h2 className="font-serif text-2xl md:text-3xl font-semibold tracking-tight mt-1">Presupuestos</h2>
+            <p className="text-sm text-[color:var(--arume-gray-500)] mt-1">Hoteles · eventos · catering · corporativo</p>
           </div>
           <button onClick={() => { setShowForm(true); setForm(emptyPresup()); }}
-            className="flex items-center gap-2 px-5 py-3 bg-slate-900 text-white rounded-2xl text-xs font-black hover:bg-indigo-600 transition shadow-md">
-            <Plus className="w-4 h-4"/> Nuevo Presupuesto
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] hover:bg-[color:var(--arume-gray-700)] transition active:scale-[0.98]">
+            <Plus className="w-3.5 h-3.5"/> Nuevo presupuesto
           </button>
         </div>
 
@@ -449,7 +448,7 @@ Celoso de Palma SL`;
 
       {/* LISTA */}
       {filtered.length === 0 ? (
-        <div className="bg-white border-2 border-dashed border-slate-200 rounded-[2rem] p-16 text-center">
+        <div className="bg-white border-2 border-dashed border-slate-200 rounded-2xl p-16 text-center">
           <FileText className="w-12 h-12 text-slate-300 mx-auto mb-4"/>
           <p className="text-sm font-black text-slate-500">
             {presupuestos.length === 0 ? 'Aún no hay presupuestos' : 'Sin resultados para este filtro'}
@@ -469,7 +468,7 @@ Celoso de Palma SL`;
               new Date(pres.fecha).getTime() + pres.validezDias * 86400000 < Date.now();
             return (
               <motion.div key={pres.id} whileHover={{y:-2}}
-                className={cn('bg-white rounded-[2rem] border shadow-sm hover:shadow-md transition-all overflow-hidden cursor-pointer',
+                className={cn('bg-white rounded-2xl border shadow-sm hover:shadow-md transition-all overflow-hidden cursor-pointer',
                   caducado ? 'border-amber-200' : 'border-slate-100')}
                 onClick={() => setSelected(pres)}>
                 {caducado && (
@@ -526,7 +525,7 @@ Celoso de Palma SL`;
             className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4"
             onClick={e => { if (e.target===e.currentTarget) { setSelected(null); setEditingId(null); setAiText(''); } }}>
             <motion.div initial={{y:40,opacity:0}} animate={{y:0,opacity:1}} exit={{y:40,opacity:0}}
-              className="bg-white rounded-[2rem] w-full max-w-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+              className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
 
               {/* Header modal */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50 shrink-0">
@@ -758,7 +757,7 @@ const PresupuestoFormModal: React.FC<{
       className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-end sm:items-center justify-center p-4"
       onClick={e => { if (e.target===e.currentTarget) onClose(); }}>
       <motion.div initial={{y:40,opacity:0}} animate={{y:0,opacity:1}} exit={{y:40,opacity:0}}
-        className="bg-white rounded-[2rem] w-full max-w-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+        className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
 
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
           <h3 className="font-black text-slate-800">{titulo}</h3>

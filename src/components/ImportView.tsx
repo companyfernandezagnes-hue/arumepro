@@ -717,7 +717,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
           >
             <motion.div
               initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
-              className="bg-white rounded-[2rem] shadow-2xl w-full max-w-sm overflow-hidden"
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden"
               onClick={e => e.stopPropagation()}
             >
               <div className="bg-rose-50 border-b border-rose-100 px-6 py-5 flex items-center gap-3">
@@ -769,21 +769,19 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       </AnimatePresence>
 
       {/* Header */}
-      <div className="flex items-center gap-4 mb-4 px-2">
-        <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg">
-          <Database className="w-6 h-6 text-white" />
-        </div>
-        <div className="flex-1">
-          <h2 className="text-2xl font-black text-slate-800 tracking-tight">Data Input 3.1</h2>
-          <p className="text-slate-500 font-bold text-xs uppercase tracking-widest mt-1">Revisión documento a documento · Sin sorpresas</p>
+      <div className="flex items-end justify-between gap-4 mb-4 px-2 flex-wrap">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Compras · Importación</p>
+          <h2 className="font-serif text-2xl md:text-3xl font-semibold tracking-tight mt-1">Data Input</h2>
+          <p className="text-sm text-[color:var(--arume-gray-500)] mt-1">Revisión documento a documento · sin sorpresas</p>
         </div>
 
         {pendingReview.length > 0 && (
           <button
             onClick={() => setReviewItem(pendingReview[0])}
-            className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-xl text-xs font-black animate-pulse shadow-lg shadow-amber-200"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-warn)] text-white shadow-sm hover:brightness-95 transition"
           >
-            <Eye className="w-4 h-4" />
+            <Eye className="w-3.5 h-3.5" />
             {pendingReview.length} pendiente{pendingReview.length > 1 ? 's' : ''} de revisar
           </button>
         )}
@@ -800,7 +798,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         </button>
       </div>
 
-      <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden p-6 md:p-8">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden p-6 md:p-8">
 
         {/* Selector de modo */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
@@ -822,7 +820,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
 
             {(!hasQueue || !isRunning) && (
               <div
-                className={cn('border-2 border-dashed rounded-[2rem] p-10 flex flex-col items-center justify-center transition-all cursor-pointer relative overflow-hidden',
+                className={cn('border-2 border-dashed rounded-2xl p-10 flex flex-col items-center justify-center transition-all cursor-pointer relative overflow-hidden',
                   isDragging ? 'border-indigo-500 bg-indigo-50/50 scale-[1.02]' : 'border-slate-200 bg-slate-50 hover:bg-slate-100',
                   isRunning && 'opacity-50 pointer-events-none')}
                 onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} onClick={() => fileInputRef.current?.click()}
@@ -948,7 +946,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         {/* Zona Excel */}
         {importMode !== 'ia_auto' && (
           <div>
-            <div className={cn('border-2 border-dashed rounded-[2rem] p-12 flex flex-col items-center justify-center transition-all cursor-pointer relative overflow-hidden',
+            <div className={cn('border-2 border-dashed rounded-2xl p-12 flex flex-col items-center justify-center transition-all cursor-pointer relative overflow-hidden',
               isDragging ? 'border-indigo-500 bg-indigo-50/50 scale-[1.02]' : 'border-slate-200 bg-slate-50 hover:bg-slate-100')}
               onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} onClick={() => fileInputRef.current?.click()}>
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".xlsx,.csv" className="hidden" />
@@ -968,7 +966,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
             <AnimatePresence>
               {processedData && (
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }} className="mt-6">
-                  <div className="bg-white border-2 border-indigo-100 rounded-[2rem] p-6 shadow-xl relative overflow-hidden">
+                  <div className="bg-white border-2 border-indigo-100 rounded-2xl p-6 shadow-xl relative overflow-hidden">
                     <div className="absolute top-0 left-0 right-0 bg-indigo-50 py-2 px-6 border-b border-indigo-100 flex justify-between items-center">
                       <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600 flex items-center gap-1.5"><Edit3 className="w-3 h-3" /> Resumen de Importación</span>
                       <button onClick={() => setProcessedData(null)} className="text-slate-400 hover:text-slate-700"><X className="w-4 h-4" /></button>
@@ -1055,7 +1053,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       </div>
 
       {/* Limpieza Quirúrgica */}
-      <div className="mt-8 border border-slate-200 bg-white rounded-[2.5rem] p-6 md:p-8 shadow-sm">
+      <div className="mt-8 border border-slate-200 bg-white rounded-2xl p-6 md:p-8 shadow-sm">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 mb-6">
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center border border-rose-100"><CalendarClock className="w-6 h-6 text-rose-500" /></div>
@@ -1146,7 +1144,7 @@ const ReviewModal = ({ item, queuePosition, onConfirm, onSkip }: ReviewModalProp
     >
       <motion.div
         initial={{ scale: 0.96, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.96, y: 20 }}
-        className="bg-white rounded-[2rem] shadow-2xl w-full max-w-5xl flex flex-col overflow-hidden"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col overflow-hidden"
         style={{ maxHeight: '95vh' }}
       >
         {/* Header */}
@@ -1480,7 +1478,7 @@ export const GeminiKeysConfig = () => {
   const activeCount = [keys.k1, keys.k2, keys.k3].filter(k => k.trim()).length;
 
   return (
-    <div className="bg-white border border-slate-200 rounded-[2rem] p-6 space-y-4">
+    <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h3 className="font-black text-slate-800 text-base flex items-center gap-2"><Sparkles className="w-4 h-4 text-indigo-500"/>Claves API Gemini</h3>
@@ -1551,7 +1549,7 @@ const GeminiKeyModal = ({ reason, onClose, onSaved }: GeminiKeyModalProps) => {
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <motion.div initial={{ y: 60, opacity: 0, scale: 0.97 }} animate={{ y: 0, opacity: 1, scale: 1 }} exit={{ y: 40, opacity: 0, scale: 0.97 }}
         transition={{ type: 'spring', damping: 22, stiffness: 300 }}
-        className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md overflow-hidden">
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
 
         <div className={cn('px-6 pt-6 pb-4 border-b', reason === 'missing' ? 'border-rose-100 bg-rose-50' : 'border-amber-100 bg-amber-50')}>
           <div className="flex items-start justify-between">

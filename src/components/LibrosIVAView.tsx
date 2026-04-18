@@ -334,16 +334,16 @@ export const LibrosIVAView: React.FC<{ data: AppData }> = ({ data }) => {
     <div className="space-y-6 animate-fade-in pb-24 max-w-[1400px] mx-auto">
 
       {/* ── HEADER ─────────────────────────────────────────── */}
-      <div className="bg-gradient-to-br from-slate-900 to-indigo-900 p-6 md:p-8 rounded-[2.5rem] text-white relative overflow-hidden">
-        <div className="absolute -right-8 -top-8 opacity-5"><BookOpen className="w-48 h-48" /></div>
+      <div className="relative overflow-hidden bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] p-6 md:p-8 rounded-2xl">
+        <div className="absolute top-0 left-0 w-full h-[2px] bg-[color:var(--arume-gold)]/80"/>
+        <div className="absolute -right-20 -top-20 w-64 h-64 rounded-full bg-[color:var(--arume-gold)]/5 pointer-events-none"/>
         <div className="relative z-10">
-          <h2 className="text-2xl md:text-3xl font-black tracking-tight flex items-center gap-3">
-            <BookOpen className="w-8 h-8 text-indigo-400" />
+          <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-[color:var(--arume-gold)]">Dinero · Oficial</p>
+          <h2 className="font-serif text-2xl md:text-3xl font-semibold tracking-tight mt-2 flex items-center gap-3">
+            <BookOpen className="w-7 h-7 text-[color:var(--arume-gold)]" />
             Libros de IVA
           </h2>
-          <p className="text-xs text-indigo-300 font-bold uppercase tracking-[0.2em] mt-1">
-            Registro Oficial de Facturas · Celoso de Palma SL
-          </p>
+          <p className="text-sm text-white/60 mt-1">Registro oficial de facturas · Celoso de Palma SL</p>
 
           {/* Controles periodo */}
           <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -377,21 +377,21 @@ export const LibrosIVAView: React.FC<{ data: AppData }> = ({ data }) => {
 
       {/* ── RESUMEN LIQUIDACIÓN ────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm">
+        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
           <p className="text-[10px] font-black text-emerald-500 uppercase tracking-widest flex items-center gap-1.5">
             <ArrowUpRight className="w-3.5 h-3.5" /> IVA Repercutido
           </p>
           <p className="text-2xl font-black text-slate-800 mt-1">{Num.fmt(liquidacion.repercutido)}</p>
           <p className="text-[10px] text-slate-400 font-bold">{emitidas.length} facturas emitidas</p>
         </div>
-        <div className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm">
+        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
           <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest flex items-center gap-1.5">
             <ArrowDownRight className="w-3.5 h-3.5" /> IVA Soportado
           </p>
           <p className="text-2xl font-black text-slate-800 mt-1">{Num.fmt(liquidacion.soportado)}</p>
           <p className="text-[10px] text-slate-400 font-bold">{recibidas.length} facturas recibidas</p>
         </div>
-        <div className={cn('p-5 rounded-[2rem] border shadow-sm',
+        <div className={cn('p-5 rounded-2xl border shadow-sm',
           liquidacion.resultado >= 0
             ? 'bg-amber-50 border-amber-200'
             : 'bg-emerald-50 border-emerald-200'
@@ -410,7 +410,7 @@ export const LibrosIVAView: React.FC<{ data: AppData }> = ({ data }) => {
       </div>
 
       {/* ── DESGLOSE POR TIPO IVA ─────────────────────────── */}
-      <div className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm">
+      <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
         <h3 className="text-xs font-black text-slate-700 uppercase tracking-widest mb-3 flex items-center gap-2">
           <Filter className="w-4 h-4 text-indigo-400" /> Desglose por Tipo
         </h3>
@@ -467,7 +467,7 @@ export const LibrosIVAView: React.FC<{ data: AppData }> = ({ data }) => {
       </div>
 
       {/* ── TABLA DE REGISTROS ─────────────────────────────── */}
-      <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
         {/* Totales barra */}
         <div className={cn('px-5 py-3 flex items-center justify-between border-b',
           tab === 'emitidas' ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100')}>

@@ -170,17 +170,15 @@ export const NotificacionesView: React.FC<Props> = ({ data, onSave }) => {
     <div className="animate-fade-in space-y-6 pb-24">
 
       {/* ── Header ── */}
-      <header className="bg-gradient-to-br from-indigo-600 to-violet-700 p-8 rounded-[3rem] shadow-xl text-white relative overflow-hidden">
-        <div className="absolute top-0 right-0 opacity-10 scale-150 translate-x-16 -translate-y-8">
-          <Bell className="w-48 h-48" />
-        </div>
+      <header className="relative overflow-hidden bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] p-6 md:p-8 rounded-2xl">
+        <div className="absolute top-0 left-0 w-full h-[2px] bg-[color:var(--arume-gold)]/80"/>
+        <div className="absolute -right-20 -top-20 w-64 h-64 rounded-full bg-[color:var(--arume-gold)]/5 pointer-events-none"/>
         <div className="relative z-10">
-          <h2 className="text-3xl font-black tracking-tight flex items-center gap-3">
-            <BellRing className="w-8 h-8" /> Centro de Notificaciones
+          <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-[color:var(--arume-gold)]">Sistema</p>
+          <h2 className="font-serif text-3xl md:text-4xl font-semibold tracking-tight mt-2 flex items-center gap-3">
+            <BellRing className="w-7 h-7 text-[color:var(--arume-gold)]" /> Centro de notificaciones
           </h2>
-          <p className="text-xs font-bold uppercase tracking-[0.3em] mt-2 opacity-80">
-            Alertas inteligentes · Push nativo
-          </p>
+          <p className="text-sm text-white/60 mt-1">Alertas inteligentes · push nativo</p>
           <div className="flex items-center gap-3 mt-4 flex-wrap">
             <span className={cn('text-[10px] font-black px-3 py-1 rounded-full',
               prefs.enabled ? 'bg-emerald-500' : 'bg-white/20')}>

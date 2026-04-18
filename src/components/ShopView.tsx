@@ -275,22 +275,21 @@ Máximo 150 palabras. Sin preamble.`;
     <div className="animate-fade-in space-y-6 pb-24 max-w-[1600px] mx-auto">
 
       {/* HEADER */}
-      <header className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <header className="bg-white p-6 rounded-2xl shadow-sm border border-[color:var(--arume-gray-100)]">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
           <div>
-            <h2 className="text-2xl font-black text-slate-800 tracking-tighter flex items-center gap-2">
-              <Store className="w-6 h-6 text-indigo-600"/> Celosos de Palma — Tienda de Saques
-            </h2>
-            <p className="text-[10px] font-black text-slate-400 uppercase mt-1">Canal físico · Online · WhatsApp</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Tienda</p>
+            <h2 className="font-serif text-2xl md:text-3xl font-semibold tracking-tight mt-1">Celosos de Palma — Tienda de Sakes</h2>
+            <p className="text-sm text-[color:var(--arume-gray-500)] mt-1">Canal físico · Online · WhatsApp</p>
           </div>
           <div className="flex gap-2">
             <button onClick={handleExport}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 rounded-xl text-[10px] font-black hover:bg-emerald-100 transition border border-emerald-100">
-              <Download className="w-3.5 h-3.5"/> Export
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)] text-[color:var(--arume-gray-600)] hover:bg-[color:var(--arume-gray-100)] transition">
+              <Download className="w-3.5 h-3.5"/> Exportar
             </button>
             <button onClick={() => setShowForm(true)}
-              className="flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white rounded-xl text-[10px] font-black hover:bg-indigo-600 transition shadow-md">
-              <Plus className="w-3.5 h-3.5"/> Nuevo Pedido
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] hover:bg-[color:var(--arume-gray-700)] transition active:scale-[0.98]">
+              <Plus className="w-3.5 h-3.5"/> Nuevo pedido
             </button>
           </div>
         </div>
@@ -345,7 +344,7 @@ Máximo 150 palabras. Sin preamble.`;
 
             {/* Ventas por canal */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
+              <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
                 <h3 className="text-sm font-black text-slate-800 mb-4 flex items-center gap-2">
                   <BarChart3 className="w-4 h-4 text-indigo-500"/> Ventas por Canal · {new Date().toLocaleString('es-ES',{month:'long'}).toUpperCase()}
                 </h3>
@@ -376,7 +375,7 @@ Máximo 150 palabras. Sin preamble.`;
               </div>
 
               {/* Top productos */}
-              <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
+              <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
                 <h3 className="text-sm font-black text-slate-800 mb-4 flex items-center gap-2">
                   <Star className="w-4 h-4 text-amber-500"/> Top Saques Vendidos
                 </h3>
@@ -401,7 +400,7 @@ Máximo 150 palabras. Sin preamble.`;
 
             {/* Stock crítico SHOP */}
             {kpis.stockCritico > 0 && (
-              <div className="bg-rose-50 border border-rose-200 rounded-[2rem] p-5 flex items-center gap-4">
+              <div className="bg-rose-50 border border-rose-200 rounded-2xl p-5 flex items-center gap-4">
                 <AlertCircle className="w-8 h-8 text-rose-500 flex-shrink-0"/>
                 <div className="flex-1">
                   <p className="font-black text-rose-800 text-sm">{kpis.stockCritico} producto{kpis.stockCritico>1?'s':''} bajo mínimo en la tienda</p>
@@ -417,7 +416,7 @@ Máximo 150 palabras. Sin preamble.`;
             )}
 
             {/* Pedidos recientes */}
-            <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
               <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
                 <h3 className="text-sm font-black text-slate-800">Últimos pedidos</h3>
                 <button onClick={() => setActiveTab('pedidos')} className="text-xs font-black text-indigo-600 hover:text-indigo-800 transition flex items-center gap-1">
@@ -482,7 +481,7 @@ Máximo 150 palabras. Sin preamble.`;
 
             {/* Lista pedidos */}
             {filtered.length === 0 ? (
-              <div className="bg-white border-2 border-dashed border-slate-200 rounded-[2rem] p-16 text-center">
+              <div className="bg-white border-2 border-dashed border-slate-200 rounded-2xl p-16 text-center">
                 <Package className="w-12 h-12 text-slate-300 mx-auto mb-4"/>
                 <p className="text-sm font-black text-slate-500">Sin pedidos</p>
                 <button onClick={() => setShowForm(true)}
@@ -496,7 +495,7 @@ Máximo 150 palabras. Sin preamble.`;
                   const m = ESTADO_PEDIDO[p.estado]; const Icon = m.icon;
                   return (
                     <motion.div key={p.id} whileHover={{y:-2}}
-                      className="bg-white rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-md transition-all cursor-pointer overflow-hidden"
+                      className="bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all cursor-pointer overflow-hidden"
                       onClick={() => setSelected(p)}>
                       <div className={cn('px-4 py-2 flex items-center gap-2 border-b', m.bg, m.border)}>
                         <Icon className={cn('w-3.5 h-3.5', m.color)}/>
@@ -543,7 +542,7 @@ Máximo 150 palabras. Sin preamble.`;
             </div>
 
             {productosSHOP.length === 0 ? (
-              <div className="bg-white border-2 border-dashed border-slate-200 rounded-[2rem] p-16 text-center">
+              <div className="bg-white border-2 border-dashed border-slate-200 rounded-2xl p-16 text-center">
                 <ShoppingBag className="w-12 h-12 text-slate-300 mx-auto mb-4"/>
                 <p className="text-sm font-black text-slate-500">Sin productos en el catálogo SHOP</p>
                 <p className="text-xs text-slate-400 mt-1">Añade productos en Stock → Boutique de Saques</p>
@@ -556,7 +555,7 @@ Máximo 150 palabras. Sin preamble.`;
                   const precioVenta = ing.cost ? Num.round2(ing.cost * 1.60) : null;
                   return (
                     <div key={ing.id}
-                      className={cn('bg-white rounded-[2rem] border p-5 shadow-sm',
+                      className={cn('bg-white rounded-2xl border p-5 shadow-sm',
                         critico ? 'border-rose-200 bg-rose-50/30' : 'border-slate-100')}>
                       <div className="flex items-start justify-between mb-3">
                         <div className="min-w-0 flex-1">
@@ -610,7 +609,7 @@ Máximo 150 palabras. Sin preamble.`;
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {PLATAFORMAS.map(p => (
                   <div key={p.nombre}
-                    className={cn('bg-white rounded-[2rem] border p-5 shadow-sm relative overflow-hidden',
+                    className={cn('bg-white rounded-2xl border p-5 shadow-sm relative overflow-hidden',
                       p.recomendado ? 'border-indigo-300 ring-2 ring-indigo-100' : 'border-slate-100')}>
                     {p.recomendado && (
                       <div className="absolute top-3 right-3 bg-indigo-600 text-white text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest">
@@ -659,7 +658,7 @@ Máximo 150 palabras. Sin preamble.`;
             </div>
 
             {/* Webhook Shopify */}
-            <div className="bg-white rounded-[2.5rem] border border-slate-100 p-6 shadow-sm space-y-4">
+            <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm space-y-4">
               <h3 className="text-sm font-black text-slate-700 flex items-center gap-2">
                 <Webhook className="w-4 h-4 text-indigo-500"/> Conexión Shopify → Arume PRO
               </h3>
@@ -683,7 +682,7 @@ Máximo 150 palabras. Sin preamble.`;
             </div>
 
             {/* IA Asesor */}
-            <div className="bg-slate-900 rounded-[2.5rem] p-6 space-y-4 text-white">
+            <div className="bg-slate-900 rounded-2xl p-6 space-y-4 text-white">
               <h3 className="font-black flex items-center gap-2 text-sm">
                 <Sparkles className="w-4 h-4 text-indigo-400"/> Asesor Ecommerce IA
               </h3>
@@ -721,7 +720,7 @@ Máximo 150 palabras. Sin preamble.`;
             className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4"
             onClick={e => { if (e.target===e.currentTarget) setSelected(null); }}>
             <motion.div initial={{y:40,opacity:0}} animate={{y:0,opacity:1}} exit={{y:40,opacity:0}}
-              className="bg-white rounded-[2rem] w-full max-w-lg shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+              className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
               <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-slate-50 shrink-0">
                 <div>
                   <p className="text-[10px] font-black text-indigo-600 uppercase">{selected.num}</p>
@@ -855,7 +854,7 @@ const NuevoPedidoModal: React.FC<{
       className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-end sm:items-center justify-center p-4"
       onClick={e => { if (e.target===e.currentTarget) onClose(); }}>
       <motion.div initial={{y:40,opacity:0}} animate={{y:0,opacity:1}} exit={{y:40,opacity:0}}
-        className="bg-white rounded-[2rem] w-full max-w-xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+        className="bg-white rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
           <h3 className="font-black text-slate-800">Nuevo Pedido</h3>
           <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-xl transition"><X className="w-4 h-4 text-slate-500"/></button>

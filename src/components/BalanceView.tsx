@@ -261,16 +261,16 @@ export const BalanceView: React.FC<{ data: AppData }> = ({ data }) => {
     <div className="space-y-6 animate-fade-in pb-24 max-w-[1200px] mx-auto">
 
       {/* ── HEADER ─────────────────────────────────────────── */}
-      <div className="bg-gradient-to-br from-slate-900 to-emerald-900 p-6 md:p-8 rounded-[2.5rem] text-white relative overflow-hidden">
-        <div className="absolute -right-8 -top-8 opacity-5"><Scale className="w-48 h-48" /></div>
+      <div className="relative overflow-hidden bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] p-6 md:p-8 rounded-2xl">
+        <div className="absolute top-0 left-0 w-full h-[2px] bg-[color:var(--arume-gold)]/80"/>
+        <div className="absolute -right-20 -top-20 w-64 h-64 rounded-full bg-[color:var(--arume-gold)]/5 pointer-events-none"/>
         <div className="relative z-10">
-          <h2 className="text-2xl md:text-3xl font-black tracking-tight flex items-center gap-3">
-            <Scale className="w-8 h-8 text-emerald-400" />
-            Balance de Situación
+          <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-[color:var(--arume-gold)]">Dinero · Contable</p>
+          <h2 className="font-serif text-2xl md:text-3xl font-semibold tracking-tight mt-2 flex items-center gap-3">
+            <Scale className="w-7 h-7 text-[color:var(--arume-gold)]" />
+            Balance de situación
           </h2>
-          <p className="text-xs text-emerald-300 font-bold uppercase tracking-[0.2em] mt-1">
-            Celoso de Palma SL · {MONTHS[month]} {year}
-          </p>
+          <p className="text-sm text-white/60 mt-1">Celoso de Palma SL · {MONTHS[month]} {year}</p>
 
           {/* Selector periodo */}
           <div className="mt-4 flex items-center gap-3">
@@ -294,7 +294,7 @@ export const BalanceView: React.FC<{ data: AppData }> = ({ data }) => {
       </div>
 
       {/* ── PATRIMONIO NETO (gran KPI) ─────────────────────── */}
-      <div className={cn('p-6 rounded-[2.5rem] border shadow-lg flex flex-col sm:flex-row items-center justify-between gap-4',
+      <div className={cn('p-6 rounded-2xl border shadow-lg flex flex-col sm:flex-row items-center justify-between gap-4',
         balance.patrimonioNeto >= 0
           ? 'bg-gradient-to-r from-emerald-50 to-white border-emerald-200'
           : 'bg-gradient-to-r from-rose-50 to-white border-rose-200'
@@ -321,7 +321,7 @@ export const BalanceView: React.FC<{ data: AppData }> = ({ data }) => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
         {/* ACTIVO */}
-        <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           <div className="px-5 py-4 bg-emerald-50 border-b border-emerald-100 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <TrendingUp className="w-5 h-5 text-emerald-500" />
@@ -340,7 +340,7 @@ export const BalanceView: React.FC<{ data: AppData }> = ({ data }) => {
         </div>
 
         {/* PASIVO */}
-        <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           <div className="px-5 py-4 bg-rose-50 border-b border-rose-100 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <TrendingDown className="w-5 h-5 text-rose-500" />
@@ -361,7 +361,7 @@ export const BalanceView: React.FC<{ data: AppData }> = ({ data }) => {
 
       {/* ── ACTIVOS FIJOS DETALLE ──────────────────────────── */}
       {balance.activosFijos.length > 0 && (
-        <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           <div className="px-5 py-4 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
             <Home className="w-4 h-4 text-slate-400" />
             <h3 className="text-xs font-black text-slate-700 uppercase tracking-widest">Detalle Activos Fijos (Amortización)</h3>
@@ -390,7 +390,7 @@ export const BalanceView: React.FC<{ data: AppData }> = ({ data }) => {
       )}
 
       {/* ── INFO EDUCATIVA ─────────────────────────────────── */}
-      <div className="bg-indigo-50 p-5 rounded-[2rem] border border-indigo-100 flex items-start gap-3">
+      <div className="bg-indigo-50 p-5 rounded-2xl border border-indigo-100 flex items-start gap-3">
         <Info className="w-5 h-5 text-indigo-400 flex-shrink-0 mt-0.5" />
         <div className="text-[10px] text-indigo-700 font-bold leading-relaxed space-y-1">
           <p><strong>ACTIVO</strong> = lo que la empresa TIENE (dinero, stock, lo que le deben clientes, mobiliario...)</p>
