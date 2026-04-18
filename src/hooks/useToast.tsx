@@ -91,19 +91,19 @@ export function ToastRenderer() {
   );
 }
 
-// Item individual
+// Item individual — estilo editorial Arume
 const ICONS: Record<ToastType, React.ReactNode> = {
-  success: <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />,
-  error:   <XCircle      className="w-4 h-4 text-rose-500 shrink-0" />,
-  warning: <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />,
-  info:    <Info          className="w-4 h-4 text-sky-500 shrink-0" />,
+  success: <CheckCircle2 className="w-4 h-4 shrink-0" style={{ color: 'var(--arume-ok)' }} />,
+  error:   <XCircle      className="w-4 h-4 shrink-0" style={{ color: 'var(--arume-danger)' }} />,
+  warning: <AlertTriangle className="w-4 h-4 shrink-0" style={{ color: 'var(--arume-warn)' }} />,
+  info:    <Info          className="w-4 h-4 shrink-0" style={{ color: 'var(--arume-info)' }} />,
 };
 
-const STYLES: Record<ToastType, string> = {
-  success: 'bg-white border-emerald-200 shadow-emerald-100',
-  error:   'bg-white border-rose-200 shadow-rose-100',
-  warning: 'bg-white border-amber-200 shadow-amber-100',
-  info:    'bg-white border-sky-200 shadow-sky-100',
+const ACCENT: Record<ToastType, string> = {
+  success: 'var(--arume-ok)',
+  error:   'var(--arume-danger)',
+  warning: 'var(--arume-warn)',
+  info:    'var(--arume-info)',
 };
 
 function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: (id: string) => void }) {
@@ -121,16 +121,16 @@ function ToastItem({ toast: t, onDismiss }: { toast: Toast; onDismiss: (id: stri
       animate={{ opacity: 1, x: 0, scale: 1 }}
       exit={{ opacity: 0, x: 40, scale: 0.95 }}
       transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-      className={cn(
-        'pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl border shadow-lg max-w-sm w-full',
-        STYLES[t.type],
-      )}
+      className="pointer-events-auto relative flex items-center gap-3 pl-4 pr-3 py-3 rounded-xl bg-[color:var(--arume-paper)] border border-[color:var(--arume-gray-100)] max-w-sm w-full overflow-hidden"
+      style={{ boxShadow: '0 12px 40px rgba(11,11,12,0.12)' }}
     >
+      {/* Barra lateral de color según tipo */}
+      <span className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ background: ACCENT[t.type] }} />
       {ICONS[t.type]}
-      <p className="flex-1 text-xs font-bold text-slate-800 leading-snug">{t.message}</p>
+      <p className="flex-1 text-sm font-medium text-[color:var(--arume-ink)] leading-snug">{t.message}</p>
       <button
         onClick={() => onDismiss(t.id)}
-        className="text-slate-300 hover:text-slate-500 transition shrink-0"
+        className="text-[color:var(--arume-gray-300)] hover:text-[color:var(--arume-ink)] transition shrink-0"
         aria-label="Cerrar"
       >
         <X className="w-3.5 h-3.5" />

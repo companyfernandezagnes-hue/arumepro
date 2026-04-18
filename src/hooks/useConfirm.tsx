@@ -98,9 +98,9 @@ export function ConfirmProvider() {
   const variant = state?.danger ? 'danger' : state?.warning ? 'warning' : 'info';
 
   const CFG = {
-    danger:  { iconBg: 'bg-rose-50',   icon: <Trash2     className="w-6 h-6 text-rose-500"   />, btn: 'bg-rose-500 hover:bg-rose-600',     label: 'Eliminar'   },
-    warning: { iconBg: 'bg-amber-50',  icon: <AlertTriangle className="w-6 h-6 text-amber-500"/>, btn: 'bg-amber-500 hover:bg-amber-600',   label: 'Continuar'  },
-    info:    { iconBg: 'bg-indigo-50', icon: <HelpCircle  className="w-6 h-6 text-indigo-500"/>, btn: 'bg-indigo-600 hover:bg-indigo-700', label: 'Confirmar'  },
+    danger:  { icon: <Trash2        className="w-5 h-5" style={{ color: 'var(--arume-danger)' }} />, accent: 'var(--arume-danger)', btnBg: 'bg-[color:var(--arume-danger)] hover:brightness-95', label: 'Eliminar'  },
+    warning: { icon: <AlertTriangle className="w-5 h-5" style={{ color: 'var(--arume-warn)'   }} />, accent: 'var(--arume-warn)',   btnBg: 'bg-[color:var(--arume-warn)] hover:brightness-95',   label: 'Continuar' },
+    info:    { icon: <HelpCircle    className="w-5 h-5" style={{ color: 'var(--arume-ink)'    }} />, accent: 'var(--arume-ink)',    btnBg: 'bg-[color:var(--arume-ink)] hover:bg-[color:var(--arume-gray-700)]', label: 'Confirmar' },
   } as const;
 
   const cfg = CFG[variant];
@@ -109,47 +109,56 @@ export function ConfirmProvider() {
     <AnimatePresence>
       {state && (
         <div
-          className="fixed inset-0 z-[9998] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+          className="fixed inset-0 z-[9998] flex items-center justify-center p-4 bg-[color:var(--arume-ink)]/70 backdrop-blur-sm"
           onClick={() => handleResolve(false)}
         >
           <motion.div
-            initial={{ opacity: 0, scale: 0.93, y: 10 }}
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1,    y: 0  }}
-            exit={{    opacity: 0, scale: 0.93, y: 10 }}
+            exit={{    opacity: 0, scale: 0.95, y: 10 }}
             transition={{ type: 'spring', stiffness: 380, damping: 28 }}
-            className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 flex flex-col gap-5"
+            className="relative bg-[color:var(--arume-paper)] rounded-2xl w-full max-w-sm p-7 flex flex-col gap-5 overflow-hidden"
+            style={{ boxShadow: '0 24px 80px rgba(11,11,12,0.35)' }}
             onClick={e => e.stopPropagation()}
           >
-            {/* Icono */}
-            <div className={cn('w-14 h-14 rounded-2xl flex items-center justify-center mx-auto shadow-sm', cfg.iconBg)}>
-              {cfg.icon}
+            {/* Línea acento superior */}
+            <span className="absolute top-0 left-0 right-0 h-[2px]" style={{ background: cfg.accent }} />
+
+            {/* Icono + label variante */}
+            <div className="flex items-center gap-2">
+              <div className="w-9 h-9 rounded-full flex items-center justify-center bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)]">
+                {cfg.icon}
+              </div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">
+                {variant === 'danger' ? 'Confirmar eliminación' : variant === 'warning' ? 'Confirmar acción' : 'Confirmar'}
+              </p>
             </div>
 
             {/* Texto */}
-            <div className="text-center space-y-1.5">
-              <h3 className="text-base font-black text-slate-800 leading-snug">{state.title}</h3>
+            <div className="space-y-2">
+              <h3 className="font-serif text-xl font-semibold tracking-tight leading-snug text-[color:var(--arume-ink)]">{state.title}</h3>
               {state.message && (
-                <p className="text-xs text-slate-500 leading-relaxed whitespace-pre-line">{state.message}</p>
+                <p className="text-sm text-[color:var(--arume-gray-500)] leading-relaxed whitespace-pre-line">{state.message}</p>
               )}
             </div>
 
             {/* Atajo de teclado */}
-            <p className="text-center text-[9px] font-bold text-slate-300 uppercase tracking-widest -mt-2">
-              Enter para confirmar · Esc para cancelar
+            <p className="text-[10px] font-semibold text-[color:var(--arume-gray-300)] uppercase tracking-[0.15em]">
+              Enter confirma · Esc cancela
             </p>
 
             {/* Botones */}
-            <div className="flex gap-3">
+            <div className="flex gap-2">
               <button
                 onClick={() => handleResolve(false)}
-                className="flex-1 py-3 px-4 rounded-2xl border border-slate-200 text-xs font-black text-slate-600 hover:bg-slate-50 transition-colors active:scale-95"
+                className="flex-1 py-2.5 px-4 rounded-full border border-[color:var(--arume-gray-200)] text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gray-600)] hover:bg-[color:var(--arume-gray-50)] transition active:scale-[0.98]"
               >
                 {state.cancelLabel ?? 'Cancelar'}
               </button>
               <button
                 autoFocus
                 onClick={() => handleResolve(true)}
-                className={cn('flex-1 py-3 px-4 rounded-2xl text-xs font-black text-white transition-all shadow-lg active:scale-95', cfg.btn)}
+                className={cn('flex-1 py-2.5 px-4 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] text-white transition active:scale-[0.98]', cfg.btnBg)}
               >
                 {state.confirmLabel ?? cfg.label}
               </button>

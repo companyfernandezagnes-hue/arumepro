@@ -138,38 +138,129 @@ function CommandPalette<T extends string>({ open, onClose, items, onSelect, onAc
     return items.filter(i => i.label.toLowerCase().includes(qq));
   }, [q, items]);
 
+  // Agrupar por grupo si no hay búsqueda activa
+  const groupedEntries = useMemo(() => {
+    if (q.trim()) return null;
+    const order = ['inicio','compras','ventas','dinero','personal','cierres','tienda','marketing','sistema'];
+    const labels: Record<string, string> = {
+      inicio:'Inicio', compras:'Compras', ventas:'Ventas', dinero:'Dinero',
+      personal:'Personal', cierres:'Cierres', tienda:'Tienda',
+      marketing:'Marketing', sistema:'Sistema',
+    };
+    const map: Record<string, CmdItem<T>[]> = {};
+    for (const it of filtered) {
+      const g = it.group || 'otros';
+      (map[g] = map[g] || []).push(it);
+    }
+    return order
+      .filter(k => map[k]?.length)
+      .map(k => ({ group: k, label: labels[k] || k, items: map[k] }))
+      .concat(
+        Object.keys(map)
+          .filter(k => !order.includes(k))
+          .map(k => ({ group: k, label: labels[k] || k, items: map[k] }))
+      );
+  }, [q, filtered]);
+
   useEffect(() => { if (open) setQ(''); }, [open]);
   if (!open) return null;
 
+  const renderItem = (i: CmdItem<T>) => {
+    const Icon = i.icon;
+    return (
+      <button
+        className={cn(
+          "w-full text-left px-3 py-2.5 rounded-xl text-sm transition-colors flex items-center justify-between group",
+          i.isAction
+            ? "bg-[color:var(--arume-gold)]/10 text-[color:var(--arume-ink)] hover:bg-[color:var(--arume-gold)]/20 border border-[color:var(--arume-gold)]/30"
+            : "text-[color:var(--arume-ink)] hover:bg-[color:var(--arume-gray-50)] border border-transparent"
+        )}
+        onClick={() => i.isAction ? onAction(i.key) : onSelect(i.key)}
+      >
+        <div className="flex items-center gap-2.5">
+          {Icon && <Icon className={cn("w-4 h-4", i.isAction ? "text-[color:var(--arume-gold)]" : "text-[color:var(--arume-gray-400)] group-hover:text-[color:var(--arume-ink)]")} />}
+          <span className="font-medium">{i.label}</span>
+          {i.badge && (
+            <span className="ml-1 px-2 py-0.5 bg-[color:var(--arume-gold)] text-[color:var(--arume-ink)] text-[9px] font-bold uppercase tracking-[0.15em] rounded-full">
+              {i.badge}
+            </span>
+          )}
+        </div>
+        {i.shortcut && (
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded border border-[color:var(--arume-gray-200)] text-[color:var(--arume-gray-500)] bg-[color:var(--arume-gray-50)]">
+            {i.shortcut}
+          </span>
+        )}
+      </button>
+    );
+  };
+
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-[300] flex justify-center items-start pt-[12vh] px-4" aria-modal="true" role="dialog">
-        <motion.button initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} aria-label="Cerrar" className="absolute inset-0 w-full h-full bg-slate-900/50 backdrop-blur-sm cursor-default border-none outline-none" onClick={onClose} />
-        <motion.div initial={{ y: -10, scale: 0.98, opacity: 0 }} animate={{ y: 0, scale: 1, opacity: 1 }} className="relative w-full max-w-xl rounded-xl bg-white shadow-2xl border border-slate-200 overflow-hidden z-10 flex flex-col max-h-[70vh]">
-          <div className="p-3 border-b border-slate-100 flex items-center gap-3 bg-slate-50 shrink-0">
-            <Search className="w-5 h-5 text-indigo-500" />
-            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar módulo o acción..." className="flex-1 outline-none text-sm font-semibold text-slate-800 bg-transparent" onKeyDown={(e) => { if (e.key === 'Enter' && filtered.length > 0) { filtered[0].isAction ? onAction(filtered[0].key) : onSelect(filtered[0].key); } if (e.key === 'Escape') onClose(); }} />
-            <span className="text-[10px] font-bold text-slate-400 bg-slate-200 px-1.5 py-0.5 rounded">ESC</span>
+      <div className="fixed inset-0 z-[300] flex justify-center items-start pt-[10vh] px-4" aria-modal="true" role="dialog">
+        <motion.button
+          initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          aria-label="Cerrar"
+          className="absolute inset-0 w-full h-full bg-[color:var(--arume-ink)]/70 backdrop-blur-sm cursor-default border-none outline-none"
+          onClick={onClose}
+        />
+        <motion.div
+          initial={{ y: -10, scale: 0.98, opacity: 0 }}
+          animate={{ y: 0, scale: 1, opacity: 1 }}
+          className="relative w-full max-w-xl rounded-2xl bg-[color:var(--arume-paper)] border border-[color:var(--arume-gray-100)] overflow-hidden z-10 flex flex-col max-h-[75vh]"
+          style={{ boxShadow: '0 24px 80px rgba(11,11,12,0.35)' }}
+        >
+          {/* Línea dorada superior */}
+          <span className="absolute top-0 left-0 right-0 h-[2px] bg-[color:var(--arume-gold)]"/>
+
+          {/* Buscador */}
+          <div className="p-4 border-b border-[color:var(--arume-gray-100)] flex items-center gap-3 shrink-0">
+            <Search className="w-4 h-4 text-[color:var(--arume-gray-400)]" />
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Buscar módulo o acción…"
+              className="flex-1 outline-none text-base text-[color:var(--arume-ink)] placeholder:text-[color:var(--arume-gray-400)] bg-transparent"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && filtered.length > 0) {
+                  filtered[0].isAction ? onAction(filtered[0].key) : onSelect(filtered[0].key);
+                }
+                if (e.key === 'Escape') onClose();
+              }}
+            />
+            <span className="text-[10px] font-semibold text-[color:var(--arume-gray-500)] border border-[color:var(--arume-gray-200)] bg-white px-2 py-0.5 rounded">ESC</span>
           </div>
-          <div className="overflow-y-auto p-2 custom-scrollbar bg-white flex-1">
-            {filtered.length === 0 && <p className="text-xs font-semibold text-slate-400 px-4 py-8 text-center">No hay resultados.</p>}
-            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1">
-              {filtered.map((i) => {
-                const Icon = i.icon;
-                return (
-                  <li key={i.key}>
-                    <button className={cn("w-full text-left px-3 py-2.5 rounded-lg text-xs font-semibold transition-colors flex items-center justify-between group", i.isAction ? "text-indigo-700 bg-indigo-50 hover:bg-indigo-100" : "text-slate-600 hover:bg-slate-100")} onClick={() => i.isAction ? onAction(i.key) : onSelect(i.key)}>
-                      <div className="flex items-center gap-2">
-                        {Icon && <Icon className={cn("w-4 h-4 transition-colors", i.isAction ? "text-indigo-500" : "text-slate-400 group-hover:text-indigo-500")} />}
-                        {i.label}
-                        {i.badge && <span className="ml-1 px-1.5 py-0.5 bg-fuchsia-100 text-fuchsia-600 text-[8px] font-black uppercase rounded">{i.badge}</span>}
-                      </div>
-                      {i.shortcut && <span className={cn("text-[9px] font-bold px-1.5 py-0.5 rounded transition-colors", i.isAction ? "bg-indigo-200 text-indigo-800" : "text-slate-400 bg-slate-100 group-hover:bg-indigo-100 group-hover:text-indigo-500")}>{i.shortcut}</span>}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+
+          {/* Lista */}
+          <div className="overflow-y-auto p-2 custom-scrollbar flex-1">
+            {filtered.length === 0 && (
+              <p className="text-sm text-[color:var(--arume-gray-400)] px-4 py-10 text-center">
+                No hay resultados para “{q}”.
+              </p>
+            )}
+            {groupedEntries ? (
+              <div className="space-y-4 p-2">
+                {groupedEntries.map(({ group, label, items: list }) => (
+                  <div key={group}>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-400)] px-2 mb-1.5">{label}</p>
+                    <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                      {list.map(i => <li key={i.key}>{renderItem(i)}</li>)}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1 p-2">
+                {filtered.map(i => <li key={i.key}>{renderItem(i)}</li>)}
+              </ul>
+            )}
+          </div>
+
+          {/* Footer con atajos */}
+          <div className="border-t border-[color:var(--arume-gray-100)] px-4 py-2.5 flex items-center justify-between text-[10px] text-[color:var(--arume-gray-400)] font-semibold uppercase tracking-[0.15em]">
+            <span>↑↓ navegar · ⏎ abrir</span>
+            <span>Arume Pro</span>
           </div>
         </motion.div>
       </div>
