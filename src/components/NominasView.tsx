@@ -1,13 +1,14 @@
 // ==========================================
 // 👥 NominasView.tsx — Gestión de Nóminas y Seguridad Social
 // ==========================================
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import {
   Users, UserPlus, UserMinus, Euro, TrendingUp, TrendingDown,
   Calendar, Briefcase, Shield, Download, Edit3, Trash2, X,
   Save, ChevronDown, ChevronUp, FileText, Building2, PieChart, Scale,
-  Clock, AlertCircle, CheckCircle2, Plus,
+  Clock, AlertCircle, CheckCircle2, Plus, Upload, Loader2, Sparkles,
 } from 'lucide-react';
+import { scanBase64 } from '../services/aiProviders';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppData } from '../types';
 import { Num } from '../services/engine';
@@ -92,6 +93,12 @@ export const NominasView: React.FC<Props> = ({ data, onSave }) => {
   const [editTrab, setEditTrab] = useState<Trabajador | null>(null);
   const [showNominaForm, setShowNominaForm] = useState(false);
   const [expandedTrab, setExpandedTrab] = useState<string | null>(null);
+
+  // ── Importación masiva de nóminas con IA ──
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<string>('');
+  const [importResults, setImportResults] = useState<{ name: string; status: 'ok' | 'error'; msg: string }[]>([]);
+  const nominasFileRef = useRef<HTMLInputElement>(null);
 
   // ── Data accessors ──
   const plantilla: Trabajador[] = (data as any).plantilla || [];
@@ -252,6 +259,117 @@ export const NominasView: React.FC<Props> = ({ data, onSave }) => {
     await onSave(newData);
     setShowNominaForm(false);
     toast.success('Nómina registrada');
+  }, [data, onSave, plantilla]);
+
+  // ── Importar nóminas del mes con IA (OCR + extracción estructurada) ──
+  const handleBulkImportNominas = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    e.target.value = '';
+    if (!files || files.length === 0) return;
+
+    setIsImporting(true);
+    setImportResults([]);
+    const results: typeof importResults = [];
+    const nuevas: NominaRegistro[] = [];
+
+    const prompt = `Eres un experto en nóminas españolas. Extrae de esta nómina los siguientes campos y devuelve SOLO un JSON válido sin markdown ni comentarios:
+{
+  "nombre_trabajador": "nombre completo del empleado",
+  "mes": "YYYY-MM del periodo de la nómina",
+  "bruto": número (devengos brutos totales),
+  "irpf_retenido": número (retención IRPF en euros),
+  "ss_empleado": número (aportación del trabajador a la SS),
+  "liquido": número (líquido a percibir),
+  "ss_empresa": número (coste SS a cargo de la empresa, si aparece; 0 si no)
+}
+Todos los importes SIN símbolo €, con punto decimal. Si algún campo no aparece, usa 0.`;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      setImportProgress(`Leyendo ${i + 1}/${files.length}: ${file.name}`);
+      try {
+        // Convertir a base64
+        const b64: string = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error('Error leyendo archivo'));
+          reader.readAsDataURL(file);
+        });
+
+        const scan = await scanBase64(b64, file.type || 'application/pdf', prompt);
+        const raw = scan?.raw || {};
+        // Gemini suele devolver el JSON dentro de raw.copy o raw como objeto directo
+        let parsed: any = raw;
+        if (typeof raw === 'string') {
+          try { parsed = JSON.parse((raw as string).replace(/^```json\s*|\s*```$/g, '')); } catch { parsed = {}; }
+        } else if ((raw as any).copy && typeof (raw as any).copy === 'string') {
+          try { parsed = JSON.parse(((raw as any).copy as string).replace(/^```json\s*|\s*```$/g, '')); } catch { parsed = raw; }
+        }
+
+        const nombre = String(parsed.nombre_trabajador || parsed.nombre || '').trim();
+        const mes = String(parsed.mes || '').trim().slice(0, 7);
+        const bruto = Num.parse(parsed.bruto || 0);
+        const irpf = Num.parse(parsed.irpf_retenido || parsed.irpf || 0);
+        const ssEmp = Num.parse(parsed.ss_empleado || 0);
+        const liquido = Num.parse(parsed.liquido || (bruto - irpf - ssEmp));
+        const ssEmpresa = Num.parse(parsed.ss_empresa || 0);
+
+        if (!nombre || !mes || !/^\d{4}-\d{2}$/.test(mes)) {
+          results.push({ name: file.name, status: 'error', msg: 'No se pudo extraer nombre o mes' });
+          continue;
+        }
+
+        // Buscar trabajador existente por nombre (match flexible)
+        const nomLow = nombre.toLowerCase();
+        const trab = plantilla.find(t => t.nombre.toLowerCase().includes(nomLow) || nomLow.includes(t.nombre.toLowerCase()));
+
+        const nomina: NominaRegistro = {
+          id: `nom-${Date.now()}-${i}`,
+          mes,
+          trabajadorId: trab?.id || '',
+          nombre: trab?.nombre || nombre,
+          bruto: Num.round2(bruto),
+          irpfRetenido: Num.round2(irpf),
+          ssEmpleado: Num.round2(ssEmp),
+          liquido: Num.round2(liquido),
+          ssEmpresa: Num.round2(ssEmpresa),
+          costeTotalEmpresa: Num.round2(liquido + ssEmpresa),
+        };
+
+        nuevas.push(nomina);
+        results.push({
+          name: file.name,
+          status: 'ok',
+          msg: `${nomina.nombre} · ${mes} · Líquido ${Num.fmt(nomina.liquido)}${trab ? '' : ' (trabajador nuevo)'}`,
+        });
+      } catch (err: any) {
+        results.push({ name: file.name, status: 'error', msg: err?.message || 'Error al procesar' });
+      }
+    }
+
+    // Guardar todas las nóminas nuevas a la vez
+    if (nuevas.length > 0) {
+      const newData = JSON.parse(JSON.stringify(data));
+      if (!newData.nominas_registro) newData.nominas_registro = [];
+      // Evitar duplicados (mismo nombre + mes + bruto)
+      const existentes = new Set(
+        (newData.nominas_registro as NominaRegistro[]).map(n => `${n.nombre}__${n.mes}__${n.bruto.toFixed(2)}`)
+      );
+      let añadidas = 0;
+      for (const n of nuevas) {
+        const key = `${n.nombre}__${n.mes}__${n.bruto.toFixed(2)}`;
+        if (!existentes.has(key)) {
+          newData.nominas_registro.push(n);
+          añadidas++;
+        }
+      }
+      await onSave(newData);
+      toast.success(`${añadidas} nómina${añadidas !== 1 ? 's' : ''} importada${añadidas !== 1 ? 's' : ''} con IA ✨`);
+    }
+
+    setImportResults(results);
+    setImportProgress('');
+    setIsImporting(false);
   }, [data, onSave, plantilla]);
 
   // ── Export Excel ──
@@ -586,13 +704,74 @@ export const NominasView: React.FC<Props> = ({ data, onSave }) => {
       {/* ════════════════════════════════════════════════════════════════════ */}
       {tab === 'registro' && (
         <div className="space-y-4">
-          <div className="flex justify-between items-center">
+          <div className="flex flex-wrap justify-between items-center gap-2">
             <h3 className="text-lg font-bold text-gray-900">Registro de Nóminas {year}</h3>
-            <button onClick={() => setShowNominaForm(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-fuchsia-600 text-white rounded-xl text-sm font-bold hover:bg-fuchsia-700 transition">
-              <Plus className="w-4 h-4" /> Registrar Nómina
-            </button>
+            <div className="flex gap-2">
+              <input
+                ref={nominasFileRef}
+                type="file"
+                accept="application/pdf,image/*"
+                multiple
+                className="hidden"
+                onChange={handleBulkImportNominas}
+              />
+              <button
+                onClick={() => nominasFileRef.current?.click()}
+                disabled={isImporting}
+                className={cn(
+                  'flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition border',
+                  isImporting
+                    ? 'bg-fuchsia-100 text-fuchsia-400 border-fuchsia-200 cursor-wait'
+                    : 'bg-gradient-to-r from-fuchsia-500 to-violet-500 text-white border-transparent hover:from-fuchsia-600 hover:to-violet-600 shadow'
+                )}
+              >
+                {isImporting ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /> Leyendo…</>
+                ) : (
+                  <><Sparkles className="w-4 h-4" /> Importar con IA</>
+                )}
+              </button>
+              <button onClick={() => setShowNominaForm(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-50 transition">
+                <Plus className="w-4 h-4" /> Manual
+              </button>
+            </div>
           </div>
+
+          {/* Progreso de importación */}
+          {isImporting && importProgress && (
+            <div className="bg-fuchsia-50 border border-fuchsia-200 rounded-xl p-3 flex items-center gap-3">
+              <Loader2 className="w-5 h-5 animate-spin text-fuchsia-500"/>
+              <p className="text-sm font-bold text-fuchsia-700">{importProgress}</p>
+            </div>
+          )}
+
+          {/* Resultados de la última importación */}
+          {importResults.length > 0 && !isImporting && (
+            <div className="bg-white border border-slate-200 rounded-xl p-3 space-y-2">
+              <div className="flex justify-between items-center">
+                <p className="text-xs font-black text-slate-500 uppercase tracking-widest">
+                  Resultado · {importResults.filter(r => r.status === 'ok').length}/{importResults.length} OK
+                </p>
+                <button onClick={() => setImportResults([])}
+                  className="text-[10px] font-black text-slate-400 hover:text-slate-600 uppercase tracking-widest">
+                  Cerrar
+                </button>
+              </div>
+              {importResults.map((r, i) => (
+                <div key={i} className={cn('flex items-start gap-2 text-xs p-2 rounded-lg',
+                  r.status === 'ok' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700')}>
+                  {r.status === 'ok'
+                    ? <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5"/>
+                    : <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5"/>}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold truncate">{r.name}</p>
+                    <p className="opacity-80">{r.msg}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {nominasYear.length === 0 ? (
             <div className="bg-gray-50 rounded-2xl p-12 text-center">

@@ -183,9 +183,9 @@ const DEFAULT_FLOWS: FlowDef[] = [
   },
   {
     id: 'resumen_diario',
-    name: 'Resumen Diario',
-    description: 'Genera y envía un briefing del día con ventas, compras y alertas',
-    icon: '📊',
+    name: 'Briefing Matutino (9h)',
+    description: 'Cada mañana a las 9h: ventas de ayer, saldo, facturas por pagar, stock, precios anómalos',
+    icon: '☀️',
     category: 'operaciones',
     enabled: true,
     schedule: 'daily',
@@ -857,51 +857,98 @@ export class ArumeAgent {
     return null;
   }
 
-  // ── 13. Resumen Diario ──
+  // ── 13. Briefing Matutino (9h) ──
 
   private static async _resumenDiario(data: AppData): Promise<FlowRun | null> {
-    const hoy = new Date().toISOString().split('T')[0];
-    const hora = new Date().getHours();
-    if (hora < 20) {
-      ArumeAgent.logRun('resumen_diario', 'success', 'El resumen se envía a las 20h');
+    const now = new Date();
+    const hora = now.getHours();
+    // Se envía entre las 9h y las 10h de la mañana
+    if (hora < 9 || hora >= 10) {
+      ArumeAgent.logRun('resumen_diario', 'success', 'El briefing se envía entre las 9h y 10h');
       return null;
     }
 
-    // Cierre de hoy
-    const cierre = (data.cierres || []).find(c => c.date === hoy);
-    const ventaHoy = cierre ? Num.parse((cierre as any).totalVenta || (cierre as any).totalVentas || 0) : 0;
+    const hoy = now.toISOString().split('T')[0];
+    const ayer = new Date(now); ayer.setDate(now.getDate() - 1);
+    const ayerStr = ayer.toISOString().split('T')[0];
+    const diaFmt = now.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
 
-    // Compras de hoy
-    const comprasHoy = (data.albaranes || []).filter(a => a.date === hoy);
-    const totalCompras = comprasHoy.reduce((s, a) => s + Num.parse(a.total), 0);
+    // Cierre de ayer
+    const cierreAyer = (data.cierres || []).find(c => c.date === ayerStr);
+    const ventaAyer = cierreAyer ? Num.parse((cierreAyer as any).totalVenta || (cierreAyer as any).totalVentas || 0) : 0;
 
-    // Stock crítico
-    const stockCritico = (data.ingredientes || []).filter(i => i.stock <= i.min).length;
-
-    // Saldo
+    // Saldo banco
     const saldoInicial = (data.config as any)?.saldoInicial || 0;
     const saldo = (data.banco || []).reduce((s, m: any) => s + Num.parse(m.amount), saldoInicial);
 
+    // Stock crítico
+    const stockCritico = (data.ingredientes || []).filter(i => i.stock <= i.min);
+
+    // Facturas a pagar hoy o vencidas
+    const facturasPendientes = (data.facturas || []).filter((f: any) => {
+      if (f.paid) return false;
+      const due = f.dueDate || f.date;
+      return due && due <= hoy;
+    });
+    const totalPendiente = facturasPendientes.reduce((s, f: any) => s + Num.parse(f.total), 0);
+
+    // Albaranes sin factura (>30 días)
+    const hace30 = new Date(); hace30.setDate(hace30.getDate() - 30);
+    const hace30Str = hace30.toISOString().split('T')[0];
+    const albSinFact = (data.albaranes || []).filter((a: any) => !a.invoiced && a.date < hace30Str);
+
+    // Subidas de precio (reutilizamos la misma lógica, inline)
+    const history = data.priceHistory || [];
+    const grouped: Record<string, { unitPrice: number; date: string }[]> = {};
+    for (const h of history) {
+      const k = `${h.item}__${h.prov}`;
+      if (!grouped[k]) grouped[k] = [];
+      grouped[k].push({ unitPrice: h.unitPrice, date: h.date });
+    }
+    let subidas = 0;
+    for (const entries of Object.values(grouped)) {
+      if (entries.length < 2) continue;
+      entries.sort((a, b) => a.date.localeCompare(b.date));
+      const ult = entries[entries.length - 1].unitPrice;
+      const ant = entries[entries.length - 2].unitPrice;
+      if (ant > 0 && ((ult - ant) / ant) * 100 > 15) subidas++;
+    }
+
     const lines = [
-      `📊 *Resumen del Día — ${hoy}*`,
+      `☀️ *Buenos días — ${diaFmt}*`,
       '',
-      `💰 Ventas: ${ventaHoy > 0 ? Num.fmt(ventaHoy) : 'Sin cierre'}`,
-      `🛒 Compras: ${Num.fmt(totalCompras)} (${comprasHoy.length} albaranes)`,
-      `📦 Stock bajo mínimos: ${stockCritico} productos`,
+      `💰 Ventas ayer: ${ventaAyer > 0 ? Num.fmt(ventaAyer) : 'Sin cierre'}`,
       `🏦 Saldo banco: ${Num.fmt(saldo)}`,
     ];
 
-    if (cierre?.descuadre && Math.abs(cierre.descuadre) > 5) {
-      lines.push(`⚠️ Descuadre: ${Num.fmt(cierre.descuadre)}`);
+    if (totalPendiente > 0) {
+      lines.push(`💳 Por pagar hoy: ${Num.fmt(totalPendiente)} (${facturasPendientes.length} facturas)`);
     }
+    if (stockCritico.length > 0) {
+      const nombres = stockCritico.slice(0, 3).map((i: any) => i.n || i.nombre).join(', ');
+      lines.push(`📦 Stock bajo: ${stockCritico.length} productos${stockCritico.length <= 3 ? ` (${nombres})` : ` (${nombres}…)`}`);
+    }
+    if (subidas > 0) {
+      lines.push(`📈 ${subidas} subida${subidas > 1 ? 's' : ''} de precio >15% — revisa en Proveedores`);
+    }
+    if (albSinFact.length > 0) {
+      lines.push(`📄 ${albSinFact.length} albaranes >30 días sin factura`);
+    }
+
+    if (cierreAyer?.descuadre && Math.abs(cierreAyer.descuadre) > 5) {
+      lines.push(`⚠️ Descuadre caja ayer: ${Num.fmt(cierreAyer.descuadre)}`);
+    }
+
+    lines.push('');
+    lines.push(`¡A por el día! 💪`);
 
     const msg = lines.join('\n');
     await ArumeAgent._sendTelegram(data, msg);
-    await PushService.sendNative('Resumen del Día', `Ventas: ${Num.fmt(ventaHoy)} | Compras: ${Num.fmt(totalCompras)}`, {
-      type: 'info', category: 'resumen', tag: 'resumen-diario',
+    await PushService.sendNative('Buenos días ☀️', `Ventas ayer: ${Num.fmt(ventaAyer)} | Saldo: ${Num.fmt(saldo)}`, {
+      type: 'info', category: 'resumen', tag: 'briefing-matutino',
     });
 
-    ArumeAgent.logRun('resumen_diario', 'success', `Resumen enviado — Ventas: ${Num.fmt(ventaHoy)}`);
+    ArumeAgent.logRun('resumen_diario', 'success', `Briefing matutino enviado — Ventas ayer: ${Num.fmt(ventaAyer)}`);
     return null;
   }
 
