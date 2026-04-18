@@ -31,6 +31,10 @@ const normalizeGastoFijo = (g: any) => ({
 export const CierreContableView: React.FC<CierreContableViewProps> = ({ data, onSave }) => {
   const [year, setYear] = useState(new Date().getFullYear());
   const [isExporting, setIsExporting] = useState(false);
+  // Previsión año siguiente
+  const [prevCrecVentas, setPrevCrecVentas] = useState(5);   // % crecimiento ventas
+  const [prevInflacion, setPrevInflacion]   = useState(3);   // % inflación gastos
+  const [isClosingYear, setIsClosingYear]   = useState(false);
   const meses = useMemo(() => [
     'Enero','Febrero','Marzo','Abril','Mayo','Junio',
     'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre',
@@ -170,6 +174,99 @@ export const CierreContableView: React.FC<CierreContableViewProps> = ({ data, on
     try { await onSave({ ...data, cierres_mensuales:cierresMensuales.filter(c=>c.id!==id) }); }
     catch { toast.info('❌ Error al reabrir.'); }
   }, [cierresMensuales, data, onSave]);
+  // ── Cerrar el año entero (12 meses) de golpe ───────────────────────────────
+  const mesesAbiertosConDatos = useMemo(() =>
+    yearlySnapshots
+      .map((s, i) => ({ s, i }))
+      .filter(({ s }) => !s.isClosed && ((s.ventas ?? 0) > 0 || (s.compras ?? 0) > 0 || (s.fijos ?? 0) > 0)),
+    [yearlySnapshots]
+  );
+  const handleCerrarAño = useCallback(async () => {
+    if (mesesAbiertosConDatos.length === 0) {
+      return void toast.info('Todos los meses con datos ya están cerrados.');
+    }
+    const nombres = mesesAbiertosConDatos.map(({ i }) => meses[i]).join(', ');
+    if (!await confirm(`🔒 CIERRE ANUAL ${year}\n\nSe cerrarán ${mesesAbiertosConDatos.length} meses de golpe:\n${nombres}\n\n¿Seguro que los datos son correctos?`)) return;
+    setIsClosingYear(true);
+    try {
+      const nuevos: CierreMensual[] = mesesAbiertosConDatos.map(({ s, i }) => ({
+        id: `cierre-${year}-${i}`,
+        mes: i,
+        anio: year,
+        fecha_cierre: new Date().toISOString(),
+        snapshot: {
+          ventas: s.ventas, compras: s.compras, fijos: s.fijos,
+          personal: s.personal, suministros: s.suministros, otrosFijos: s.otrosFijos,
+          amortizaciones: s.amortizaciones ?? 0, resultado: s.resultado,
+        },
+      }));
+      const ids = new Set(nuevos.map(n => n.id));
+      await onSave({
+        ...data,
+        cierres_mensuales: [
+          ...cierresMensuales.filter(c => !ids.has(c.id)),
+          ...nuevos,
+        ],
+      });
+      toast.success(`✅ Año ${year} cerrado — ${nuevos.length} meses congelados`);
+    } catch { toast.info('❌ Error al cerrar el año.'); }
+    finally { setIsClosingYear(false); }
+  }, [mesesAbiertosConDatos, year, data, cierresMensuales, meses, onSave]);
+
+  // ── Previsión año siguiente ────────────────────────────────────────────────
+  const prevision = useMemo(() => {
+    const gCrec = prevCrecVentas / 100;
+    const gInfl = prevInflacion / 100;
+    // Usa los totales del año actual como base
+    const base = kpis;
+    // Compras/materia prima escalan con ventas (mantienen food cost %)
+    const ventasPrev = Num.round2(base.ventas * (1 + gCrec));
+    const foodCostPctActual = base.ventas > 0 ? base.variables / base.ventas : 0.30;
+    const comprasPrev = Num.round2(ventasPrev * foodCostPctActual);
+    const fijosPrev = Num.round2(base.fijos * (1 + gInfl));
+    const resultadoPrev = Num.round2(ventasPrev - comprasPrev - fijosPrev);
+    const margenPrev = ventasPrev > 0 ? (resultadoPrev / ventasPrev) * 100 : 0;
+    // Proyección mensual (distribución proporcional al año actual)
+    const mensual = yearlySnapshots.map((s, i) => {
+      const share = base.ventas > 0 ? (s.ventas ?? 0) / base.ventas : 1 / 12;
+      const ventasMes = Num.round2(ventasPrev * share);
+      const comprasMes = Num.round2(ventasMes * foodCostPctActual);
+      const fijosMes = Num.round2(fijosPrev / 12);
+      return {
+        mes: meses[i],
+        ventas: ventasMes,
+        compras: comprasMes,
+        fijos: fijosMes,
+        resultado: Num.round2(ventasMes - comprasMes - fijosMes),
+      };
+    });
+    return { ventasPrev, comprasPrev, fijosPrev, resultadoPrev, margenPrev, mensual, foodCostPctActual: foodCostPctActual * 100 };
+  }, [kpis, prevCrecVentas, prevInflacion, yearlySnapshots, meses]);
+
+  const handleExportPrevision = () => {
+    try {
+      const rows = prevision.mensual.map(m => ({
+        'PERIODO': `${m.mes} ${year + 1}`,
+        'VENTAS PREVISTAS': m.ventas,
+        'COMPRAS PREVISTAS': m.compras,
+        'FIJOS PREVISTOS': m.fijos,
+        'RESULTADO PREVISTO': m.resultado,
+      }));
+      rows.push({
+        'PERIODO': `TOTAL ${year + 1}`,
+        'VENTAS PREVISTAS': prevision.ventasPrev,
+        'COMPRAS PREVISTAS': prevision.comprasPrev,
+        'FIJOS PREVISTOS': prevision.fijosPrev,
+        'RESULTADO PREVISTO': prevision.resultadoPrev,
+      });
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws['!cols'] = [{wch:22},{wch:20},{wch:20},{wch:20},{wch:22}];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, `Prevision_${year + 1}`);
+      XLSX.writeFile(wb, `Prevision_Arume_${year + 1}.xlsx`);
+    } catch { toast.info('Error al exportar la previsión.'); }
+  };
+
   const handleExportYear = () => {
     setIsExporting(true);
     try {
@@ -413,6 +510,171 @@ export const CierreContableView: React.FC<CierreContableViewProps> = ({ data, on
           </AnimatePresence>
         </div>
       </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          📊 RESUMEN ANUAL & CIERRE DEL AÑO
+          ═══════════════════════════════════════════════════════════════════════ */}
+      <div className="bg-gradient-to-br from-indigo-600 via-purple-600 to-purple-700 rounded-2xl p-6 text-white shadow-lg">
+        <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-white/15 rounded-lg"><ShieldCheck className="w-5 h-5"/></div>
+            <div>
+              <h3 className="text-sm font-black uppercase tracking-widest">Resumen Anual {year}</h3>
+              <p className="text-[11px] opacity-80">P&L del año completo</p>
+            </div>
+          </div>
+          <button
+            onClick={handleCerrarAño}
+            disabled={isClosingYear || mesesAbiertosConDatos.length === 0}
+            className="flex items-center gap-2 px-4 py-2 bg-white text-indigo-700 rounded-xl font-black text-xs uppercase tracking-widest shadow-md hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isClosingYear
+              ? <><Loader2 className="w-4 h-4 animate-spin"/> Cerrando…</>
+              : mesesAbiertosConDatos.length === 0
+                ? <><CheckCircle2 className="w-4 h-4"/> Año ya cerrado</>
+                : <><Lock className="w-4 h-4"/> Cerrar Año ({mesesAbiertosConDatos.length} meses)</>
+            }
+          </button>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="bg-white/10 rounded-xl p-3 backdrop-blur">
+            <p className="text-[9px] font-black uppercase tracking-widest opacity-70">Ventas netas</p>
+            <p className="text-xl font-black tabular-nums">{Num.fmt(kpis.ventas)}</p>
+          </div>
+          <div className="bg-white/10 rounded-xl p-3 backdrop-blur">
+            <p className="text-[9px] font-black uppercase tracking-widest opacity-70">Compras</p>
+            <p className="text-xl font-black tabular-nums">{Num.fmt(kpis.variables)}</p>
+          </div>
+          <div className="bg-white/10 rounded-xl p-3 backdrop-blur">
+            <p className="text-[9px] font-black uppercase tracking-widest opacity-70">Fijos + Amort.</p>
+            <p className="text-xl font-black tabular-nums">{Num.fmt(kpis.fijos)}</p>
+          </div>
+          <div className={cn('rounded-xl p-3 backdrop-blur', kpis.resultado >= 0 ? 'bg-emerald-500/30' : 'bg-rose-500/30')}>
+            <p className="text-[9px] font-black uppercase tracking-widest opacity-70">Resultado</p>
+            <p className="text-xl font-black tabular-nums">{Num.fmt(kpis.resultado)}</p>
+            <p className="text-[9px] opacity-80 mt-0.5">Margen {margenNeto.toFixed(1)}%</p>
+          </div>
+        </div>
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          🔮 PREVISIÓN AÑO SIGUIENTE
+          ═══════════════════════════════════════════════════════════════════════ */}
+      <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-gradient-to-br from-fuchsia-500 to-violet-500 text-white rounded-lg"><Target className="w-5 h-5"/></div>
+            <div>
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Previsión {year + 1}</h3>
+              <p className="text-[10px] text-slate-400 font-bold">Proyección basada en {year}</p>
+            </div>
+          </div>
+          <button onClick={handleExportPrevision}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-fuchsia-50 text-fuchsia-600 rounded-lg font-black text-[10px] uppercase tracking-widest hover:bg-fuchsia-100 border border-fuchsia-200">
+            <Download className="w-3.5 h-3.5"/> Excel
+          </button>
+        </div>
+
+        {/* Parámetros editables */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+          <div className="bg-slate-50 rounded-xl p-3">
+            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Crecimiento ventas (%)</label>
+            <div className="flex items-center gap-2 mt-1">
+              <input
+                type="range"
+                min="-20" max="50" step="1"
+                value={prevCrecVentas}
+                onChange={e => setPrevCrecVentas(parseInt(e.target.value))}
+                className="flex-1 accent-fuchsia-500"
+              />
+              <input
+                type="number"
+                value={prevCrecVentas}
+                onChange={e => setPrevCrecVentas(parseInt(e.target.value || '0'))}
+                className="w-16 text-center bg-white border border-slate-200 rounded-lg px-2 py-1 text-sm font-black"
+              />
+              <span className="text-sm font-black text-slate-600">%</span>
+            </div>
+          </div>
+          <div className="bg-slate-50 rounded-xl p-3">
+            <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Inflación gastos fijos (%)</label>
+            <div className="flex items-center gap-2 mt-1">
+              <input
+                type="range"
+                min="-10" max="30" step="1"
+                value={prevInflacion}
+                onChange={e => setPrevInflacion(parseInt(e.target.value))}
+                className="flex-1 accent-fuchsia-500"
+              />
+              <input
+                type="number"
+                value={prevInflacion}
+                onChange={e => setPrevInflacion(parseInt(e.target.value || '0'))}
+                className="w-16 text-center bg-white border border-slate-200 rounded-lg px-2 py-1 text-sm font-black"
+              />
+              <span className="text-sm font-black text-slate-600">%</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Totales previstos */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
+            <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest">Ventas previstas</p>
+            <p className="text-lg font-black text-emerald-700 tabular-nums">{Num.fmt(prevision.ventasPrev)}</p>
+            <p className="text-[9px] text-emerald-500 mt-0.5">{prevCrecVentas >= 0 ? '+' : ''}{prevCrecVentas}% vs {year}</p>
+          </div>
+          <div className="bg-amber-50 border border-amber-100 rounded-xl p-3">
+            <p className="text-[9px] font-black text-amber-600 uppercase tracking-widest">Compras previstas</p>
+            <p className="text-lg font-black text-amber-700 tabular-nums">{Num.fmt(prevision.comprasPrev)}</p>
+            <p className="text-[9px] text-amber-500 mt-0.5">Food cost {prevision.foodCostPctActual.toFixed(1)}%</p>
+          </div>
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+            <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Fijos previstos</p>
+            <p className="text-lg font-black text-slate-700 tabular-nums">{Num.fmt(prevision.fijosPrev)}</p>
+            <p className="text-[9px] text-slate-400 mt-0.5">{prevInflacion >= 0 ? '+' : ''}{prevInflacion}% inflación</p>
+          </div>
+          <div className={cn('rounded-xl p-3 border', prevision.resultadoPrev >= 0 ? 'bg-indigo-50 border-indigo-100' : 'bg-rose-50 border-rose-100')}>
+            <p className="text-[9px] font-black text-indigo-600 uppercase tracking-widest">Resultado previsto</p>
+            <p className={cn('text-lg font-black tabular-nums', prevision.resultadoPrev >= 0 ? 'text-indigo-700' : 'text-rose-700')}>{Num.fmt(prevision.resultadoPrev)}</p>
+            <p className="text-[9px] opacity-70 mt-0.5">Margen {prevision.margenPrev.toFixed(1)}%</p>
+          </div>
+        </div>
+
+        {/* Tabla mensual prevista */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-slate-200">
+                <th className="text-left py-2 px-3 font-black text-slate-500 text-[10px] uppercase tracking-widest">Mes</th>
+                <th className="text-right py-2 px-3 font-black text-emerald-600 text-[10px] uppercase tracking-widest">Ventas</th>
+                <th className="text-right py-2 px-3 font-black text-amber-600 text-[10px] uppercase tracking-widest">Compras</th>
+                <th className="text-right py-2 px-3 font-black text-slate-500 text-[10px] uppercase tracking-widest">Fijos</th>
+                <th className="text-right py-2 px-3 font-black text-indigo-600 text-[10px] uppercase tracking-widest">Resultado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {prevision.mensual.map((m, i) => (
+                <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
+                  <td className="py-2 px-3 font-bold text-slate-700">{m.mes}</td>
+                  <td className="py-2 px-3 text-right tabular-nums text-emerald-700">{Num.fmt(m.ventas)}</td>
+                  <td className="py-2 px-3 text-right tabular-nums text-amber-700">{Num.fmt(m.compras)}</td>
+                  <td className="py-2 px-3 text-right tabular-nums text-slate-600">{Num.fmt(m.fijos)}</td>
+                  <td className={cn('py-2 px-3 text-right tabular-nums font-black', m.resultado >= 0 ? 'text-indigo-700' : 'text-rose-700')}>{Num.fmt(m.resultado)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-4 flex items-start gap-2 bg-slate-50 rounded-xl p-3">
+          <Lightbulb className="w-4 h-4 text-amber-500 shrink-0 mt-0.5"/>
+          <p className="text-[10px] text-slate-600 font-medium leading-relaxed">
+            <b>Cómo funciona:</b> las ventas crecen/decrecen según el % que indiques. Las compras mantienen el food cost actual ({prevision.foodCostPctActual.toFixed(1)}%). Los fijos se ajustan con el % de inflación. Los meses conservan la estacionalidad del año actual.
+          </p>
+        </div>
+      </div>
+
     </div>
   );
 };
