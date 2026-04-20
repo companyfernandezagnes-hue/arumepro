@@ -330,7 +330,7 @@ export const ExportTools: React.FC<ExportToolsProps> = ({ db, onSave }) => {
             <button key={q.value} onClick={() => setFilterQ(q.value)}
               className={cn('px-2.5 py-1 rounded-lg text-[10px] font-black transition border',
                 filterQ === q.value
-                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                  ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] border-indigo-600 shadow-sm'
                   : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-indigo-300 hover:text-indigo-600'
               )}>
               {q.label}

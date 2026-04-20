@@ -668,7 +668,7 @@ export const ShopifySync: React.FC<Props> = ({ data, onSave }) => {
                 Sync Pedidos
               </button>
               <button onClick={handleImportAllOrders}
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold hover:bg-indigo-700 transition">
+                className="flex items-center gap-2 px-4 py-2 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-xl text-sm font-bold hover:bg-[color:var(--arume-gray-700)] transition">
                 <ArrowDownToLine className="w-4 h-4" /> Importar Todos
               </button>
             </div>

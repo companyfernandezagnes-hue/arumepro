@@ -384,7 +384,7 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
               className="bg-transparent text-sm font-black text-slate-700 outline-none w-36 cursor-pointer"/>
           </div>
           <button onClick={handleExportGestoria}
-            className="bg-slate-900 text-white px-6 py-3 rounded-2xl text-xs font-black shadow-xl hover:bg-emerald-600 transition-all flex items-center gap-2 active:scale-95">
+            className="bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] px-6 py-3 rounded-2xl text-xs font-black shadow-xl hover:bg-emerald-600 transition-all flex items-center gap-2 active:scale-95">
             <Download className="w-4 h-4"/> PACK EXCEL GESTORÍA
           </button>
         </div>
@@ -401,7 +401,7 @@ export const LiquidacionesView = ({ data, onSave }: LiquidacionesViewProps) => {
           <button key={t.key} onClick={() => setActiveTab(t.key)}
             className={cn('px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition border',
               activeTab === t.key
-                ? 'bg-slate-900 text-white border-slate-900 shadow-lg'
+                ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] border-slate-900 shadow-lg'
                 : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300')}>
             {t.label}
           </button>

@@ -814,7 +814,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
             <div className="flex items-center gap-2 mb-4 flex-wrap">
               <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Unidad:</span>
               {[{id:'REST',label:'🍽️ Restaurante'},{id:'SHOP',label:'🛍️ Shop'},{id:'B2B',label:'🏢 B2B'}].map(u=>(
-                <button key={u.id} onClick={() => setSelectedUnit(u.id as any)} className={cn('px-4 py-1.5 rounded-xl text-xs font-black border transition-all', selectedUnit === u.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300')}>{u.label}</button>
+                <button key={u.id} onClick={() => setSelectedUnit(u.id as any)} className={cn('px-4 py-1.5 rounded-xl text-xs font-black border transition-all', selectedUnit === u.id ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300')}>{u.label}</button>
               ))}
             </div>
 
@@ -868,7 +868,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
 
                   <div className="flex gap-2 mt-3 flex-wrap justify-center">
                     {!isRunning && !allFinished && (
-                      <button onClick={() => startProcessing()} className="flex items-center gap-2 bg-indigo-600 text-white text-xs font-black px-4 py-2 rounded-xl hover:bg-indigo-700 transition">
+                      <button onClick={() => startProcessing()} className="flex items-center gap-2 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] text-xs font-black px-4 py-2 rounded-xl hover:bg-[color:var(--arume-gray-700)] transition">
                         <Play className="w-3.5 h-3.5" /> Iniciar
                       </button>
                     )}
@@ -1041,7 +1041,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
                       )}
                     </div>
 
-                    <button onClick={handleConfirm} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm py-4 rounded-xl transition-all shadow-lg flex justify-center items-center gap-2">
+                    <button onClick={handleConfirm} className="w-full bg-indigo-600 hover:bg-[color:var(--arume-gray-700)] text-white font-black text-sm py-4 rounded-xl transition-all shadow-lg flex justify-center items-center gap-2">
                       <Database className="w-4 h-4" /> GUARDAR EN ARUME
                     </button>
                   </div>
@@ -1294,7 +1294,7 @@ const ReviewModal = ({ item, queuePosition, onConfirm, onSkip }: ReviewModalProp
                       onClick={() => setEdited((p: any) => ({ ...p, metodo_pago: opt.val, paid: opt.val !== 'pendiente' }))}
                       className={cn('px-3 py-1.5 rounded-xl text-[11px] font-black border transition-all',
                         (edited.metodo_pago ?? 'pendiente') === opt.val
-                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                          ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] border-indigo-600 shadow-sm'
                           : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300 hover:text-indigo-600')}
                     >
                       {opt.label}
@@ -1367,7 +1367,7 @@ const ReviewModal = ({ item, queuePosition, onConfirm, onSkip }: ReviewModalProp
               if (isAlbaran) finalResult.total = String(calculatedTotal);
               onConfirm(finalResult);
             }}
-            className="flex items-center gap-2 px-8 py-3 rounded-xl text-sm font-black bg-indigo-600 text-white hover:bg-indigo-700 transition shadow-lg shadow-indigo-200 active:scale-95"
+            className="flex items-center gap-2 px-8 py-3 rounded-xl text-sm font-black bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] hover:bg-[color:var(--arume-gray-700)] transition shadow-lg shadow-indigo-200 active:scale-95"
           >
             <Check className="w-4 h-4" /> Confirmar y guardar
           </button>
@@ -1433,7 +1433,7 @@ const QueueRow = ({ item, onSkip, onReview }: { item: QueueItem; onSkip: () => v
 /* ─── ModuleButton ───────────────────────────────────────────────────────────── */
 const ModuleButton = ({ active, onClick, icon: Icon, title, subtitle, color }: any) => {
   const colors: any = {
-    indigo:  active ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-200'    : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50',
+    indigo:  active ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] border-indigo-600 shadow-md shadow-indigo-200'    : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50',
     blue:    active ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-200'          : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:bg-blue-50',
     amber:   active ? 'bg-amber-500 text-white border-amber-500 shadow-md shadow-amber-200'       : 'bg-white text-slate-600 border-slate-200 hover:border-amber-300 hover:bg-amber-50',
     emerald: active ? 'bg-emerald-600 text-white border-emerald-600 shadow-md shadow-emerald-200' : 'bg-white text-slate-600 border-slate-200 hover:border-emerald-300 hover:bg-emerald-50',
@@ -1509,7 +1509,7 @@ export const GeminiKeysConfig = () => {
           </div>
         ))}
       </div>
-      <button onClick={handleSave} className={cn('w-full py-3 rounded-xl font-black text-sm transition-all', saved ? 'bg-emerald-500 text-white' : 'bg-indigo-600 hover:bg-indigo-700 text-white')}>
+      <button onClick={handleSave} className={cn('w-full py-3 rounded-xl font-black text-sm transition-all', saved ? 'bg-emerald-500 text-white' : 'bg-indigo-600 hover:bg-[color:var(--arume-gray-700)] text-white')}>
         {saved ? '✅ Guardado' : 'Guardar claves'}
       </button>
     </div>
@@ -1601,7 +1601,7 @@ const GeminiKeyModal = ({ reason, onClose, onSaved }: GeminiKeyModalProps) => {
           <button onClick={handleSave} disabled={!keys.k1.trim() || saved}
             className={cn('w-full py-4 rounded-xl font-black text-sm transition-all shadow-lg',
               saved                ? 'bg-emerald-500 text-white shadow-emerald-200' :
-              keys.k1.trim()       ? 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200' :
+              keys.k1.trim()       ? 'bg-indigo-600 hover:bg-[color:var(--arume-gray-700)] text-white shadow-indigo-200' :
                                      'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none')}>
             {saved
               ? '✅ Guardado — reanudando cola…'

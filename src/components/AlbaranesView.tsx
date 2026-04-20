@@ -742,7 +742,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
           <button onClick={handleTelegramSync} disabled={isSyncingTelegram} className="px-3 py-1.5 rounded-lg font-black text-[10px] uppercase bg-[#229ED9] text-white hover:bg-[#1E8CC0] transition flex items-center gap-1.5 disabled:opacity-50">
             {isSyncingTelegram ? <Loader2 className="w-3 h-3 animate-spin"/> : <Smartphone className="w-3 h-3"/>} Telegram
           </button>
-          <button onClick={()=>setShowInspector(!showInspector)} className={cn('px-3 py-1.5 rounded-lg font-black text-[10px] uppercase transition flex items-center gap-1.5', showInspector?'bg-slate-900 text-white':'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50')}>
+          <button onClick={()=>setShowInspector(!showInspector)} className={cn('px-3 py-1.5 rounded-lg font-black text-[10px] uppercase transition flex items-center gap-1.5', showInspector?'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)]':'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50')}>
             <LineChartIcon className="w-3 h-3"/> Precios
           </button>
           <button onClick={handleExportExcel} className="px-3 py-1.5 rounded-lg font-black text-[10px] uppercase bg-emerald-600 text-white hover:bg-emerald-700 transition flex items-center gap-1.5">
@@ -755,7 +755,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       <div className="sticky top-2 z-40">
         <div className="bg-white/95 backdrop-blur-md px-3 py-2 rounded-xl shadow-md border border-slate-200 flex flex-col xl:flex-row justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
-            <button onClick={()=>setSelectedUnit('ALL')} className={cn('px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition border flex items-center gap-1', selectedUnit==='ALL'?'bg-slate-900 text-white border-slate-900':'bg-white text-slate-400 border-slate-200 hover:bg-slate-50')}><Layers className="w-3 h-3"/> Todas</button>
+            <button onClick={()=>setSelectedUnit('ALL')} className={cn('px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition border flex items-center gap-1', selectedUnit==='ALL'?'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] border-slate-900':'bg-white text-slate-400 border-slate-200 hover:bg-slate-50')}><Layers className="w-3 h-3"/> Todas</button>
             {BUSINESS_UNITS.map(u=>(
               <button key={u.id} onClick={()=>setSelectedUnit(u.id)} className={cn('px-3 py-1.5 rounded-lg text-[10px] font-black uppercase transition border flex items-center gap-1', selectedUnit===u.id?`${u.bg} ${u.color} border-transparent`:'bg-white text-slate-400 border-slate-200 hover:bg-slate-50')}><u.icon className="w-3 h-3"/> {u.name.split(' ')[0]}</button>
             ))}
@@ -867,7 +867,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                 <div className="flex items-center gap-1 mb-3 bg-indigo-50/50 p-2 rounded-lg border border-indigo-100">
                   <input type="text" value={quickCalc.name} onChange={e=>setQuickCalc({...quickCalc,name:e.target.value})} placeholder="Añadir línea rápida..." className="flex-1 p-1.5 bg-white rounded-md text-xs font-bold outline-none"/>
                   <input type="number" value={quickCalc.total} onChange={e=>setQuickCalc({...quickCalc,total:e.target.value})} placeholder="€" className="w-16 p-1.5 bg-white rounded-md text-xs font-bold outline-none text-right"/>
-                  <button type="button" onClick={handleQuickAdd} className="w-7 h-7 bg-indigo-600 text-white rounded-md flex items-center justify-center hover:bg-indigo-700 transition"><Plus className="w-3.5 h-3.5"/></button>
+                  <button type="button" onClick={handleQuickAdd} className="w-7 h-7 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-md flex items-center justify-center hover:bg-[color:var(--arume-gray-700)] transition"><Plus className="w-3.5 h-3.5"/></button>
                 </div>
 
                 <div className="flex justify-between items-center mb-1.5">
@@ -912,7 +912,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                   </div>
                 </div>
 
-                <button type="button" disabled={isSaving} onClick={handleSaveAlbaran} className="w-full bg-indigo-600 text-white py-3 rounded-lg font-black text-xs shadow-md hover:bg-indigo-700 transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50">
+                <button type="button" disabled={isSaving} onClick={handleSaveAlbaran} className="w-full bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] py-3 rounded-lg font-black text-xs shadow-md hover:bg-[color:var(--arume-gray-700)] transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50">
                   {isSaving ? <Loader2 className="w-4 h-4 animate-spin"/> : <Check className="w-4 h-4"/>} GUARDAR ALBARÁN
                 </button>
               </motion.div>

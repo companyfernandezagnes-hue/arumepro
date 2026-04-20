@@ -339,7 +339,7 @@ Genera un briefing de negociación conciso (máx 120 palabras) con:
           {familias.map(f => (
             <button key={f} onClick={() => setFamFilter(f)}
               className={cn("px-3 py-1.5 rounded-xl text-[9px] font-black uppercase transition border",
-                famFilter===f ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-500 border-slate-200 hover:border-slate-300")}>
+                famFilter===f ? "bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] border-slate-900" : "bg-white text-slate-500 border-slate-200 hover:border-slate-300")}>
               {f}
             </button>
           ))}
@@ -733,7 +733,7 @@ const ProveedorModal: React.FC<{
 
               {/* IA Briefing */}
               <button onClick={onBriefing} disabled={aiLoading}
-                className="w-full flex items-center justify-center gap-2 py-3 bg-indigo-600 text-white rounded-2xl text-xs font-black uppercase hover:bg-indigo-700 transition disabled:opacity-50">
+                className="w-full flex items-center justify-center gap-2 py-3 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-2xl text-xs font-black uppercase hover:bg-[color:var(--arume-gray-700)] transition disabled:opacity-50">
                 {aiLoading ? <Loader2 className="w-4 h-4 animate-spin"/> : <Sparkles className="w-4 h-4"/>}
                 {aiLoading ? 'Generando briefing...' : 'Briefing de Negociación IA'}
               </button>
@@ -764,7 +764,7 @@ const ProveedorModal: React.FC<{
                     {itemsConHistorial.slice(0,10).map(([item]) => (
                       <button key={item} onClick={() => setSelectedItem(item)}
                         className={cn("px-3 py-1.5 rounded-xl text-[9px] font-black uppercase transition border",
-                          itemSeleccionado===item ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-500 border-slate-200 hover:border-indigo-300")}>
+                          itemSeleccionado===item ? "bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] border-indigo-600" : "bg-white text-slate-500 border-slate-200 hover:border-indigo-300")}>
                         {item}
                       </button>
                     ))}
@@ -892,7 +892,7 @@ const ProveedorModal: React.FC<{
             <>
               <button onClick={onCancelEdit} className="flex-1 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-black text-[10px] uppercase hover:bg-slate-200 transition">Cancelar</button>
               <button onClick={onSaveEdit} disabled={saving}
-                className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl font-black text-[10px] uppercase hover:bg-indigo-700 transition flex items-center justify-center gap-2">
+                className="flex-1 py-2.5 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-xl font-black text-[10px] uppercase hover:bg-[color:var(--arume-gray-700)] transition flex items-center justify-center gap-2">
                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <Save className="w-3.5 h-3.5"/>} Guardar
               </button>
             </>
@@ -979,7 +979,7 @@ const ProveedorFormModal: React.FC<{
       <div className="p-4 border-t border-slate-100 flex gap-3 shrink-0">
         <button onClick={onClose} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-2xl font-black text-xs uppercase hover:bg-slate-200 transition">Cancelar</button>
         <button onClick={onSave} disabled={saving}
-          className="flex-1 py-3 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase hover:bg-indigo-700 transition flex items-center justify-center gap-2">
+          className="flex-1 py-3 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-2xl font-black text-xs uppercase hover:bg-[color:var(--arume-gray-700)] transition flex items-center justify-center gap-2">
           {saving ? <Loader2 className="w-4 h-4 animate-spin"/> : <Plus className="w-4 h-4"/>} Guardar
         </button>
       </div>

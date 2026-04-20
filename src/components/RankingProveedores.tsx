@@ -261,7 +261,7 @@ export const RankingProveedores: React.FC<Props> = ({ data }) => {
           {years.map(y => (
             <button key={y} onClick={() => setYear(y)}
               className={cn('px-3 py-1.5 rounded-md text-[10px] font-black transition',
-                year === y ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:bg-slate-50')}>
+                year === y ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] shadow-sm' : 'text-slate-400 hover:bg-slate-50')}>
               {y}
             </button>
           ))}

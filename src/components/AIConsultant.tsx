@@ -359,7 +359,7 @@ export function AIConsultant({ data }: AIConsultantProps) {
                 <div className={cn(
                   'p-4 rounded-2xl text-sm leading-relaxed shadow-sm',
                   msg.role === 'user'
-                    ? 'bg-indigo-600 text-white rounded-tr-none font-medium'
+                    ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-tr-none font-medium'
                     : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none',
                 )}>
                   <div className={cn('prose prose-sm max-w-none', msg.role === 'user' ? 'prose-invert' : 'prose-slate')}>
@@ -431,7 +431,7 @@ export function AIConsultant({ data }: AIConsultantProps) {
           <button
             onClick={() => handleSend()}
             disabled={!input.trim() || isLoading}
-            className="absolute right-2 p-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-xl transition-all shadow-lg shadow-indigo-500/20 active:scale-95"
+            className="absolute right-2 p-3 bg-indigo-600 hover:bg-[color:var(--arume-gray-700)] disabled:bg-slate-300 text-white rounded-xl transition-all shadow-lg shadow-indigo-500/20 active:scale-95"
           >
             {isLoading
               ? <Loader2 className="w-5 h-5 animate-spin" />

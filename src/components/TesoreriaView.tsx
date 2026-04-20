@@ -1032,7 +1032,7 @@ export const TesoreriaView: React.FC<TesoreriaViewProps> = ({ data, onSave, onNa
                     <div className="flex gap-2 flex-wrap">
                       <input ref={biltyRef} type="file" accept=".csv,.txt" onChange={handleBiltyFile} className="hidden" />
                       <button onClick={() => biltyRef.current?.click()}
-                        className="px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 transition flex items-center gap-1.5">
+                        className="px-3 py-2 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-xl text-xs font-black hover:bg-[color:var(--arume-gray-700)] transition flex items-center gap-1.5">
                         <Upload className="w-3.5 h-3.5" /> Seleccionar CSV
                       </button>
                       {biltyPreview && (

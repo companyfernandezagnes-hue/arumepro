@@ -157,7 +157,7 @@ export const PresupuestoVsReal: React.FC<Props> = ({ data, onSave }) => {
           {[year - 1, year, year + 1].filter(y => y <= new Date().getFullYear() + 1).map(y => (
             <button key={y} onClick={() => { setYear(y); setDraftMetas(savedMetas[String(y)] || DEFAULT_METAS); }}
               className={cn('px-3 py-1.5 rounded-md text-[10px] font-black transition',
-                year === y ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:bg-slate-50')}>
+                year === y ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] shadow-sm' : 'text-slate-400 hover:bg-slate-50')}>
               {y}
             </button>
           ))}
@@ -213,7 +213,7 @@ export const PresupuestoVsReal: React.FC<Props> = ({ data, onSave }) => {
             ))}
           </div>
           <button onClick={handleSaveMetas}
-            className="flex items-center gap-1.5 px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 transition shadow-sm">
+            className="flex items-center gap-1.5 px-5 py-2.5 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-xl text-xs font-black hover:bg-[color:var(--arume-gray-700)] transition shadow-sm">
             <Save className="w-3.5 h-3.5" /> Guardar Metas
           </button>
         </motion.div>

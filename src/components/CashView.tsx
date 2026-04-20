@@ -395,7 +395,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         {isRecording && (
           <motion.div
             initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -50, opacity: 0 }}
-            className="fixed top-4 left-1/2 -translate-x-1/2 z-[400] w-11/12 max-w-md bg-slate-900 text-white p-4 rounded-3xl shadow-2xl border-2 border-indigo-500 cursor-pointer flex flex-col items-center gap-2"
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[400] w-11/12 max-w-md bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] p-4 rounded-3xl shadow-2xl border-2 border-indigo-500 cursor-pointer flex flex-col items-center gap-2"
             onClick={toggleRecording}
           >
             <div className="flex items-center gap-3">
@@ -473,7 +473,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
 
         <button onClick={toggleRecording}
           className={cn('w-full py-3 rounded-xl font-black text-xs uppercase tracking-widest transition flex items-center justify-center gap-2',
-            isRecording ? 'bg-rose-500 text-white animate-pulse' : 'bg-indigo-600 text-white hover:bg-indigo-700')}>
+            isRecording ? 'bg-rose-500 text-white animate-pulse' : 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] hover:bg-[color:var(--arume-gray-700)]')}>
           {isRecording
             ? <><Square className="w-4 h-4"/> Parar y ver resultado</>
             : <><Mic className="w-4 h-4"/> Probar micrófono</>}
@@ -542,13 +542,13 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         <div className="flex flex-wrap gap-2">
           <button onClick={() => setSelectedUnit('ALL')}
             className={cn('px-4 py-2 rounded-xl text-[9px] font-black uppercase border flex gap-1.5 items-center',
-              selectedUnit === 'ALL' ? 'bg-slate-900 text-white' : 'bg-white text-slate-400')}>
+              selectedUnit === 'ALL' ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)]' : 'bg-white text-slate-400')}>
             <Layers className="w-3 h-3"/> Consolidado
           </button>
           {CASH_UNITS.map(u => (
             <button key={u.id} onClick={() => setSelectedUnit(u.id)}
               className={cn('px-4 py-2 rounded-xl text-[9px] font-black uppercase border flex gap-1.5 items-center',
-                selectedUnit === u.id ? 'bg-indigo-600 text-white' : 'bg-white text-slate-400')}>
+                selectedUnit === u.id ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)]' : 'bg-white text-slate-400')}>
               <u.icon className="w-3 h-3"/> {u.name}
             </button>
           ))}
@@ -608,7 +608,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
               <div className="flex gap-2">
                 <button onClick={toggleRecording}
                   className={cn('flex items-center gap-1.5 px-3 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest transition border',
-                    isRecording ? 'bg-red-500 text-white border-red-500' : 'bg-slate-900 text-white border-slate-900 hover:bg-slate-700')}>
+                    isRecording ? 'bg-red-500 text-white border-red-500' : 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] border-slate-900 hover:bg-slate-700')}>
                   {isRecording ? <><Square className="w-3 h-3"/> PARAR</> : <><Mic className="w-3 h-3"/> DICTAR IA</>}
                 </button>
                 <button
@@ -731,7 +731,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
               className={cn('w-full mt-2 py-6 text-white rounded-2xl font-black text-base shadow-2xl transition-all transform active:scale-95 disabled:opacity-50',
                 estadoCierreHoy.restCerrado
                   ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/20'
-                  : 'bg-slate-900 hover:bg-indigo-700 shadow-slate-900/20')}>
+                  : 'bg-slate-900 hover:bg-[color:var(--arume-gray-700)] shadow-slate-900/20')}>
               {isSaving
                 ? 'PROCESANDO CIERRE...'
                 : estadoCierreHoy.restCerrado

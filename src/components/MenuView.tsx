@@ -108,7 +108,7 @@ const DatePickerModal: React.FC<DateModalProps> = ({ title, defaultDate, onConfi
           <button onClick={onCancel} className="flex-1 py-3 rounded-2xl border border-slate-200 text-xs font-black text-slate-600 hover:bg-slate-50 transition active:scale-95">
             Cancelar
           </button>
-          <button onClick={() => onConfirm(date)} className="flex-1 py-3 rounded-2xl bg-indigo-600 text-white text-xs font-black hover:bg-indigo-700 transition shadow-lg active:scale-95">
+          <button onClick={() => onConfirm(date)} className="flex-1 py-3 rounded-2xl bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] text-xs font-black hover:bg-[color:var(--arume-gray-700)] transition shadow-lg active:scale-95">
             Confirmar
           </button>
         </div>
@@ -541,7 +541,7 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
             { id: 'omnes',      label: 'Omnes'      },
             { id: 'simulator',  label: 'Simulador'  },
           ].map(t => (
-            <button key={t.id} onClick={() => setViewTab(t.id as ViewTab)} className={cn("px-3 py-1.5 rounded-md text-[9px] font-bold uppercase transition-colors", viewTab === t.id ? "bg-indigo-600 text-white" : "text-slate-500 hover:bg-slate-50")}>
+            <button key={t.id} onClick={() => setViewTab(t.id as ViewTab)} className={cn("px-3 py-1.5 rounded-md text-[9px] font-bold uppercase transition-colors", viewTab === t.id ? "bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)]" : "text-slate-500 hover:bg-slate-50")}>
               {t.label}
             </button>
           ))}
@@ -554,7 +554,7 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
           </div>
           <button onClick={() => setEditingPlato({ id: 'p-' + Date.now(), name: '', price: 0, cost: 0, category: 'General', iva: 10, merma: 0 })} className="bg-slate-800 text-white p-1.5 rounded-lg shadow-sm hover:bg-slate-700 transition" title="Añadir Plato"><Plus className="w-4 h-4" /></button>
           <label className="bg-emerald-500 text-white p-1.5 rounded-lg shadow-sm hover:bg-emerald-600 transition cursor-pointer" title="Subir Excel TPV"><FileText className="w-4 h-4" /><input type="file" ref={fileInputRef} onChange={handleImportExcel} className="hidden" accept=".csv, .xlsx, .xls" /></label>
-          <label className="bg-indigo-600 text-white p-1.5 rounded-lg shadow-sm hover:bg-indigo-700 transition cursor-pointer" title="Leer Ticket Z con IA"><Camera className="w-4 h-4" /><input type="file" ref={iaInputRef} onChange={handleUploadIA} className="hidden" accept=".pdf, image/*" /></label>
+          <label className="bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] p-1.5 rounded-lg shadow-sm hover:bg-[color:var(--arume-gray-700)] transition cursor-pointer" title="Leer Ticket Z con IA"><Camera className="w-4 h-4" /><input type="file" ref={iaInputRef} onChange={handleUploadIA} className="hidden" accept=".pdf, image/*" /></label>
         </div>
       </div>
 
@@ -660,7 +660,7 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
                     ))}
                   </tbody>
                   {data.mixTable.length > 0 && (
-                    <tfoot className="bg-slate-900 text-white font-bold text-[9px]">
+                    <tfoot className="bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] font-bold text-[9px]">
                       <tr>
                         <td className="p-2">TOTALES</td>
                         <td className="p-2 text-center">{data.mixTable.reduce((acc, p) => acc + p.qty, 0)}</td>
@@ -824,7 +824,7 @@ export const MenuView: React.FC<MenuViewProps> = ({ db, onSave }) => {
                       <Trash2 className="w-4 h-4" />
                     </button>
                   )}
-                  <button type="submit" className="flex-1 bg-indigo-600 text-white py-2 rounded-lg font-bold text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition">Guardar</button>
+                  <button type="submit" className="flex-1 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] py-2 rounded-lg font-bold text-[10px] uppercase tracking-widest hover:bg-[color:var(--arume-gray-700)] transition">Guardar</button>
                 </div>
               </form>
             </motion.div>

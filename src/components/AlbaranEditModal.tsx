@@ -416,7 +416,7 @@ export const AlbaranEditModal = ({
                   {startVoiceRecording && (
                     <button type="button" onClick={() => startVoiceRecording('edit')}
                       className={cn('px-3 py-2 rounded-xl text-[9px] font-black uppercase flex items-center gap-1.5 transition shadow-sm',
-                        isRecordingState ? 'bg-rose-500 text-white animate-pulse' : 'bg-slate-900 text-white hover:bg-slate-800'
+                        isRecordingState ? 'bg-rose-500 text-white animate-pulse' : 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] hover:bg-slate-800'
                       )}>
                       <Mic className="w-3 h-3" /> {isRecordingState ? 'DICTANDO...' : 'DICTAR CAMBIOS'}
                     </button>
@@ -486,7 +486,7 @@ export const AlbaranEditModal = ({
                                     <button key={r} type="button" onClick={() => handleItemChange(i, 'rate', r)}
                                       className={cn('text-[10px] font-bold px-2 py-1.5 rounded-lg transition-all border',
                                         it.rate === r
-                                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                                          ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] border-indigo-600 shadow-sm'
                                           : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'
                                       )}>
                                       {r}%
@@ -573,7 +573,7 @@ export const AlbaranEditModal = ({
           </div>
 
           {/* FOOTER FIJO */}
-          <div className="bg-slate-900 text-white shrink-0 relative z-20 pb-safe rounded-b-[2.5rem]">
+          <div className="bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] shrink-0 relative z-20 pb-safe rounded-b-[2.5rem]">
             <div className="p-5 md:p-6 flex flex-col md:flex-row justify-between items-center gap-4">
 
               <div className="flex gap-8 w-full md:w-auto">
@@ -628,7 +628,7 @@ export const AlbaranEditModal = ({
                 </button>
 
                 <button type="button" disabled={saving} onClick={onSaveClick}
-                  className="flex-1 md:flex-none px-6 py-3 bg-indigo-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-indigo-500 transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20 active:scale-95 disabled:opacity-50">
+                  className="flex-1 md:flex-none px-6 py-3 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-xl font-black text-xs uppercase tracking-widest hover:bg-indigo-500 transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20 active:scale-95 disabled:opacity-50">
                   {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   <span className="hidden sm:inline">{saving ? 'Guardando...' : 'Guardar'}</span>
                 </button>

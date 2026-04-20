@@ -51,7 +51,7 @@ export const ComprasDashboard = ({ data, onSave }: ComprasDashboardProps) => {
               'relative flex items-center gap-1.5 px-4 py-2 rounded-lg',
               'text-[10px] font-black uppercase tracking-widest transition-all duration-200',
               activeSub === 'albaranes'
-                ? 'bg-indigo-600 text-white shadow-md'
+                ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] shadow-md'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800',
             )}
           >
@@ -74,7 +74,7 @@ export const ComprasDashboard = ({ data, onSave }: ComprasDashboardProps) => {
               'relative flex items-center gap-1.5 px-4 py-2 rounded-lg',
               'text-[10px] font-black uppercase tracking-widest transition-all duration-200',
               activeSub === 'facturas'
-                ? 'bg-indigo-600 text-white shadow-md'
+                ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] shadow-md'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800',
             )}
           >

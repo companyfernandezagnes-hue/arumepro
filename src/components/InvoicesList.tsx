@@ -370,7 +370,7 @@ export const InvoicesList = React.memo(({
             </AnimatePresence>
           </tbody>
           
-          <tfoot className="sticky bottom-0 bg-slate-900 text-white z-30 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.1)]">
+          <tfoot className="sticky bottom-0 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] z-30 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.1)]">
             <tr className="text-xs font-bold uppercase tracking-widest">
               <td className="p-4" colSpan={5}>TOTALES ({historyList.length} documentos)</td>
               <td className="p-4 text-right text-slate-300 tabular-nums">{Num.fmt(totales.base)}</td>

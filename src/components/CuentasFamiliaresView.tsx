@@ -317,11 +317,11 @@ export const CuentasFamiliaresView: React.FC<Props> = ({ data, onSave }) => {
       <div className="flex flex-wrap gap-2 justify-between items-center">
         <div className="flex gap-2">
           <button onClick={() => setShowAdd(true)}
-            className="px-4 py-2.5 bg-indigo-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 transition flex items-center gap-2 shadow-sm">
+            className="px-4 py-2.5 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-[color:var(--arume-gray-700)] transition flex items-center gap-2 shadow-sm">
             <Plus className="w-3.5 h-3.5"/> Añadir movimiento
           </button>
           <button onClick={exportExcel}
-            className="px-4 py-2.5 bg-slate-900 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition flex items-center gap-2 shadow-sm">
+            className="px-4 py-2.5 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition flex items-center gap-2 shadow-sm">
             <Download className="w-3.5 h-3.5"/> Excel para Papá
           </button>
         </div>
@@ -449,7 +449,7 @@ export const CuentasFamiliaresView: React.FC<Props> = ({ data, onSave }) => {
                   Cancelar
                 </button>
                 <button onClick={addManual}
-                  className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 transition">
+                  className="flex-1 py-2.5 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-xl text-xs font-black uppercase tracking-widest hover:bg-[color:var(--arume-gray-700)] transition">
                   Guardar
                 </button>
               </div>

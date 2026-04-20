@@ -491,7 +491,7 @@ export const CierreContableView: React.FC<CierreContableViewProps> = ({ data, on
                   </div>
                   <div className="mt-auto pt-1.5">
                     {canClose && (
-                      <button onClick={()=>handleCerrarMes(i,datos)} className="w-full py-2 bg-indigo-600 text-white rounded-lg font-black text-[9px] uppercase tracking-widest hover:bg-indigo-700 transition active:scale-95 shadow-sm flex items-center justify-center gap-1">
+                      <button onClick={()=>handleCerrarMes(i,datos)} className="w-full py-2 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-lg font-black text-[9px] uppercase tracking-widest hover:bg-[color:var(--arume-gray-700)] transition active:scale-95 shadow-sm flex items-center justify-center gap-1">
                         <Lock className="w-2.5 h-2.5"/> Congelar Mes
                       </button>
                     )}

@@ -528,7 +528,7 @@ Instrucciones:
 
             <button
               onClick={() => { setEditingGasto(null); setIsModalOpen(true); }}
-              className="flex-1 md:flex-none bg-slate-900 text-white px-6 py-2.5 rounded-xl text-[10px] font-black hover:bg-indigo-600 transition flex-shrink-0 shadow-lg flex items-center justify-center gap-2 whitespace-nowrap active:scale-95"
+              className="flex-1 md:flex-none bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] px-6 py-2.5 rounded-xl text-[10px] font-black hover:bg-[color:var(--arume-ink)] transition flex-shrink-0 shadow-lg flex items-center justify-center gap-2 whitespace-nowrap active:scale-95"
             >
               <Plus className="w-4 h-4" /> NUEVO
             </button>
@@ -538,7 +538,7 @@ Instrucciones:
         <div className="flex flex-wrap gap-2 px-1">
           <button
             onClick={() => setSelectedUnit('ALL')}
-            className={cn('px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all border flex items-center gap-1.5', selectedUnit === 'ALL' ? 'bg-slate-900 text-white border-slate-900 shadow-md' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-50')}
+            className={cn('px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all border flex items-center gap-1.5', selectedUnit === 'ALL' ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] border-slate-900 shadow-md' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-50')}
           >
             <Layers className="w-3 h-3" /> Todas
           </button>
@@ -792,7 +792,7 @@ Instrucciones:
                 </div>
 
                 <div className="pt-2 space-y-3">
-                  <button type="submit" className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black shadow-xl hover:bg-indigo-600 transition active:scale-95 flex justify-center items-center gap-2">
+                  <button type="submit" className="w-full bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] py-5 rounded-3xl font-black shadow-xl hover:bg-[color:var(--arume-ink)] transition active:scale-95 flex justify-center items-center gap-2">
                     <Save className="w-5 h-5" /> GUARDAR COMPROMISO
                   </button>
                   {editingGasto && (

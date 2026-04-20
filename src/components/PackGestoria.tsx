@@ -295,7 +295,7 @@ export const PackGestoria: React.FC<Props> = ({ data, className, compact }) => {
   if (compact) {
     return (
       <button onClick={generate} disabled={generating}
-        className={cn('flex items-center gap-2 px-4 py-3 bg-indigo-600 text-white rounded-2xl text-xs font-black hover:bg-indigo-700 transition shadow-md disabled:opacity-50', className)}>
+        className={cn('flex items-center gap-2 px-4 py-3 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-2xl text-xs font-black hover:bg-[color:var(--arume-gray-700)] transition shadow-md disabled:opacity-50', className)}>
         {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Package className="w-4 h-4" />}
         {generating ? 'Generando...' : '📦 Pack Gestoría'}
       </button>
@@ -334,7 +334,7 @@ export const PackGestoria: React.FC<Props> = ({ data, className, compact }) => {
       </div>
 
       <button onClick={generate} disabled={generating}
-        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 transition shadow-sm disabled:opacity-50">
+        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-xl text-xs font-black hover:bg-[color:var(--arume-gray-700)] transition shadow-sm disabled:opacity-50">
         {generating
           ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Generando...</>
           : <><Download className="w-3.5 h-3.5" /> Descargar {QUARTERS[quarter - 1]} {year}</>

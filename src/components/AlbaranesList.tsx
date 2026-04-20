@@ -279,7 +279,7 @@ export const AlbaranesList = React.memo(({
                         >
                           <td className="p-3 text-center" onClick={(e) => hasItems ? toggleExpand(e, a.id) : null}>
                             {hasItems ? (
-                              <button className={cn("p-1 rounded-md transition-all duration-300", isExpanded ? "bg-indigo-600 text-white shadow-md rotate-180" : "text-slate-400 hover:bg-slate-200 hover:text-slate-700")}>
+                              <button className={cn("p-1 rounded-md transition-all duration-300", isExpanded ? "bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] shadow-md rotate-180" : "text-slate-400 hover:bg-slate-200 hover:text-slate-700")}>
                                 <ChevronDown className="w-3.5 h-3.5" />
                               </button>
                             ) : (
@@ -380,7 +380,7 @@ export const AlbaranesList = React.memo(({
             </AnimatePresence>
           </tbody>
           
-          <tfoot className="sticky bottom-0 bg-slate-900 text-white z-30 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.1)]">
+          <tfoot className="sticky bottom-0 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] z-30 shadow-[0_-10px_15px_-3px_rgba(0,0,0,0.1)]">
             <tr className="text-xs font-bold uppercase tracking-widest">
               <td className="p-4" colSpan={5}>TOTALES ({filteredAndSorted.length} docs)</td>
               <td className="p-4 text-right text-slate-300 tabular-nums">{Num.fmt(totales.base)}</td>
@@ -396,7 +396,7 @@ export const AlbaranesList = React.memo(({
       {/* BADGE DE CARGA INFINITA */}
       {isLoadingMore && (
          <div className="flex justify-center py-6 absolute bottom-0 left-0 right-0 bg-gradient-to-t from-white via-white/90 to-transparent">
-             <span className="bg-slate-900 text-white px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-xl border border-slate-700">
+             <span className="bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-xl border border-slate-700">
                 <Loader2 className="w-3.5 h-3.5 animate-spin"/> Recuperando registros...
              </span>
          </div>

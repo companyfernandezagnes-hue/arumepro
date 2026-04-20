@@ -142,7 +142,7 @@ export const CashWeekSummary: React.FC<{ data: AppData }> = ({ data }) => {
             return (
               <div key={d.date} className="flex-1 flex flex-col items-center gap-1 group relative">
                 {/* Tooltip */}
-                <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[9px] font-black px-2 py-1 rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] text-[9px] font-black px-2 py-1 rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
                   {Num.fmt(d.total)}
                 </div>
                 {/* Barra */}

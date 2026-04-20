@@ -782,7 +782,7 @@ REGLAS: "importe": positivo=ingreso, negativo=gasto. "fecha": YYYY-MM-DD. Ignora
           <div className="flex flex-wrap gap-2 items-center">
             {/* Importador guiado */}
             <button onClick={() => setShowImportGuide(v => !v)}
-              className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-[10px] font-black hover:bg-indigo-700 transition flex items-center gap-2 shadow-md">
+              className="bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] px-4 py-2 rounded-xl text-[10px] font-black hover:bg-[color:var(--arume-gray-700)] transition flex items-center gap-2 shadow-md">
               <Upload className="w-3.5 h-3.5"/> Importar
             </button>
 
@@ -964,7 +964,7 @@ REGLAS: "importe": positivo=ingreso, negativo=gasto. "fecha": YYYY-MM-DD. Ignora
                       {/* 🆕 Dos botones: importar solo o importar + conciliar */}
                       <div className="grid grid-cols-2 gap-2">
                         <button onClick={() => confirmImport(false)}
-                          className="py-3 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 transition flex items-center justify-center gap-2">
+                          className="py-3 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-xl text-xs font-black hover:bg-[color:var(--arume-gray-700)] transition flex items-center justify-center gap-2">
                           <Upload className="w-4 h-4"/> Importar ({importPreview.length})
                         </button>
                         <button onClick={() => confirmImport(true)}
@@ -1054,7 +1054,7 @@ REGLAS: "importe": positivo=ingreso, negativo=gasto. "fecha": YYYY-MM-DD. Ignora
             </div>
           )}
 
-          <div className="bg-white p-8 rounded-[3rem] shadow-sm border border-slate-100">
+          <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
             <h3 className="text-xl font-black text-slate-800 mb-2">CashFlow → Últimos 30 Días</h3>
             <p className="text-[10px] uppercase font-bold text-slate-400 tracking-widest mb-6">Solo movimientos conciliados</p>
             <div className="h-64">
@@ -1093,7 +1093,7 @@ REGLAS: "importe": positivo=ingreso, negativo=gasto. "fecha": YYYY-MM-DD. Ignora
           {/* ── Columna izquierda ── */}
           <div className="lg:col-span-5 space-y-3">
 
-            <div className="bg-white p-2 rounded-[1.5rem] border border-slate-200 flex items-center gap-2 shadow-sm">
+            <div className="bg-white p-2 rounded-xl border border-slate-200 flex items-center gap-2 shadow-sm">
               <Search className="w-4 h-4 text-slate-400 ml-3"/>
               <input type="text" placeholder="Buscar movimiento o etiqueta..." value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
@@ -1146,23 +1146,25 @@ REGLAS: "importe": positivo=ingreso, negativo=gasto. "fecha": YYYY-MM-DD. Ignora
                   </div>
                 ) : movimientosPrevistos.map(p => (
                   <div key={p.id}
-                    className={cn('bg-white p-4 rounded-[1.5rem] border-2 transition',
-                      p.status === 'atrasado' ? 'border-rose-200 bg-rose-50/30' : 'border-violet-200 bg-violet-50/30')}>
+                    className={cn('bg-white p-4 rounded-2xl border transition',
+                      p.status === 'atrasado'
+                        ? 'border-[color:var(--arume-danger)]/30 bg-[color:var(--arume-danger)]/5'
+                        : 'border-[color:var(--arume-gray-100)] hover:border-[color:var(--arume-ink)]/20')}>
                     <div className="flex justify-between items-start gap-2">
                       <div className="min-w-0 flex-1">
-                        <p className="font-black text-slate-800 text-sm truncate uppercase tracking-tight">{p.desc}</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-[10px] text-slate-400 font-bold">Día {p.diaPago}</span>
-                          <span className={cn("text-[8px] font-black px-1.5 py-0.5 rounded-full border",
+                        <p className="font-semibold text-[color:var(--arume-ink)] text-sm truncate">{p.desc}</p>
+                        <div className="flex items-center gap-2 mt-1.5">
+                          <span className="text-[11px] text-[color:var(--arume-gray-500)] tabular-nums">Día {p.diaPago}</span>
+                          <span className={cn("text-[10px] font-semibold uppercase tracking-[0.1em] px-2 py-0.5 rounded-full border",
                             p.status === 'atrasado'
-                              ? 'bg-rose-100 text-rose-700 border-rose-200'
-                              : 'bg-violet-100 text-violet-700 border-violet-200')}>
-                            {p.status === 'atrasado' ? '⚠️ Atrasado' : '🔮 Esperado'}
+                              ? 'bg-[color:var(--arume-danger)]/10 text-[color:var(--arume-danger)] border-[color:var(--arume-danger)]/20'
+                              : 'bg-[color:var(--arume-gray-50)] text-[color:var(--arume-gray-600)] border-[color:var(--arume-gray-200)]')}>
+                            {p.status === 'atrasado' ? 'Atrasado' : 'Previsto'}
                           </span>
                         </div>
                       </div>
-                      <span className={cn('font-black text-lg whitespace-nowrap tracking-tighter shrink-0',
-                        p.amount < 0 ? 'text-slate-900' : 'text-emerald-500')}>
+                      <span className={cn('font-serif text-xl font-semibold whitespace-nowrap shrink-0 tabular-nums',
+                        p.amount < 0 ? 'text-[color:var(--arume-ink)]' : 'text-[color:var(--arume-ok)]')}>
                         {Num.fmt(p.amount)}
                       </span>
                     </div>
@@ -1179,30 +1181,32 @@ REGLAS: "importe": positivo=ingreso, negativo=gasto. "fecha": YYYY-MM-DD. Ignora
                   </div>
                 ) : filteredMovements.map((b: any) => (
                   <motion.div key={b.id} layoutId={b.id} onClick={() => { setSelectedBankId(b.id); setEditingId(null); }}
-                    className={cn('group relative bg-white p-4 rounded-[1.5rem] border-2 transition cursor-pointer',
-                      selectedBankId===b.id ? 'border-indigo-400 bg-indigo-50/30 shadow-md' : 'border-slate-100 hover:border-indigo-200')}>
+                    className={cn('group relative bg-white p-4 rounded-2xl border transition cursor-pointer',
+                      selectedBankId===b.id
+                        ? 'border-[color:var(--arume-ink)] shadow-sm'
+                        : 'border-[color:var(--arume-gray-100)] hover:border-[color:var(--arume-ink)]/30')}>
                     <div className="flex justify-between items-start gap-2">
                       <div className="min-w-0 flex-1">
-                        <p className="font-black text-slate-800 text-sm truncate uppercase tracking-tight">{b.desc}</p>
-                        <div className="flex items-center gap-2 mt-1 flex-wrap">
-                          <p className="text-[10px] text-slate-400 font-bold tracking-widest">{b.date}</p>
+                        <p className="font-semibold text-[color:var(--arume-ink)] text-sm truncate">{b.desc}</p>
+                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                          <p className="text-[11px] text-[color:var(--arume-gray-500)] tabular-nums">{b.date}</p>
                           {b.label && (
-                            <span className={cn("text-[8px] font-black px-1.5 py-0.5 rounded-full border",
-                              ETIQUETAS_RAPIDAS.find(e => e.label === b.label)?.color || 'bg-slate-100 text-slate-600 border-slate-200')}>
+                            <span className={cn("text-[10px] font-semibold uppercase tracking-[0.1em] px-2 py-0.5 rounded-full border",
+                              ETIQUETAS_RAPIDAS.find(e => e.label === b.label)?.color || 'bg-[color:var(--arume-gray-50)] text-[color:var(--arume-gray-600)] border-[color:var(--arume-gray-200)]')}>
                               {b.label}
                             </span>
                           )}
                           {b.status==='matched' && (
-                            <span className="text-[8px] font-black text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-0.5">
+                            <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[color:var(--arume-ok)] bg-[color:var(--arume-ok)]/10 px-2 py-0.5 rounded-full border border-[color:var(--arume-ok)]/20 flex items-center gap-0.5">
                               <ShieldCheck className="w-2.5 h-2.5"/> OK
                             </span>
                           )}
-                          {b.flags?.suspicious && <span className="text-[8px] font-black text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-full border border-amber-200">⚠️</span>}
-                          {b.flags?.duplicate  && <span className="text-[8px] font-black text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded-full border border-rose-200">🔄</span>}
+                          {b.flags?.suspicious && <span className="text-[10px] font-semibold text-[color:var(--arume-warn)] bg-[color:var(--arume-warn)]/10 px-2 py-0.5 rounded-full border border-[color:var(--arume-warn)]/20">⚠️</span>}
+                          {b.flags?.duplicate  && <span className="text-[10px] font-semibold text-[color:var(--arume-danger)] bg-[color:var(--arume-danger)]/10 px-2 py-0.5 rounded-full border border-[color:var(--arume-danger)]/20">↻</span>}
                         </div>
                       </div>
-                      <span className={cn('font-black text-lg whitespace-nowrap tracking-tighter shrink-0',
-                        Num.parse(b.amount) < 0 ? 'text-slate-900' : 'text-emerald-500')}>
+                      <span className={cn('font-serif text-xl font-semibold whitespace-nowrap shrink-0 tabular-nums',
+                        Num.parse(b.amount) < 0 ? 'text-[color:var(--arume-ink)]' : 'text-[color:var(--arume-ok)]')}>
                         {Num.parse(b.amount) > 0 ? '+' : ''}{Num.fmt(b.amount)}
                       </span>
                     </div>
@@ -1214,7 +1218,7 @@ REGLAS: "importe": positivo=ingreso, negativo=gasto. "fecha": YYYY-MM-DD. Ignora
 
           {/* ── Panel detalle ── */}
           <div className="lg:col-span-7">
-            <div className="bg-white p-8 md:p-10 rounded-[3rem] border border-slate-100 min-h-[580px] flex flex-col shadow-xl relative overflow-hidden">
+            <div className="bg-white p-8 md:p-10 rounded-2xl border border-slate-100 min-h-[580px] flex flex-col shadow-xl relative overflow-hidden">
               <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 to-purple-500"/>
 
               <AnimatePresence mode="wait">
@@ -1306,7 +1310,7 @@ REGLAS: "importe": positivo=ingreso, negativo=gasto. "fecha": YYYY-MM-DD. Ignora
                                     </div>
                                     <button onClick={() => handleLink(selectedItem.id, m.type, m.id)}
                                       className={cn('px-4 py-2 rounded-xl text-[10px] font-black text-white transition active:scale-95 shadow-md',
-                                        isHov ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-indigo-600 hover:bg-indigo-700')}>
+                                        isHov ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-indigo-600 hover:bg-[color:var(--arume-gray-700)]')}>
                                       Enlazar →
                                     </button>
                                   </div>
@@ -1333,7 +1337,7 @@ REGLAS: "importe": positivo=ingreso, negativo=gasto. "fecha": YYYY-MM-DD. Ignora
                             { label:'Personal / Nómina', type:'FIXED_EXPENSE' as const },
                           ]).map(cat => (
                             <button key={cat.label} onClick={() => handleQuickAction(selectedItem.id, cat.label, cat.type)}
-                              className="w-full p-4 border-2 border-slate-100 rounded-[1.5rem] hover:bg-slate-50 hover:border-indigo-100 text-left transition-all group">
+                              className="w-full p-4 border-2 border-slate-100 rounded-xl hover:bg-slate-50 hover:border-indigo-100 text-left transition-all group">
                               <p className="text-xs font-black text-slate-600 uppercase tracking-tight group-hover:text-indigo-600">{cat.label}</p>
                             </button>
                           ))}

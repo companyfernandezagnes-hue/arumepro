@@ -208,7 +208,7 @@ export const NotificacionesView: React.FC<Props> = ({ data, onSave }) => {
           ].map(t => (
             <button key={t.key} onClick={() => setTab(t.key)}
               className={cn('flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all',
-                tab === t.key ? 'bg-indigo-600 text-white shadow-lg' : 'text-gray-500 hover:bg-white')}>
+                tab === t.key ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] shadow-lg' : 'text-gray-500 hover:bg-white')}>
               <t.icon className="w-4 h-4" /> {t.label}
             </button>
           ))}
@@ -360,7 +360,7 @@ export const NotificacionesView: React.FC<Props> = ({ data, onSave }) => {
               className={cn('px-6 py-3 rounded-xl font-bold text-sm transition',
                 prefs.enabled
                   ? 'bg-gray-200 text-gray-600 hover:bg-gray-300'
-                  : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg')}>
+                  : 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] hover:bg-[color:var(--arume-gray-700)] shadow-lg')}>
               {prefs.enabled ? 'Desactivar' : 'Activar'}
             </button>
           </div>

@@ -391,7 +391,7 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
                      <span className="text-[10px] font-black text-indigo-400 uppercase flex items-center gap-1.5"><FileArchive className="w-3 h-3"/> Doc. Original</span>
                      {onSaveData && <button onClick={handleRemoveAttachment} className="text-rose-400 hover:text-rose-600 transition"><Trash2 className="w-3.5 h-3.5"/></button>}
                    </div>
-                   <button onClick={handleDownload} className="w-full bg-white border border-indigo-200 text-indigo-600 font-black text-[10px] uppercase py-2 rounded-xl shadow-sm hover:bg-indigo-600 hover:text-white transition flex justify-center items-center gap-2">
+                   <button onClick={handleDownload} className="w-full bg-white border border-indigo-200 text-indigo-600 font-black text-[10px] uppercase py-2 rounded-xl shadow-sm hover:bg-[color:var(--arume-ink)] hover:text-white transition flex justify-center items-center gap-2">
                      <Download className="w-3.5 h-3.5"/> Descargar PDF
                    </button>
                  </>
@@ -470,7 +470,7 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
           </div>
         </div>
 
-        <div className="bg-slate-900 text-white shrink-0 relative z-20 shadow-[0_-10px_30px_rgba(0,0,0,0.15)] rounded-t-3xl md:rounded-t-none">
+        <div className="bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] shrink-0 relative z-20 shadow-[0_-10px_30px_rgba(0,0,0,0.15)] rounded-t-3xl md:rounded-t-none">
           <div className="p-6 md:p-8 pb-safe">
             
             <div className="grid grid-cols-3 gap-3 mb-6">
@@ -527,7 +527,7 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
                   </button>
                 )}
                 {factura.file_base64 && typeof factura.file_base64 === 'string' && (
-                  <button type="button" onClick={handleDownload} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-3.5 px-6 rounded-xl font-black text-[10px] uppercase tracking-widest transition-colors flex items-center justify-center gap-2 shadow-lg active:scale-95 border border-indigo-500">
+                  <button type="button" onClick={handleDownload} className="flex-1 bg-indigo-600 hover:bg-[color:var(--arume-gray-700)] text-white py-3.5 px-6 rounded-xl font-black text-[10px] uppercase tracking-widest transition-colors flex items-center justify-center gap-2 shadow-lg active:scale-95 border border-indigo-500">
                     <FileArchive className="w-4 h-4" /> Bajar PDF
                   </button>
                 )}

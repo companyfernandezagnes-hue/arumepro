@@ -329,7 +329,7 @@ Máximo 150 palabras. Sin preamble.`;
           <button key={t.key} onClick={() => setActiveTab(t.key)}
             className={cn('px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-widest transition border',
               activeTab === t.key
-                ? 'bg-slate-900 text-white border-slate-900 shadow-lg'
+                ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] border-slate-900 shadow-lg'
                 : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300')}>
             {t.label}
           </button>
@@ -462,7 +462,7 @@ Máximo 150 palabras. Sin preamble.`;
               <div className="flex flex-wrap gap-1.5">
                 <button onClick={() => setFiltroEstado('todos')}
                   className={cn('flex items-center gap-1.5 px-3 py-2 rounded-xl text-[9px] font-black uppercase border transition',
-                    filtroEstado==='todos'?'bg-slate-900 text-white border-slate-900':'bg-white text-slate-500 border-slate-200')}>
+                    filtroEstado==='todos'?'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] border-slate-900':'bg-white text-slate-500 border-slate-200')}>
                   Todos <span className="bg-white/20 rounded-full px-1.5">{counts.todos}</span>
                 </button>
                 {(Object.keys(ESTADO_PEDIDO) as EstadoPedido[]).map(e => {
@@ -485,7 +485,7 @@ Máximo 150 palabras. Sin preamble.`;
                 <Package className="w-12 h-12 text-slate-300 mx-auto mb-4"/>
                 <p className="text-sm font-black text-slate-500">Sin pedidos</p>
                 <button onClick={() => setShowForm(true)}
-                  className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black uppercase hover:bg-indigo-700 transition">
+                  className="mt-4 px-4 py-2 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-xl text-xs font-black uppercase hover:bg-[color:var(--arume-gray-700)] transition">
                   Crear Primer Pedido
                 </button>
               </div>
@@ -612,7 +612,7 @@ Máximo 150 palabras. Sin preamble.`;
                     className={cn('bg-white rounded-2xl border p-5 shadow-sm relative overflow-hidden',
                       p.recomendado ? 'border-indigo-300 ring-2 ring-indigo-100' : 'border-slate-100')}>
                     {p.recomendado && (
-                      <div className="absolute top-3 right-3 bg-indigo-600 text-white text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest">
+                      <div className="absolute top-3 right-3 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest">
                         ⭐ Recomendado
                       </div>
                     )}
@@ -671,7 +671,7 @@ Máximo 150 palabras. Sin preamble.`;
                   placeholder="https://tu-backend.com/webhook/shopify"
                   className="flex-1 border border-slate-200 rounded-xl px-4 py-2 text-xs font-mono focus:outline-none focus:border-indigo-400"/>
                 <button onClick={handleSaveWebhook}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 transition">
+                  className="px-4 py-2 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-xl text-xs font-black hover:bg-[color:var(--arume-gray-700)] transition">
                   Guardar
                 </button>
               </div>
@@ -689,7 +689,7 @@ Máximo 150 palabras. Sin preamble.`;
               <div className="flex flex-wrap gap-2">
                 {PREGUNTAS_RAPIDAS.map(q => (
                   <button key={q} onClick={() => handleIAConsejo(q)}
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-indigo-700 text-slate-300 hover:text-white rounded-xl text-[9px] font-bold border border-slate-700 hover:border-indigo-500 transition text-left">
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-[color:var(--arume-gray-700)] text-slate-300 hover:text-white rounded-xl text-[9px] font-bold border border-slate-700 hover:border-indigo-500 transition text-left">
                     {q}
                   </button>
                 ))}
@@ -744,7 +744,7 @@ Máximo 150 palabras. Sin preamble.`;
                     <span className="font-bold text-slate-600">Envío</span>
                     <span className="font-black text-slate-700">{Num.fmt(selected.envio)}</span>
                   </div>
-                  <div className="flex justify-between px-4 py-3 bg-slate-900 text-white text-sm">
+                  <div className="flex justify-between px-4 py-3 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] text-sm">
                     <span className="font-black">TOTAL</span>
                     <span className="font-black tabular-nums">{Num.fmt(calcPedidoTotal(selected))}</span>
                   </div>
@@ -927,7 +927,7 @@ const NuevoPedidoModal: React.FC<{
                     className="col-span-1 text-rose-300 hover:text-rose-500 flex justify-center"><X className="w-3.5 h-3.5"/></button>
                 </div>
               ))}
-              <div className="flex justify-between px-4 py-3 bg-slate-900 text-white text-sm">
+              <div className="flex justify-between px-4 py-3 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] text-sm">
                 <span className="font-black">TOTAL</span>
                 <span className="font-black tabular-nums">{Num.fmt(total)}</span>
               </div>
@@ -943,7 +943,7 @@ const NuevoPedidoModal: React.FC<{
         <div className="p-4 border-t border-slate-100 flex gap-3 shrink-0">
           <button onClick={onClose} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-2xl font-black text-xs uppercase hover:bg-slate-200 transition">Cancelar</button>
           <button onClick={handleSave} disabled={saving}
-            className="flex-1 py-3 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase hover:bg-indigo-700 transition flex items-center justify-center gap-2">
+            className="flex-1 py-3 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-2xl font-black text-xs uppercase hover:bg-[color:var(--arume-gray-700)] transition flex items-center justify-center gap-2">
             {saving ? <Loader2 className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4"/>} Crear Pedido
           </button>
         </div>

@@ -220,7 +220,7 @@ export const CashProjection: React.FC<{ data: AppData; saldoActual: number }> = 
     const d = payload[0].payload;
     const eventsDay = events.filter(e => e.date === d.fecha);
     return (
-      <div className="bg-slate-900 text-white p-3 rounded-xl shadow-xl text-xs min-w-[180px]">
+      <div className="bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] p-3 rounded-xl shadow-xl text-xs min-w-[180px]">
         <p className="font-black text-slate-300 mb-2 uppercase tracking-widest text-[9px]">{d.fecha}</p>
         <p className="font-black text-base mb-1">{Num.fmt(d.saldo)}</p>
         {d.entrada > 0 && <p className="text-emerald-400 font-bold">+ {Num.fmt(d.entrada)}</p>}

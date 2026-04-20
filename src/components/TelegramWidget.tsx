@@ -356,7 +356,7 @@ export const TelegramWidget = ({ currentModule, chatId }: TelegramWidgetProps) =
                     initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
                     key={msg.id} 
                     className={cn("max-w-[85%] rounded-2xl p-3.5 text-sm shadow-sm relative", 
-                      msg.sender === 'user' ? "bg-indigo-600 text-white self-end rounded-tr-sm" : 
+                      msg.sender === 'user' ? "bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] self-end rounded-tr-sm" : 
                       msg.sender === 'ai' ? "bg-white border border-slate-200 text-slate-800 self-start rounded-tl-sm" :
                       "bg-slate-200 text-slate-600 self-center text-center text-xs font-medium px-4 py-2 rounded-full",
                       msg.isQueue ? "opacity-70 border-dashed border border-white" : ""
@@ -404,7 +404,7 @@ export const TelegramWidget = ({ currentModule, chatId }: TelegramWidgetProps) =
                 className="flex-1 bg-slate-50 text-sm font-bold rounded-xl px-4 py-3 outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500 text-slate-800 border border-slate-200 transition-all w-full"
               />
 
-              <button onClick={() => safeSend(message)} disabled={!message.trim() || isSending} className="bg-indigo-600 text-white w-12 h-12 rounded-xl flex items-center justify-center hover:bg-indigo-700 transition-colors disabled:opacity-50 active:scale-95 shrink-0 shadow-md">
+              <button onClick={() => safeSend(message)} disabled={!message.trim() || isSending} className="bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] w-12 h-12 rounded-xl flex items-center justify-center hover:bg-[color:var(--arume-gray-700)] transition-colors disabled:opacity-50 active:scale-95 shrink-0 shadow-md">
                 {isSending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5 ml-1" />}
               </button>
             </div>

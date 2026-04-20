@@ -429,7 +429,7 @@ Celoso de Palma SL`;
       <div className="flex flex-wrap gap-2">
         <button onClick={() => setFiltroEstado('todos')}
           className={cn('flex items-center gap-1.5 px-4 py-2 rounded-xl text-[9px] font-black uppercase border transition',
-            filtroEstado==='todos' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300')}>
+            filtroEstado==='todos' ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300')}>
           Todos <span className={cn('rounded-full px-1.5 text-[8px] font-black', filtroEstado==='todos'?'bg-white/20':'bg-slate-100 text-slate-500')}>{counts.todos}</span>
         </button>
         {(Object.keys(ESTADO_META) as EstadoPresupuesto[]).map(e => {
@@ -455,7 +455,7 @@ Celoso de Palma SL`;
           </p>
           {presupuestos.length === 0 && (
             <button onClick={() => setShowForm(true)}
-              className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black uppercase hover:bg-indigo-700 transition">
+              className="mt-4 px-4 py-2 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-xl text-xs font-black uppercase hover:bg-[color:var(--arume-gray-700)] transition">
               Crear Primer Presupuesto
             </button>
           )}
@@ -656,7 +656,7 @@ Celoso de Palma SL`;
                 <div className="space-y-2">
                   <div className="flex gap-2">
                     <button onClick={() => handleIADraft(selected)} disabled={aiLoading}
-                      className="flex-1 flex items-center justify-center gap-2 py-3 bg-indigo-600 text-white rounded-2xl text-xs font-black uppercase hover:bg-indigo-700 transition disabled:opacity-50">
+                      className="flex-1 flex items-center justify-center gap-2 py-3 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-2xl text-xs font-black uppercase hover:bg-[color:var(--arume-gray-700)] transition disabled:opacity-50">
                       {aiLoading ? <Loader2 className="w-4 h-4 animate-spin"/> : <Sparkles className="w-4 h-4"/>}
                       {aiLoading ? 'Generando...' : 'Redactar con IA'}
                     </button>
@@ -864,7 +864,7 @@ const PresupuestoFormModal: React.FC<{
         <div className="p-4 border-t border-slate-100 flex gap-3 shrink-0">
           <button onClick={onClose} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-2xl font-black text-xs uppercase hover:bg-slate-200 transition">Cancelar</button>
           <button onClick={onSave} disabled={saving}
-            className="flex-1 py-3 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase hover:bg-indigo-700 transition flex items-center justify-center gap-2">
+            className="flex-1 py-3 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rounded-2xl font-black text-xs uppercase hover:bg-[color:var(--arume-gray-700)] transition flex items-center justify-center gap-2">
             {saving ? <Loader2 className="w-4 h-4 animate-spin"/> : <Save className="w-4 h-4"/>} Guardar
           </button>
         </div>

@@ -1018,7 +1018,7 @@ Usa punto como separador decimal.`;
                     {pendingGroups.reduce((acc, [, dg]) => acc + Object.keys(dg.groups).length, 0)} grupos detectados
                     {' '}· <span className="text-indigo-500">Fuzzy matching activo</span>
                   </p>
-                  <button onClick={handlePrepareAutoGroup} disabled={isProcessing} className="bg-indigo-600 text-white font-black text-[10px] uppercase tracking-widest px-6 py-3 rounded-xl shadow-lg hover:bg-indigo-700 transition-all flex items-center gap-2 active:scale-95 disabled:opacity-50">
+                  <button onClick={handlePrepareAutoGroup} disabled={isProcessing} className="bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] font-black text-[10px] uppercase tracking-widest px-6 py-3 rounded-xl shadow-lg hover:bg-[color:var(--arume-gray-700)] transition-all flex items-center gap-2 active:scale-95 disabled:opacity-50">
                     {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
                     Revisar Auto-Agrupación
                   </button>
@@ -1088,7 +1088,7 @@ Usa punto como separador decimal.`;
                                 <button
                                   onClick={() => setEditingDraftIdx(isEditingThis ? -1 : idx)}
                                   title="Editar qué albaranes van en esta factura"
-                                  className={cn('p-2.5 rounded-xl border text-xs font-black transition flex items-center gap-1.5', isEditingThis ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white border-slate-200 text-slate-500 hover:border-indigo-300 hover:text-indigo-600')}
+                                  className={cn('p-2.5 rounded-xl border text-xs font-black transition flex items-center gap-1.5', isEditingThis ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] border-indigo-600' : 'bg-white border-slate-200 text-slate-500 hover:border-indigo-300 hover:text-indigo-600')}
                                 >
                                   <Wand2 className="w-3.5 h-3.5" />
                                   <span className="hidden sm:inline">{isEditingThis ? 'Cerrar' : 'Editar'}</span>
@@ -1952,7 +1952,7 @@ Usa punto como separador decimal.`;
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Trimestre</label>
                   <div className="grid grid-cols-4 gap-2">
                     {[1, 2, 3, 4].map(q => (
-                      <button key={q} onClick={() => setExportQuarter(q)} className={cn('py-3 rounded-xl text-xs font-black transition-all border', exportQuarter === q ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50')}>Q{q}</button>
+                      <button key={q} onClick={() => setExportQuarter(q)} className={cn('py-3 rounded-xl text-xs font-black transition-all border', exportQuarter === q ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] border-indigo-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50')}>Q{q}</button>
                     ))}
                   </div>
                 </div>
@@ -2038,7 +2038,7 @@ Usa punto como separador decimal.`;
                     <AlertCircle className="w-3.5 h-3.5" /> Escribe un número de factura para guardar.
                   </p>
                 )}
-                <button onClick={handleConfirmManualInvoice} disabled={modalForm.selectedAlbs.length === 0 || isProcessing || !modalForm.num.trim()} className="w-full bg-indigo-600 text-white py-4 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2 shadow-lg active:scale-95 transition-all">
+                <button onClick={handleConfirmManualInvoice} disabled={modalForm.selectedAlbs.length === 0 || isProcessing || !modalForm.num.trim()} className="w-full bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] py-4 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-[color:var(--arume-gray-700)] disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2 shadow-lg active:scale-95 transition-all">
                   {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5"/>} Emitir Factura Final
                 </button>
               </div>

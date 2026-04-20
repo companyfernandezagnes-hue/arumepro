@@ -296,7 +296,7 @@ Escribe 3 párrafos muy cortos: evalúa la salud, el mayor problema y un consejo
   const CustomTooltip = useMemo(() => ({ active, payload }: any) => {
     if (!active || !payload?.length) return null;
     return (
-      <div className="bg-slate-900 text-white p-2.5 rounded-lg shadow-xl border border-slate-700 text-xs font-bold">
+      <div className="bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] p-2.5 rounded-lg shadow-xl border border-slate-700 text-xs font-bold">
         <p className="text-slate-400 mb-1">{payload[0].name || payload[0].payload?.name}</p>
         {payload.map((e:any,i:number) => <p key={i} style={{color:e.color}}>{e.name}: {Num.fmt(e.value)}</p>)}
       </div>
@@ -333,7 +333,7 @@ Escribe 3 párrafos muy cortos: evalúa la salud, el mayor problema y un consejo
           </div>
           <PackGestoria data={data} compact />
           <button onClick={analyzeWithAI} disabled={isAnalyzing}
-            className="w-full sm:w-auto bg-slate-900 text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-wide hover:bg-indigo-600 transition shadow-md flex items-center justify-center gap-1.5 disabled:opacity-50">
+            className="w-full sm:w-auto bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-wide hover:bg-[color:var(--arume-ink)] transition shadow-md flex items-center justify-center gap-1.5 disabled:opacity-50">
             {isAnalyzing ? <Loader2 className="w-4 h-4 animate-spin"/> : <Brain className="w-4 h-4"/>}
             {isAnalyzing ? 'Analizando...' : 'Director IA'}
           </button>
@@ -372,7 +372,7 @@ Escribe 3 párrafos muy cortos: evalúa la salud, el mayor problema y un consejo
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Gastos Totales</p>
               <p className="text-3xl font-black text-rose-500 tabular-nums">{Num.fmt(stats.gastos?.total??0)}</p>
             </div>
-            <div className={cn('px-4 py-3 rounded-xl shadow-md relative overflow-hidden flex flex-col justify-center', (stats.neto??0)>=0?'bg-slate-900 text-white':'bg-rose-600 text-white')}>
+            <div className={cn('px-4 py-3 rounded-xl shadow-md relative overflow-hidden flex flex-col justify-center', (stats.neto??0)>=0?'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)]':'bg-rose-600 text-white')}>
               <div className="absolute -right-3 -bottom-3 opacity-10">{(stats.neto??0)>=0?<TrendingUp className="w-24 h-24"/>:<TrendingDown className="w-24 h-24"/>}</div>
               <p className="text-[10px] font-black opacity-70 uppercase tracking-widest z-10 mb-1">Beneficio Neto</p>
               <p className="text-3xl font-black z-10 tabular-nums">{Num.fmt(stats.neto??0)}</p>
@@ -767,7 +767,7 @@ const BancoAuditoria = ({ data }: { data: AppData }) => {
         {years.length === 0 && <span className="text-xs text-slate-400">Sin datos bancarios importados</span>}
         {years.map(y => (
           <button key={y} onClick={() => setSelectedYear(y)}
-            className={`px-4 py-1.5 rounded-xl text-xs font-black border transition ${selectedYear === y ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'}`}>
+            className={`px-4 py-1.5 rounded-xl text-xs font-black border transition ${selectedYear === y ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'}`}>
             {y}
           </button>
         ))}
