@@ -6,6 +6,7 @@ import {
   Landmark, Wrench, AlertOctagon, Save, Filter, UserCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { EmptyState } from './EmptyState';
 import { AppData, GastoFijo } from '../types';
 import { scanDocument } from '../services/aiProviders';
 import { cn } from '../lib/utils';
@@ -678,9 +679,13 @@ Instrucciones:
         </AnimatePresence>
 
         {filteredGastos.length === 0 && (
-          <div className="col-span-full text-center py-20 bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200">
-            <AlertTriangle className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-            <p className="text-xs font-black text-slate-400 uppercase">No hay compromisos en esta vista</p>
+          <div className="col-span-full bg-[color:var(--arume-gray-50)] rounded-2xl border-2 border-dashed border-[color:var(--arume-gray-200)]">
+            <EmptyState
+              icon={AlertTriangle}
+              eyebrow="Sin resultados"
+              title="No hay compromisos aquí"
+              message="Ningún gasto fijo coincide con los filtros. Prueba a quitar filtros o crear un nuevo compromiso."
+            />
           </div>
         )}
       </div>

@@ -5,6 +5,7 @@ import {
   ArrowUp, ArrowDown, ArrowUpDown, Lock // 🛡️ FIX CRÍTICO: Faltaba el icono Lock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { EmptyState } from './EmptyState';
 
 // 🛡️ APUNTAMOS A LA RAÍZ PARA EVITAR DEPENDENCIAS CIRCULARES
 import { Albaran, FacturaExtended, BusinessUnit } from '../types'; 
@@ -199,12 +200,14 @@ export const InvoicesList = React.memo(({
 
   if (historyList.length === 0) {
     return (
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="py-24 flex flex-col items-center justify-center bg-white rounded-3xl border border-slate-200 shadow-sm text-center">
-        <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4 border border-slate-100 shadow-inner">
-          <FileText className="w-8 h-8 text-slate-300" />
-        </div>
-        <p className="text-slate-700 font-black text-sm uppercase tracking-widest">Bóveda Vacía</p>
-        <p className="text-slate-400 text-xs mt-2 max-w-xs leading-relaxed">No hay {mode === 'socio' ? 'liquidaciones' : 'facturas'} que coincidan con los filtros aplicados.</p>
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+        className="bg-white rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm">
+        <EmptyState
+          icon={FileText}
+          eyebrow="Bóveda"
+          title="Nada que mostrar aquí"
+          message={`No hay ${mode === 'socio' ? 'liquidaciones' : 'facturas'} que coincidan con los filtros aplicados. Prueba a quitar filtros o cambiar el año.`}
+        />
       </motion.div>
     );
   }

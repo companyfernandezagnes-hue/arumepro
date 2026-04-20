@@ -22,6 +22,7 @@ import {
   ArrowUpRight, ArrowDownRight, Calendar, RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { EmptyState } from './EmptyState';
 import {
   LineChart, Line, AreaChart, Area, ResponsiveContainer,
   XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine
@@ -347,17 +348,22 @@ Genera un briefing de negociación conciso (máx 120 palabras) con:
 
       {/* GRID PROVEEDORES */}
       {filtered.length === 0 ? (
-        <div className="bg-white border-2 border-dashed border-slate-200 rounded-2xl p-16 text-center">
-          <Users className="w-12 h-12 text-slate-300 mx-auto mb-4"/>
-          <p className="text-sm font-black text-slate-500">
-            {proveedores.length === 0 ? 'Aún no hay proveedores' : 'Sin resultados'}
-          </p>
-          {proveedores.length === 0 && (
-            <button onClick={() => setShowNew(true)}
-              className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-black uppercase hover:bg-indigo-700 transition">
-              Añadir Primer Proveedor
-            </button>
-          )}
+        <div className="bg-white border-2 border-dashed border-[color:var(--arume-gray-200)] rounded-2xl">
+          <EmptyState
+            icon={Users}
+            eyebrow={proveedores.length === 0 ? 'Empezar' : 'Sin coincidencias'}
+            title={proveedores.length === 0 ? 'Aún no hay proveedores' : 'Sin resultados'}
+            message={
+              proveedores.length === 0
+                ? 'Añade tu primer proveedor para empezar a organizar compras, albaranes y comparar precios.'
+                : 'Ningún proveedor coincide con la búsqueda actual. Prueba con otro nombre o quita filtros.'
+            }
+            action={
+              proveedores.length === 0
+                ? { label: 'Añadir proveedor', onClick: () => setShowNew(true), variant: 'primary', icon: Plus }
+                : undefined
+            }
+          />
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">

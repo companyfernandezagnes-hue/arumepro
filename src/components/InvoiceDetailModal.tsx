@@ -275,71 +275,75 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
       aria-labelledby="invoice-title" aria-describedby="invoice-desc"
     >
       <motion.div
-        initial={{ opacity: 0 }} 
-        animate={{ opacity: 1 }} 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className={cn(
-          "absolute inset-0 w-full h-full backdrop-blur-md cursor-default transition-colors duration-700",
-          isPerfectMatch ? "bg-slate-900/60" : "bg-slate-900/80"
-        )}
+        className="absolute inset-0 w-full h-full bg-[color:var(--arume-ink)]/70 backdrop-blur-md cursor-default"
         onClick={handleClose}
         aria-label="Cerrar modal"
-      >
-        {!isPerfectMatch && <div className="absolute inset-0 bg-rose-500/10 mix-blend-overlay"></div>}
-      </motion.div>
+      />
 
       <motion.div
         ref={trapRef}
-        initial={{ y: 100, opacity: 0, scale: 0.98 }} 
-        animate={{ y: 0, opacity: 1, scale: 1 }} 
+        initial={{ y: 100, opacity: 0, scale: 0.98 }}
+        animate={{ y: 0, opacity: 1, scale: 1 }}
         exit={{ y: 100, opacity: 0, scale: 0.98 }}
         transition={{ type: 'spring', damping: 25, stiffness: 250 }}
-        className="bg-[#F8FAFC] w-full max-w-2xl rounded-t-[2.5rem] md:rounded-[2.5rem] shadow-2xl relative z-10 flex flex-col h-[85dvh] md:h-auto md:max-h-[90dvh] overflow-hidden focus:outline-none"
-        onClick={(e) => e.stopPropagation()} 
+        className="bg-[color:var(--arume-paper)] w-full max-w-2xl rounded-t-2xl md:rounded-2xl relative z-10 flex flex-col h-[85dvh] md:h-auto md:max-h-[90dvh] overflow-hidden focus:outline-none"
+        style={{ boxShadow: '0 24px 80px rgba(11,11,12,0.35)' }}
+        onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-6 border-b border-slate-200 bg-white flex justify-between items-start md:items-center relative z-20 shrink-0 flex-col md:flex-row gap-4">
+        {/* Línea acento superior: dorada si cuadra, rojo si no */}
+        <span className={cn('absolute top-0 left-0 right-0 h-[2px] z-30',
+          isPerfectMatch ? 'bg-[color:var(--arume-gold)]' : 'bg-[color:var(--arume-accent)]')}/>
+
+        <div className="p-6 border-b border-[color:var(--arume-gray-100)] bg-white flex justify-between items-start md:items-center relative z-20 shrink-0 flex-col md:flex-row gap-4">
           <div className="flex items-center gap-4 min-w-0 w-full">
-            <div className={cn("w-12 h-12 rounded-full flex items-center justify-center shrink-0 shadow-sm border", isPerfectMatch ? "bg-indigo-50 text-indigo-600 border-indigo-100" : "bg-rose-50 text-rose-600 border-rose-100")}>
-              <FileText className="w-6 h-6" aria-hidden="true" />
+            <div className={cn("w-11 h-11 rounded-full flex items-center justify-center shrink-0 border",
+              isPerfectMatch
+                ? "bg-[color:var(--arume-gray-50)] text-[color:var(--arume-ink)] border-[color:var(--arume-gray-100)]"
+                : "bg-[color:var(--arume-accent)]/10 text-[color:var(--arume-accent)] border-[color:var(--arume-accent)]/20")}>
+              <FileText className="w-5 h-5" aria-hidden="true" />
             </div>
             <div className="min-w-0 flex-1">
               {isEditing ? (
                 <div className="space-y-2 w-full pr-4">
-                  <input 
-                    type="text" 
-                    value={editForm.prov} 
+                  <input
+                    type="text"
+                    value={editForm.prov}
                     onChange={(e) => setEditForm({...editForm, prov: e.target.value.toUpperCase()})}
-                    className="w-full text-lg md:text-xl font-black text-slate-800 border-b-2 border-indigo-300 outline-none bg-indigo-50/50 px-2 py-1 rounded-t-lg"
-                    placeholder="Nombre Titular"
+                    className="w-full font-serif text-xl md:text-2xl font-semibold text-[color:var(--arume-ink)] border-b-2 border-[color:var(--arume-ink)]/30 outline-none bg-[color:var(--arume-gray-50)] px-2 py-1 rounded-t-lg focus:border-[color:var(--arume-ink)]"
+                    placeholder="Nombre titular"
                   />
                   <div className="flex gap-2">
-                    <input 
-                      type="text" 
-                      value={editForm.num} 
+                    <input
+                      type="text"
+                      value={editForm.num}
                       onChange={(e) => setEditForm({...editForm, num: e.target.value})}
-                      className="w-1/2 text-[10px] font-mono uppercase bg-indigo-50/50 border-b-2 border-indigo-300 outline-none px-2 py-1"
-                      placeholder="Ref / Nº Factura"
+                      className="w-1/2 text-xs font-mono uppercase bg-[color:var(--arume-gray-50)] border-b-2 border-[color:var(--arume-ink)]/30 outline-none px-2 py-1"
+                      placeholder="Nº factura"
                     />
-                    <input 
-                      type="date" 
-                      value={editForm.date} 
+                    <input
+                      type="date"
+                      value={editForm.date}
                       onChange={(e) => setEditForm({...editForm, date: e.target.value})}
-                      className="w-1/2 text-[10px] font-bold uppercase bg-indigo-50/50 border-b-2 border-indigo-300 outline-none px-2 py-1"
+                      className="w-1/2 text-xs bg-[color:var(--arume-gray-50)] border-b-2 border-[color:var(--arume-ink)]/30 outline-none px-2 py-1"
                     />
                   </div>
                 </div>
               ) : (
                 <>
-                  <h3 id="invoice-title" className="text-lg md:text-xl font-black text-slate-800 leading-tight truncate pr-2 flex items-center gap-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Factura</p>
+                  <h3 id="invoice-title" className="font-serif text-xl md:text-2xl font-semibold tracking-tight text-[color:var(--arume-ink)] leading-tight truncate pr-2 flex items-center gap-2 mt-0.5">
                     {titular}
                     {onSaveData && !factura.reconciled && (
-                      <button onClick={() => setIsEditing(true)} className="p-1.5 bg-slate-100 text-slate-400 hover:text-indigo-600 rounded-md transition-colors"><Edit2 className="w-3 h-3"/></button>
+                      <button onClick={() => setIsEditing(true)} className="p-1.5 bg-[color:var(--arume-gray-50)] text-[color:var(--arume-gray-400)] hover:text-[color:var(--arume-ink)] hover:bg-[color:var(--arume-gray-100)] rounded-full transition"><Edit2 className="w-3 h-3"/></button>
                     )}
                   </h3>
-                  <p id="invoice-desc" className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-1 flex items-center gap-2">
-                    <span className="bg-slate-100 px-2 py-0.5 rounded text-indigo-500 font-mono">REF: {refStr}</span>
-                    <span className="flex items-center gap-1"><Calendar className="w-3 h-3"/> {dateStr}</span>
-                    {isIA && <span className="bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded flex items-center gap-1 border border-purple-100"><Bot className="w-3 h-3"/> IA</span>}
+                  <p id="invoice-desc" className="text-[11px] text-[color:var(--arume-gray-500)] mt-1.5 flex items-center gap-2 flex-wrap">
+                    <span className="bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)] px-2 py-0.5 rounded-full font-mono tabular-nums text-[color:var(--arume-ink)]">{refStr}</span>
+                    <span className="flex items-center gap-1 tabular-nums"><Calendar className="w-3 h-3"/> {dateStr}</span>
+                    {isIA && <span className="bg-[color:var(--arume-gold)]/15 text-[color:var(--arume-ink)] border border-[color:var(--arume-gold)]/30 px-2 py-0.5 rounded-full flex items-center gap-1 font-semibold uppercase tracking-[0.1em]"><Bot className="w-3 h-3"/> IA</span>}
                   </p>
                 </>
               )}
@@ -349,15 +353,22 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
           <div className="flex items-center gap-2 self-end md:self-auto w-full md:w-auto justify-end">
             {isEditing ? (
               <div className="flex gap-2">
-                <button onClick={() => setIsEditing(false)} className="px-3 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-lg">Cancelar</button>
-                <button onClick={handleSaveEdits} disabled={isSaving} className="px-4 py-1.5 text-xs font-black bg-indigo-600 text-white rounded-lg shadow-md flex items-center gap-2">
+                <button onClick={() => setIsEditing(false)}
+                  className="px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gray-600)] border border-[color:var(--arume-gray-200)] hover:bg-[color:var(--arume-gray-50)] transition">
+                  Cancelar
+                </button>
+                <button onClick={handleSaveEdits} disabled={isSaving}
+                  className="px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] hover:bg-[color:var(--arume-gray-700)] transition flex items-center gap-2 active:scale-[0.98] disabled:opacity-50">
                   {isSaving ? <Loader2 className="w-3 h-3 animate-spin"/> : <Save className="w-3 h-3"/>} Guardar
                 </button>
               </div>
             ) : (
               <>
-                <span className={cn('text-[9px] font-black px-2.5 py-1 rounded-full border shadow-sm hidden sm:inline-block', chip.cls)} title="Estado de la factura">{chip.label}</span>
-                <button type="button" onClick={handleClose} className="p-2.5 bg-slate-50 text-slate-400 rounded-full hover:bg-slate-200 hover:text-slate-700 transition-colors shrink-0"><X className="w-5 h-5" /></button>
+                <span className={cn('text-[10px] font-semibold uppercase tracking-[0.15em] px-2.5 py-1 rounded-full border hidden sm:inline-block', chip.cls)} title="Estado de la factura">{chip.label}</span>
+                <button type="button" onClick={handleClose}
+                  className="p-2 bg-[color:var(--arume-gray-50)] text-[color:var(--arume-gray-500)] rounded-full hover:bg-[color:var(--arume-gray-100)] hover:text-[color:var(--arume-ink)] transition shrink-0">
+                  <X className="w-4 h-4" />
+                </button>
               </>
             )}
           </div>

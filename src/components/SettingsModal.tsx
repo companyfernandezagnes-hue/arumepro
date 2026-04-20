@@ -297,7 +297,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
         initial={{ scale: 0.95, opacity: 0, y: 20 }}
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.95, opacity: 0, y: 20 }}
-        className="bg-slate-100 w-full max-w-5xl rounded-[3rem] shadow-2xl relative z-10 flex flex-col my-auto overflow-hidden border border-slate-200"
+        className="bg-slate-100 w-full max-w-5xl rounded-3xl shadow-2xl relative z-10 flex flex-col my-auto overflow-hidden border border-slate-200"
       >
         <button onClick={onClose} className="absolute top-6 right-6 text-white/70 hover:text-white z-20 bg-slate-900/50 p-2.5 rounded-full backdrop-blur-md transition hover:rotate-90">
           <X className="w-5 h-5" />
@@ -329,7 +329,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
             {/* ══════════════════════════════════════════════════════════════
                 1. CEREBROS IA — Gemini + Groq + Cerebras + DeepSeek
             ══════════════════════════════════════════════════════════════ */}
-            <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200 relative flex flex-col space-y-3 lg:col-span-2">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 relative flex flex-col space-y-3 lg:col-span-2">
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-violet-500 to-cyan-400 rounded-t-[2.5rem]" />
               <SectionTitle icon={Brain} title="Cerebros IA" color="indigo" />
 
@@ -396,7 +396,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
             {/* ══════════════════════════════════════════════════════════════
                 2. MOTOR DE VOZ — Navegador vs Groq Whisper
             ══════════════════════════════════════════════════════════════ */}
-            <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200 relative">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 relative">
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 to-teal-400 rounded-t-[2.5rem]" />
               <SectionTitle icon={Mic} title="Motor de Voz" color="emerald" />
 
@@ -450,7 +450,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
             {/* ══════════════════════════════════════════════════════════════
                 3. TELEGRAM BOT
             ══════════════════════════════════════════════════════════════ */}
-            <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200 relative overflow-hidden">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 relative overflow-hidden">
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-400 to-sky-400 rounded-t-[2.5rem]" />
               <SectionTitle icon={MessageCircle} title="Conexión Telegram" color="blue" />
               <div className="space-y-3">
@@ -472,7 +472,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
             {/* ══════════════════════════════════════════════════════════════
                 4. MARKETING — Instagram Graph API + Google Drive
             ══════════════════════════════════════════════════════════════ */}
-            <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200 relative">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 relative">
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-pink-500 via-rose-500 to-orange-400 rounded-t-[2.5rem]" />
               <SectionTitle icon={Megaphone} title="Marketing & Redes" color="pink" />
 
@@ -516,7 +516,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
             {/* ══════════════════════════════════════════════════════════════
                 5. ENDPOINT PSD2 (BANCO)
             ══════════════════════════════════════════════════════════════ */}
-            <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200 relative">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 relative">
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 to-green-400 rounded-t-[2.5rem]" />
               <SectionTitle icon={LinkIcon} title="Endpoint PSD2" color="emerald" />
               <div className="space-y-3">
@@ -532,7 +532,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
             {/* ══════════════════════════════════════════════════════════════
                 7. INTEGRACIONES EXTERNAS — Madisa / Restoo / Cover Manager…
             ══════════════════════════════════════════════════════════════ */}
-            <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200 relative lg:col-span-2">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 relative lg:col-span-2">
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-400 via-amber-400 to-yellow-400 rounded-t-[2.5rem]" />
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
@@ -591,7 +591,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
             {/* ══════════════════════════════════════════════════════════════
                 8. EMPRESA Y REPARTOS
             ══════════════════════════════════════════════════════════════ */}
-            <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200 lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <SectionTitle icon={Building2} title="Datos Comerciales" color="slate" />
                 <div className="space-y-3">
@@ -631,7 +631,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
             {/* ══════════════════════════════════════════════════════════════
                 9. BÓVEDA DE SEGURIDAD & MANTENIMIENTO
             ══════════════════════════════════════════════════════════════ */}
-            <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-200 lg:col-span-2">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 lg:col-span-2">
               <SectionTitle icon={DownloadCloud} title="Bóveda de Seguridad & Mantenimiento" color="emerald" />
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <button onClick={handleGlobalBackup}
@@ -690,7 +690,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
           <button
             onClick={handleSaveAll}
             className={cn(
-              'flex-1 sm:flex-none sm:min-w-[200px] py-4 px-8 rounded-[2rem] font-black text-sm uppercase tracking-widest transition-all flex justify-center items-center gap-2 shadow-xl',
+              'flex-1 sm:flex-none sm:min-w-[200px] py-4 px-8 rounded-2xl font-black text-sm uppercase tracking-widest transition-all flex justify-center items-center gap-2 shadow-xl',
               isSaved ? 'bg-emerald-500 text-white' : 'bg-indigo-600 hover:bg-indigo-500 text-white active:scale-95'
             )}
           >

@@ -302,7 +302,7 @@ export const AlbaranEditModal = ({
           initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }}
           transition={{ type: 'spring', damping: 25, stiffness: 200 }}
           onClick={e => e.stopPropagation()}
-          className="bg-[#F8FAFC] w-full max-w-5xl rounded-t-[2.5rem] md:rounded-[2.5rem] shadow-2xl relative z-10 flex flex-col h-[90dvh] md:max-h-[90vh] overflow-hidden"
+          className="bg-[#F8FAFC] w-full max-w-5xl rounded-t-[2.5rem] md:rounded-2xl shadow-2xl relative z-10 flex flex-col h-[90dvh] md:max-h-[90vh] overflow-hidden"
         >
           {/* CABECERA */}
           <div className="p-5 md:p-6 border-b border-slate-200 bg-white flex justify-between items-center sticky top-0 z-30 shrink-0">
@@ -424,7 +424,7 @@ export const AlbaranEditModal = ({
                 </div>
               </div>
 
-              <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
                 <div className="overflow-x-auto w-full custom-scrollbar">
                   <table className="w-full text-left whitespace-nowrap min-w-[700px]">
                     <thead className="bg-slate-50 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 sticky top-0 z-10">
