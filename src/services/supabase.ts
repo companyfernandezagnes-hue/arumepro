@@ -101,6 +101,7 @@ const enforceSchema = (d: any): AppData => {
                 ...(Array.isArray(safeData.diario) ? safeData.diario : []),
             ],
                     cierres_mensuales: Array.isArray(safeData.cierres_mensuales) ? safeData.cierres_mensuales : [],
+                    modelos_aeat: Array.isArray(safeData.modelos_aeat) ? safeData.modelos_aeat : [],
                     gastos_fijos: Array.isArray(safeData.gastos_fijos) ? safeData.gastos_fijos : [],
                     activos: Array.isArray(safeData.activos) ? safeData.activos : [],
                     ventas_menu: Array.isArray(safeData.ventas_menu) ? safeData.ventas_menu : [],

@@ -146,9 +146,9 @@ const DEFAULT_FLOWS: FlowDef[] = [
   // ── Fiscal ──
   {
     id: 'recordatorio_fiscal',
-    name: 'Recordatorio Fiscal',
-    description: 'Avisa de obligaciones trimestrales AEAT (303, 111, 202)',
-    icon: '📋',
+    name: 'Recordatorio AEAT',
+    description: 'Avisa de modelos AEAT pendientes (303, 111, 115, 390, 190, 200). Excluye los ya registrados como presentados.',
+    icon: '🏛️',
     category: 'fiscal',
     enabled: true,
     schedule: 'daily',
@@ -704,32 +704,98 @@ export class ArumeAgent {
     return null;
   }
 
-  // ── 9. Recordatorio Fiscal ──
+  // ── 9. Recordatorio Fiscal AEAT ──
+  // Avisa de modelos pendientes de presentar (303, 111, 115, 390, 190, 200).
+  // Consulta modelos_aeat para NO avisar de los que ya están marcados como
+  // presentados. Prioridad alta si vence en ≤7 días, warning si ≤30 días.
 
   private static async _checkFiscal(data: AppData): Promise<FlowRun | null> {
     const hoy = new Date();
-    const mes = hoy.getMonth() + 1;
-    const dia = hoy.getDate();
+    const anioActual = hoy.getFullYear();
+    const mesActual = hoy.getMonth() + 1;
+    const trimActual = Math.floor((mesActual - 1) / 3) + 1;
 
-    const trimestres = [
-      { mes: 1, label: 'T4 (Oct-Dic)', limite: 30 },
-      { mes: 4, label: 'T1 (Ene-Mar)', limite: 20 },
-      { mes: 7, label: 'T2 (Abr-Jun)', limite: 20 },
-      { mes: 10, label: 'T3 (Jul-Sep)', limite: 20 },
-    ];
+    const presentados = Array.isArray((data as any).modelos_aeat) ? (data as any).modelos_aeat : [];
+    const presentadoKey = new Set(
+      presentados
+        .filter((p: any) => p.presentada)
+        .map((p: any) => `${p.modelo}__${p.anio}__${p.trimestre ?? ''}`)
+    );
 
-    const trim = trimestres.find(t => t.mes === mes);
-    if (!trim || dia > trim.limite) {
-      ArumeAgent.logRun('recordatorio_fiscal', 'success', 'Sin obligaciones fiscales próximas');
+    // Calendario de vencimientos relevantes (próximos 45 días)
+    interface Vencimiento { modelo: string; label: string; periodo: string; fecha: string; key: string }
+    const pendientes: Vencimiento[] = [];
+
+    // Trimestrales: generar próximos 2 trimestres + el anterior por si está vencido
+    const trimestrales = ['303', '111', '115'];
+    for (const offset of [-1, 0, 1]) {
+      const q = trimActual - 1 + offset;
+      const anio = anioActual + Math.floor(q / 4);
+      const trim = ((q % 4) + 4) % 4 + 1;
+      // Fecha vencimiento: 20 del mes siguiente al fin de trimestre
+      const fecha = trim === 4 ? `${anio + 1}-01-30` : `${anio}-${String(trim * 3 + 1).padStart(2, '0')}-20`;
+      for (const mod of trimestrales) {
+        const key = `${mod}__${anio}__${trim}`;
+        if (presentadoKey.has(key)) continue;
+        pendientes.push({ modelo: mod, label: `Modelo ${mod}`, periodo: `Q${trim} ${anio}`, fecha, key });
+      }
+    }
+
+    // Anuales (solo enero)
+    if (mesActual === 1) {
+      for (const mod of ['390', '190']) {
+        const anio = anioActual - 1;
+        const key = `${mod}__${anio}__`;
+        if (presentadoKey.has(key)) continue;
+        pendientes.push({ modelo: mod, label: `Modelo ${mod}`, periodo: String(anio), fecha: `${anioActual}-01-30`, key });
+      }
+    }
+    // 200 (IS) julio
+    if (mesActual === 7) {
+      const anio = anioActual - 1;
+      const key = `200__${anio}__`;
+      if (!presentadoKey.has(key)) {
+        pendientes.push({ modelo: '200', label: 'Modelo 200 (IS)', periodo: String(anio), fecha: `${anioActual}-07-25`, key });
+      }
+    }
+
+    // Filtrar los que están en los próximos 30 días o vencidos
+    const criticos = pendientes.filter(p => {
+      const v = new Date(p.fecha + 'T23:59:59');
+      const dias = Math.ceil((v.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24));
+      return dias <= 30; // incluye vencidos (días negativos)
+    });
+
+    if (criticos.length === 0) {
+      ArumeAgent.logRun('recordatorio_fiscal', 'success', 'Sin modelos AEAT pendientes en los próximos 30 días');
       return null;
     }
 
-    const diasRestantes = trim.limite - dia;
-    const msg = `📋 Declaración trimestral ${trim.label} — ${diasRestantes} días para el límite (día ${trim.limite})`;
-    const detalle = 'Modelos: IVA (303), IRPF (111), IS (202). Presentar en sede.agenciatributaria.gob.es';
+    // Agrupar por urgencia
+    const vencidos = criticos.filter(p => new Date(p.fecha + 'T23:59:59').getTime() < hoy.getTime());
+    const urgentes = criticos.filter(p => {
+      const dias = Math.ceil((new Date(p.fecha + 'T23:59:59').getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24));
+      return dias >= 0 && dias <= 7;
+    });
 
-    await PushService.sendNative(msg, detalle, { type: 'warning', category: 'fiscal', tag: 'fiscal-trimestral' });
-    await ArumeAgent._sendTelegram(data, `${msg}\n${detalle}`);
+    const lineas: string[] = [];
+    if (vencidos.length) lineas.push(`⚠️ VENCIDOS (${vencidos.length}):`);
+    vencidos.forEach(v => lineas.push(`• ${v.label} · ${v.periodo} (${v.fecha})`));
+    if (urgentes.length) lineas.push(`\n🔥 URGENTES (≤7 días):`);
+    urgentes.forEach(v => lineas.push(`• ${v.label} · ${v.periodo} → vence ${v.fecha}`));
+
+    const proximos = criticos.filter(p => !vencidos.includes(p) && !urgentes.includes(p));
+    if (proximos.length) lineas.push(`\n📅 Próximos 30d:`);
+    proximos.forEach(v => lineas.push(`• ${v.label} · ${v.periodo} (${v.fecha})`));
+
+    const severidad: 'warning' | 'critical' = vencidos.length > 0 ? 'critical' : 'warning';
+    const msg = vencidos.length > 0
+      ? `⚠️ ${vencidos.length} modelo${vencidos.length > 1 ? 's' : ''} AEAT VENCIDO${vencidos.length > 1 ? 'S' : ''}`
+      : `📋 ${criticos.length} modelo${criticos.length > 1 ? 's' : ''} AEAT pendiente${criticos.length > 1 ? 's' : ''}`;
+    const detalle = lineas.join('\n') + '\n\nVe al módulo Cierres → AEAT para registrarlos.';
+
+    await PushService.sendNative(msg, detalle, { type: severidad, category: 'fiscal', tag: 'aeat-pendiente' });
+    await ArumeAgent._sendTelegram(data, `${msg}\n\n${detalle}`);
 
     ArumeAgent.logRun('recordatorio_fiscal', 'success', msg, detalle);
     return null;

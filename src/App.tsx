@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Package, Wallet, ChefHat, Users, Settings, Search,
   TrendingUp, X, RefreshCw, FileText, Truck, Scale, Zap, Building2, 
   PieChart, Lock, Import, Sparkles, WifiOff, AlertTriangle, Camera, Loader2,
-  Receipt, Megaphone, Maximize, ShoppingBag, BookOpen, Bell, Bot
+  Receipt, Megaphone, Maximize, ShoppingBag, BookOpen, Bell, Bot, ShieldCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -30,6 +30,7 @@ const FixedExpensesView = React.lazy(() => import('./components/FixedExpensesVie
 const ReportsView = React.lazy(() => import('./components/ReportsView').then(m => ({ default: m.ReportsView })));
 const MenuView = React.lazy(() => import('./components/MenuView').then(m => ({ default: m.MenuView })));
 const CierreContableView = React.lazy(() => import('./components/CierreContableView').then(m => ({ default: m.CierreContableView })));
+const ModelosAEATView = React.lazy(() => import('./components/ModelosAEATView').then(m => ({ default: m.ModelosAEATView })));
 const StockView = React.lazy(() => import('./components/StockView').then(m => ({ default: m.StockView })));
 const DashboardView = React.lazy(() => import('./components/DashboardView').then(m => ({ default: m.DashboardView })));
 const SettingsModal = React.lazy(() => import('./components/SettingsModal').then(m => ({ default: m.SettingsModal })));
@@ -54,14 +55,14 @@ type TabKey =
   | 'dashboard' | 'ia' | 'diario' | 'importador'
   | 'compras' | 'facturas' | 'albaranes'
   | 'tesoreria' | 'liquidez' | 'banco' | 'fixed'
-  | 'informes' | 'menus' | 'stock' | 'cierre' | 'marketing' | 'proveedores' | 'presupuestos' | 'shop'
+  | 'informes' | 'menus' | 'stock' | 'cierre' | 'aeat' | 'marketing' | 'proveedores' | 'presupuestos' | 'shop'
   | 'cuentas' | 'librosiva' | 'balance' | 'nominas' | 'notificaciones' | 'agente';
 
 const TAB_LABELS: Record<TabKey, string> = {
   dashboard: 'Dashboard', ia: 'IA', diario: 'Caja Diaria', importador: 'Importador',
   compras: 'Compras', facturas: 'Compras', albaranes: 'Compras',
   tesoreria: 'Tesorería', liquidez: 'Liquidez',
-  banco: 'Banco', fixed: 'G. Fijos', informes: 'Informes', menus: 'Menús', stock: 'Stock', cierre: 'Cierre',
+  banco: 'Banco', fixed: 'G. Fijos', informes: 'Informes', menus: 'Menús', stock: 'Stock', cierre: 'Cierre', aeat: 'Modelos AEAT',
   marketing: 'Marketing',
   proveedores: 'Proveedores',
   presupuestos: 'Presupuestos',
@@ -694,6 +695,7 @@ export default function App() {
     { key: 'fixed',       label: 'Fijos',       icon: Zap,             group: 'personal' },
     // 📋 CIERRES & INFORMES
     { key: 'cierre',      label: 'Cierre',      icon: Lock,            group: 'cierres'  },
+    { key: 'aeat',        label: 'AEAT',        icon: ShieldCheck,     group: 'cierres'  },
     { key: 'informes',    label: 'Informes',    icon: PieChart,        group: 'cierres'  },
     // 🛒 TIENDA (Shop + Stock)
     { key: 'shop',        label: 'Tienda',      icon: ShoppingBag,     group: 'tienda'   },
@@ -741,6 +743,7 @@ export default function App() {
       case 'menus':        return <S><MenuView db={dbRef.current} onSave={handleSave} /></S>;
       case 'stock':        return <S><StockView {...props} /></S>;
       case 'cierre':       return <S><CierreContableView {...props} /></S>;
+      case 'aeat':         return <S><ModelosAEATView {...props} /></S>;
       case 'marketing':    return <S><MarketingView data={dbRef.current} /></S>;
       case 'cuentas':      return <S><CuentasFamiliaresView data={dbRef.current} onSave={handleSave} /></S>;
       case 'librosiva':    return <S><LibrosIVAView data={dbRef.current} /></S>;

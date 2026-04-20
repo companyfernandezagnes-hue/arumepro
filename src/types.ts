@@ -398,6 +398,26 @@ export interface Presupuesto {
   irpfPct?:     number;       // % retención IRPF (0, 7, 15)
 }
 
+// ✅ Modelos fiscales AEAT presentados
+export type ModeloAEATId = '303' | '111' | '115' | '390' | '190' | '130' | '131' | '200';
+
+export interface ModeloAEAT {
+  id: string;                      // único ej: 'aeat-2026-Q1-303'
+  modelo: ModeloAEATId;             // '303', '111', etc.
+  periodo: string;                  // '2026-Q1', '2026-01', '2026' (anuales)
+  anio: number;
+  trimestre?: 1 | 2 | 3 | 4;         // solo para trimestrales
+  mes?: number;                     // solo para mensuales
+  fecha_vencimiento: string;        // ISO YYYY-MM-DD
+  fecha_presentacion?: string;      // ISO — cuando la marcas como presentada
+  importe_pagado?: number;          // lo que saliste pagando (o devolución si negativo)
+  justificante_base64?: string;     // PDF del justificante de AEAT
+  justificante_nombre?: string;     // nombre del archivo original
+  nrc?: string;                     // Número de Referencia Completa (código banco AEAT)
+  notas?: string;
+  presentada: boolean;              // true cuando ya la marcaste presentada
+}
+
 export interface AppData {
   config?: AppConfig;
   socios?: Socio[];
@@ -406,6 +426,7 @@ export interface AppData {
   banco?: BankMovement[];
   cierres?: Cierre[];
   cierres_mensuales?: CierreMensual[];    // ✅ P&L congelados
+  modelos_aeat?: ModeloAEAT[];            // ✅ Modelos fiscales presentados
   gastos_fijos?: GastoFijo[];
   activos?: Activo[];                     // ✅ Inmovilizado
   ventas_menu?: VentaMenu[];
