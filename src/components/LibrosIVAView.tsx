@@ -16,6 +16,7 @@ import {
   CheckCircle2, AlertTriangle, Filter, Building2
 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { EmptyState } from './EmptyState';
 import * as XLSX from 'xlsx';
 import { cn } from '../lib/utils';
 import { Num, DateUtil } from '../services/engine';
@@ -481,11 +482,13 @@ export const LibrosIVAView: React.FC<{ data: AppData }> = ({ data }) => {
         {/* Lista */}
         <div className="max-h-[60vh] overflow-y-auto custom-scrollbar">
           {filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
-              <BookOpen className="w-10 h-10 text-slate-300 mb-3" />
-              <p className="text-sm font-black text-slate-400">Sin registros en este periodo</p>
-              <p className="text-[10px] text-slate-400">Cambia el trimestre o año para ver datos</p>
-            </div>
+            <EmptyState
+              icon={BookOpen}
+              eyebrow="Sin movimientos"
+              title="Sin registros en este periodo"
+              message="Cambia el trimestre o el año para ver datos."
+              size="sm"
+            />
           ) : (
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-slate-50 border-b border-slate-100 z-10">

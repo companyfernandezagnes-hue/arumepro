@@ -213,22 +213,22 @@ export const InvoicesList = React.memo(({
   }
 
   return (
-    <div className="bg-white border border-slate-200 rounded-[1.5rem] shadow-sm flex flex-col max-h-[75vh] overflow-hidden">
+    <div className="bg-white border border-[color:var(--arume-gray-100)] rounded-2xl shadow-sm flex flex-col max-h-[75vh] overflow-hidden">
       <div className="overflow-x-auto custom-scrollbar flex-1 pb-6">
         <table className="w-full text-left border-collapse whitespace-nowrap min-w-[950px]">
-          
-          <thead className="sticky top-0 bg-white/95 backdrop-blur-sm z-20 shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
-            <tr className="text-[10px] uppercase tracking-widest select-none border-b border-slate-200">
-              <th className="p-3 w-10 text-center text-slate-400">#</th>
+
+          <thead className="sticky top-0 bg-[color:var(--arume-paper)]/95 backdrop-blur-sm z-20">
+            <tr className="text-[10px] font-semibold uppercase tracking-[0.2em] select-none border-b border-[color:var(--arume-gray-100)] text-[color:var(--arume-gray-500)]">
+              <th className="p-3 w-10 text-center"></th>
               <SortableHeader title="Fecha" sortKey="date" />
-              <th className="p-3 text-slate-500 font-bold">Referencia</th>
+              <th className="p-3">Referencia</th>
               <SortableHeader title="Titular" sortKey="prov" />
-              <th className="p-3 text-center text-slate-500 font-bold">Unidad</th>
-              <th className="p-3 text-right text-slate-500 font-bold">Base</th>
-              <th className="p-3 text-right text-slate-500 font-bold">IVA</th>
+              <th className="p-3 text-center">Unidad</th>
+              <th className="p-3 text-right">Base</th>
+              <th className="p-3 text-right">IVA</th>
               <SortableHeader title="Total" sortKey="total" align="right" />
-              <th className="p-3 text-center text-slate-500 font-bold w-28">Estado</th>
-              <th className="p-3 text-center text-slate-500 font-bold w-24">Acciones</th>
+              <th className="p-3 text-center w-28">Estado</th>
+              <th className="p-3 text-center w-24">Acciones</th>
             </tr>
           </thead>
           
@@ -257,59 +257,66 @@ export const InvoicesList = React.memo(({
                       animate={{ opacity: 1, x: 0 }} 
                       exit={{ opacity: 0, scale: 0.95 }}
                       onClick={() => onOpenDetail(f)}
-                      className={cn("cursor-pointer transition-all duration-200 group z-10 relative border-b border-slate-50 last:border-none", isExpanded ? "bg-indigo-50/40 shadow-inner" : "hover:bg-slate-50")}
+                      className={cn("cursor-pointer transition-colors group z-10 relative border-b border-[color:var(--arume-gray-100)]/60 last:border-none",
+                        isExpanded ? "bg-[color:var(--arume-gray-50)]" : "hover:bg-[color:var(--arume-gray-50)]/60")}
                     >
                       <td className="p-3 text-center" onClick={(e) => hasAlbaranes ? toggleExpand(e, f.id) : null}>
                         {hasAlbaranes ? (
-                          <button className={cn("p-1.5 rounded-lg transition-all duration-300", isExpanded ? "bg-indigo-600 text-white shadow-md rotate-180" : "text-slate-400 hover:bg-slate-200 hover:text-slate-700")}>
+                          <button className={cn("p-1.5 rounded-full transition",
+                            isExpanded ? "bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] rotate-180" : "text-[color:var(--arume-gray-400)] hover:bg-[color:var(--arume-gray-100)] hover:text-[color:var(--arume-ink)]")}>
                             <ChevronDown className="w-3.5 h-3.5" />
                           </button>
                         ) : (
-                           <span className="w-4 h-4 inline-block"></span> 
+                           <span className="w-4 h-4 inline-block"></span>
                         )}
                       </td>
-                      <td className="p-3 font-semibold text-slate-600">{String(f.date || '—')}</td>
-                      <td className="p-3 font-mono text-[10px] text-slate-400 group-hover:text-slate-600 transition-colors">{highlight(String(f.num || 'S/N'), searchQ, superNorm)}</td>
+                      <td className="p-3 text-[color:var(--arume-gray-600)] tabular-nums">{String(f.date || '—')}</td>
+                      <td className="p-3 font-mono text-[10px] text-[color:var(--arume-gray-400)] group-hover:text-[color:var(--arume-gray-700)] transition-colors">{highlight(String(f.num || 'S/N'), searchQ, superNorm)}</td>
                       <td className="p-3">
                         <div className="flex items-center gap-2">
-                          {isIA && <span title="Extraído con IA" className="inline-flex shrink-0"><Sparkles className="w-3.5 h-3.5 text-purple-400"/></span>}
-                          <span className="font-black text-slate-800 truncate max-w-[220px]">{highlight(titularStr, searchQ, superNorm)}</span>
-                          {hasAlbaranes && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-100 text-slate-500 border border-slate-200 group-hover:bg-white group-hover:border-slate-300 transition-colors">{f.albaranIdsArr?.length} albs</span>}
+                          {isIA && <span title="Extraído con IA" className="inline-flex shrink-0"><Sparkles className="w-3.5 h-3.5 text-[color:var(--arume-gold)]"/></span>}
+                          <span className="font-semibold text-[color:var(--arume-ink)] truncate max-w-[220px]">{highlight(titularStr, searchQ, superNorm)}</span>
+                          {hasAlbaranes && <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-[color:var(--arume-gray-50)] text-[color:var(--arume-gray-500)] border border-[color:var(--arume-gray-100)]">{f.albaranIdsArr?.length} albs</span>}
                         </div>
                       </td>
                       <td className="p-3 text-center">
                         {unitConfig ? (
-                          <span className={cn("text-[8px] px-2 py-0.5 rounded-md font-black uppercase tracking-wider shadow-sm", unitConfig.bg, unitConfig.color)}>{unitConfig.name.split(' ')[0]}</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-[0.1em] bg-[color:var(--arume-gray-50)] text-[color:var(--arume-gray-600)] border border-[color:var(--arume-gray-100)]">{unitConfig.name.split(' ')[0]}</span>
                         ) : (
-                          <span className="text-[8px] px-2 py-0.5 rounded-md font-black uppercase tracking-wider bg-slate-100 text-slate-500 shadow-sm">VAR/GEN</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-[0.1em] bg-[color:var(--arume-gray-50)] text-[color:var(--arume-gray-400)] border border-[color:var(--arume-gray-100)]">VAR</span>
                         )}
                       </td>
-                      <td className="p-3 text-right text-slate-500 tabular-nums">{Num.fmt(fBase)}</td>
-                      <td className="p-3 text-right text-slate-500 tabular-nums">{Num.fmt(fTax)}</td>
-                      <td className="p-3 text-right font-black text-slate-900 text-[13px] tabular-nums">{Num.fmt(fTotal)}</td>
-                      
+                      <td className="p-3 text-right text-[color:var(--arume-gray-500)] tabular-nums">{Num.fmt(fBase)}</td>
+                      <td className="p-3 text-right text-[color:var(--arume-gray-500)] tabular-nums">{Num.fmt(fTax)}</td>
+                      <td className="p-3 text-right font-serif font-semibold text-[color:var(--arume-ink)] text-[14px] tabular-nums">{Num.fmt(fTotal)}</td>
+
                       <td className="p-3 text-center">
-                        <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }}>
-                          {f.reconciled ? (
-                            <span className="inline-flex items-center justify-center w-full gap-1 text-[9px] font-black text-blue-600 bg-blue-50 px-2 py-1 rounded-md border border-blue-200 shadow-sm" title="Conciliado en Banco"><LinkIcon className="w-3 h-3" /> BANCO</span>
-                          ) : f.paid ? (
-                            <span className="inline-flex items-center justify-center w-full gap-1 text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-200 shadow-sm" title="Pagada en Efectivo"><CheckCircle2 className="w-3 h-3" /> PAGADA</span>
-                          ) : (
-                            <span className="inline-flex items-center justify-center w-full gap-1 text-[9px] font-black text-amber-600 bg-amber-50 px-2 py-1 rounded-md border border-amber-200 shadow-sm" title="Pendiente de Pago"><Clock className="w-3 h-3" /> PENDIENTE</span>
-                          )}
-                        </motion.div>
+                        {f.reconciled ? (
+                          <span className="inline-flex items-center justify-center gap-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[color:var(--arume-info)] bg-[color:var(--arume-info)]/10 px-2 py-1 rounded-full border border-[color:var(--arume-info)]/20" title="Conciliado en banco"><LinkIcon className="w-3 h-3" /> Banco</span>
+                        ) : f.paid ? (
+                          <span className="inline-flex items-center justify-center gap-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[color:var(--arume-ok)] bg-[color:var(--arume-ok)]/10 px-2 py-1 rounded-full border border-[color:var(--arume-ok)]/20" title="Pagada"><CheckCircle2 className="w-3 h-3" /> Pagada</span>
+                        ) : (
+                          <span className="inline-flex items-center justify-center gap-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[color:var(--arume-warn)] bg-[color:var(--arume-warn)]/10 px-2 py-1 rounded-full border border-[color:var(--arume-warn)]/20" title="Pendiente"><Clock className="w-3 h-3" /> Pend.</span>
+                        )}
                       </td>
 
                       <td className="p-3 text-center pr-5">
-                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all duration-300 transform translate-x-2 group-hover:translate-x-0">
+                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200 transform translate-x-2 group-hover:translate-x-0">
                           {f.reconciled ? (
-                             <button type="button" disabled className="p-2 rounded-lg bg-slate-50 text-slate-300 cursor-not-allowed border border-slate-100" title="Bloqueado por Banco"><Lock className="w-4 h-4"/></button>
+                             <button type="button" disabled className="p-1.5 rounded-full bg-[color:var(--arume-gray-50)] text-[color:var(--arume-gray-300)] cursor-not-allowed border border-[color:var(--arume-gray-100)]" title="Bloqueado por banco"><Lock className="w-4 h-4"/></button>
                           ) : (
                             <>
-                              <button type="button" onClick={(e) => { e.stopPropagation(); onTogglePago(f.id); }} className={cn("p-1.5 rounded-lg transition-colors shadow-sm", f.paid ? "bg-emerald-50 text-emerald-600 hover:bg-emerald-100 border border-emerald-200" : "bg-white text-slate-400 hover:text-emerald-600 border border-slate-200 hover:border-emerald-300")} title={f.paid ? "Desmarcar Pago" : "Marcar Pagada"}>
+                              <button type="button" onClick={(e) => { e.stopPropagation(); onTogglePago(f.id); }}
+                                className={cn("p-1.5 rounded-full transition border",
+                                  f.paid
+                                    ? "bg-[color:var(--arume-ok)]/10 text-[color:var(--arume-ok)] border-[color:var(--arume-ok)]/20"
+                                    : "bg-white text-[color:var(--arume-gray-400)] hover:text-[color:var(--arume-ok)] border-[color:var(--arume-gray-200)] hover:border-[color:var(--arume-ok)]/30")}
+                                title={f.paid ? "Desmarcar pago" : "Marcar pagada"}>
                                 <CheckCircle2 className="w-4 h-4" />
                               </button>
-                              <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(f.id); }} className="p-1.5 rounded-lg bg-white text-slate-400 hover:bg-rose-50 hover:text-rose-600 border border-slate-200 hover:border-rose-200 transition-colors shadow-sm" title="Eliminar Factura">
+                              <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(f.id); }}
+                                className="p-1.5 rounded-full bg-white text-[color:var(--arume-gray-400)] hover:bg-[color:var(--arume-danger)]/10 hover:text-[color:var(--arume-danger)] border border-[color:var(--arume-gray-200)] hover:border-[color:var(--arume-danger)]/30 transition"
+                                title="Eliminar factura">
                                 <Trash2 className="w-4 h-4" />
                               </button>
                             </>

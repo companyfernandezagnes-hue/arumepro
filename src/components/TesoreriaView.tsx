@@ -3,6 +3,7 @@ import { AppData } from '../types';
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
 import { confirm } from '../hooks/useConfirm';
+import { EmptyState } from './EmptyState';
 import { toast } from '../hooks/useToast';
 import {
   TrendingUp, TrendingDown, CheckCircle2, Clock,
@@ -979,10 +980,14 @@ export const TesoreriaView: React.FC<TesoreriaViewProps> = ({ data, onSave, onNa
 
               {/* Estado limpio */}
               {processedAR.urgentes.length === 0 && processedAP.urgentes.length === 0 && (
-                <div className="bg-white border border-slate-100 rounded-2xl p-8 flex flex-col items-center text-center">
-                  <CheckCircle2 className="w-10 h-10 text-emerald-500 mb-3 opacity-60" />
-                  <p className="font-black text-slate-700 text-sm">Todo al día</p>
-                  <p className="text-xs text-slate-400 mt-1">No hay cobros ni pagos urgentes esta semana</p>
+                <div className="bg-white border border-[color:var(--arume-gray-100)] rounded-2xl">
+                  <EmptyState
+                    icon={CheckCircle2}
+                    eyebrow="Buenas noticias"
+                    title="Todo al día"
+                    message="No hay cobros ni pagos urgentes esta semana."
+                    size="sm"
+                  />
                 </div>
               )}
 

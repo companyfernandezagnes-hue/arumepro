@@ -4,6 +4,7 @@
 // ────────────────────────────────────────────────────────────────────────────
 import React, { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { EmptyState } from './EmptyState';
 import {
   Trophy, TrendingUp, TrendingDown, ChevronDown, ChevronUp,
   Package, Calendar, Euro, FileText, ShoppingCart, BarChart3,
@@ -328,10 +329,13 @@ export const RankingProveedores: React.FC<Props> = ({ data }) => {
 
       {/* Lista ranking */}
       {ranking.ranks.length === 0 ? (
-        <div className="text-center py-16 text-slate-400">
-          <ShoppingCart className="w-12 h-12 mx-auto mb-3 opacity-20" />
-          <p className="text-xs font-black uppercase tracking-widest">Sin datos de proveedores en este periodo</p>
-        </div>
+        <EmptyState
+          icon={ShoppingCart}
+          eyebrow="Ranking"
+          title="Sin datos de proveedores"
+          message="Aún no hay albaranes ni compras en este periodo. Cambia el filtro o sube albaranes para empezar."
+          size="sm"
+        />
       ) : (
         <div className="space-y-2">
           <AnimatePresence mode="popLayout">
