@@ -119,6 +119,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   const [images,            setImages]            = useState<{ img1: string | null }>({ img1: null });
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportYear,        setExportYear]        = useState(new Date().getFullYear());
+  const [exportMonth,       setExportMonth]       = useState<number | 'all'>(new Date().getMonth()); // 0-11, 'all' = año entero
   const [isSaving,          setIsSaving]          = useState(false);
 
   // ─── Diagnóstico voz (temporal — borrar cuando funcione) ─────────────────
@@ -337,19 +338,89 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
   };
 
   const handleExportGestoria = () => {
-    const rows = (data.cierres || [])
-      .filter(c => c.date.startsWith(exportYear.toString()))
-      .map(c => ({
-        'FECHA': c.date, 'UNIDAD': c.unitId,
-        'TOTAL VENTA NETO': Num.fmt(c.totalVenta),
-        'EFECTIVO TICKET':  Num.fmt(c.efectivo),
-        'DESCUADRE FISICO': Num.fmt(c.descuadre),
-      }));
-    const ws = XLSX.utils.json_to_sheet(rows);
+    // ─── Filtrado por periodo ─────────────────────────────────────────────
+    const prefix = exportMonth === 'all'
+      ? `${exportYear}-`
+      : `${exportYear}-${String(exportMonth + 1).padStart(2, '0')}-`;
+
+    const cierresFiltrados = (data.cierres || [])
+      .filter(c => String(c.date || '').startsWith(prefix))
+      .sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+
+    if (cierresFiltrados.length === 0) {
+      toast.info('No hay cierres de caja en ese periodo.');
+      return;
+    }
+
+    const MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+    const periodoLabel = exportMonth === 'all' ? `Año ${exportYear}` : `${MESES[exportMonth as number]} ${exportYear}`;
+
+    // ─── Hoja 1: Detalle día por día (lo que necesita la gestoría) ────────
+    const detalleRows = cierresFiltrados.map((c: any) => {
+      const efectivo    = Num.parse(c.efectivo || 0);
+      const tarjeta     = Num.parse(c.tarjeta || c.tpv1 || 0) + Num.parse(c.tpv2 || 0) + Num.parse(c.amex || 0);
+      const apps        = Num.parse(c.apps || 0) + Num.parse(c.glovo || 0) + Num.parse(c.uber || 0) + Num.parse(c.madisa || 0) + Num.parse(c.apperStreet || 0);
+      const total       = Num.parse(c.totalVenta || c.totalVentas || 0);
+      const baseNeta    = total > 0 ? Num.round2(total / 1.10) : 0;
+      const iva         = total > 0 ? Num.round2(total - baseNeta) : 0;
+      return {
+        'FECHA'           : c.date,
+        'UNIDAD'          : c.unitId || 'REST',
+        'EFECTIVO'        : Num.round2(efectivo),
+        'TARJETA'         : Num.round2(tarjeta),
+        'APPS DELIVERY'   : Num.round2(apps),
+        'TOTAL VENTA'     : Num.round2(total),
+        'BASE IMPONIBLE'  : baseNeta,
+        'IVA 10%'         : iva,
+        'DESCUADRE'       : Num.round2(Num.parse(c.descuadre || 0)),
+        'NOTAS'           : c.notas || c.notas || '',
+      };
+    });
+
+    // ─── Hoja 2: Resumen del periodo ──────────────────────────────────────
+    const totEfectivo = detalleRows.reduce((s, r) => s + r['EFECTIVO'], 0);
+    const totTarjeta  = detalleRows.reduce((s, r) => s + r['TARJETA'], 0);
+    const totApps     = detalleRows.reduce((s, r) => s + r['APPS DELIVERY'], 0);
+    const totVenta    = detalleRows.reduce((s, r) => s + r['TOTAL VENTA'], 0);
+    const totBase     = detalleRows.reduce((s, r) => s + r['BASE IMPONIBLE'], 0);
+    const totIVA      = detalleRows.reduce((s, r) => s + r['IVA 10%'], 0);
+    const totDescuadre = detalleRows.reduce((s, r) => s + r['DESCUADRE'], 0);
+
+    const resumenRows = [
+      { CONCEPTO: `PERIODO`,                     IMPORTE: periodoLabel        },
+      { CONCEPTO: `DÍAS CON CIERRE`,              IMPORTE: detalleRows.length   },
+      { CONCEPTO: '',                             IMPORTE: '' },
+      { CONCEPTO: 'TOTAL EFECTIVO',               IMPORTE: Num.round2(totEfectivo) },
+      { CONCEPTO: 'TOTAL TARJETA (TPV + AMEX)',   IMPORTE: Num.round2(totTarjeta) },
+      { CONCEPTO: 'TOTAL APPS (Glovo/Uber/etc.)', IMPORTE: Num.round2(totApps) },
+      { CONCEPTO: '',                             IMPORTE: '' },
+      { CONCEPTO: 'TOTAL VENTA',                  IMPORTE: Num.round2(totVenta) },
+      { CONCEPTO: 'BASE IMPONIBLE (sin IVA)',     IMPORTE: Num.round2(totBase) },
+      { CONCEPTO: 'IVA REPERCUTIDO 10%',          IMPORTE: Num.round2(totIVA) },
+      { CONCEPTO: '',                             IMPORTE: '' },
+      { CONCEPTO: 'DESCUADRE ACUMULADO',          IMPORTE: Num.round2(totDescuadre) },
+    ];
+
+    // ─── Generar Excel ────────────────────────────────────────────────────
+    const wsDetalle = XLSX.utils.json_to_sheet(detalleRows);
+    wsDetalle['!cols'] = [
+      { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 12 }, { wch: 14 },
+      { wch: 14 }, { wch: 16 }, { wch: 10 }, { wch: 12 }, { wch: 30 },
+    ];
+    const wsResumen = XLSX.utils.json_to_sheet(resumenRows);
+    wsResumen['!cols'] = [{ wch: 32 }, { wch: 20 }];
+
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Cierres_Caja');
-    XLSX.writeFile(wb, `Cierres_Arume_${exportYear}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen');
+    XLSX.utils.book_append_sheet(wb, wsDetalle, 'Detalle Diario');
+
+    const fileName = exportMonth === 'all'
+      ? `Cierres_Caja_Arume_${exportYear}.xlsx`
+      : `Cierres_Caja_Arume_${exportYear}-${String((exportMonth as number) + 1).padStart(2, '0')}.xlsx`;
+
+    XLSX.writeFile(wb, fileName);
     setIsExportModalOpen(false);
+    toast.success(`${detalleRows.length} cierres exportados`);
   };
 
   // ─── Scan IA ──────────────────────────────────────────────────────────────
@@ -797,32 +868,77 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
         <CashHistoryList cierres={kpis.cierresMes} onDelete={handleDeleteCierre}/>
       </div>
 
-      {/* MODAL EXPORT */}
+      {/* MODAL EXPORT — rediseñado editorial */}
       <AnimatePresence>
         {isExportModalOpen && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[600] flex items-center justify-center p-4 bg-slate-900/90 backdrop-blur-md">
-            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }}
-              className="bg-white p-10 rounded-[3rem] w-full max-w-xs text-center">
-              <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-6">
-                <FileArchive className="w-8 h-8"/>
+          <div className="fixed inset-0 z-[600] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-[color:var(--arume-ink)]/70 backdrop-blur-sm cursor-default"
+              onClick={() => setIsExportModalOpen(false)}
+            />
+            <motion.div
+              initial={{ y: 30, opacity: 0, scale: 0.97 }}
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: 30, opacity: 0, scale: 0.97 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="relative bg-[color:var(--arume-paper)] w-full max-w-md rounded-2xl z-10 overflow-hidden"
+              style={{ boxShadow: '0 24px 80px rgba(11,11,12,0.35)' }}
+            >
+              <span className="absolute top-0 left-0 right-0 h-[2px] bg-[color:var(--arume-gold)]"/>
+
+              <div className="p-6 border-b border-[color:var(--arume-gray-100)]">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-[color:var(--arume-gold)]/10 border border-[color:var(--arume-gold)]/20 flex items-center justify-center">
+                    <FileArchive className="w-5 h-5 text-[color:var(--arume-gold)]"/>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Gestoría</p>
+                    <h3 className="font-serif text-xl font-semibold mt-0.5">Exportar cierres de caja</h3>
+                  </div>
+                </div>
+                <p className="text-sm text-[color:var(--arume-gray-500)] mt-3">
+                  Excel con resumen del periodo + detalle diario. Formato listo para tu gestoría.
+                </p>
               </div>
-              <h3 className="font-black text-2xl mb-2 text-slate-800">Exportar Excel</h3>
-              <p className="text-xs text-slate-400 mb-6 font-bold uppercase tracking-widest">Listado para Gestoría</p>
-              <select value={exportYear} onChange={e => setExportYear(Number(e.target.value))}
-                className="w-full mb-4 p-3 bg-slate-50 rounded-xl text-sm font-bold border border-slate-200 outline-none">
-                {[2023, 2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
-              </select>
-              <button onClick={handleExportGestoria}
-                className="w-full py-5 bg-emerald-600 text-white rounded-2xl font-black shadow-xl hover:bg-emerald-700 transition active:scale-95">
-                DESCARGAR AHORA
-              </button>
-              <button onClick={() => setIsExportModalOpen(false)}
-                className="w-full mt-4 text-xs font-black text-slate-300 hover:text-slate-500 transition uppercase tracking-widest">
-                Cerrar
-              </button>
+
+              <div className="p-6 space-y-4">
+                {/* Año */}
+                <div>
+                  <label className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gray-500)] mb-1.5 block">Año</label>
+                  <select value={exportYear} onChange={e => setExportYear(Number(e.target.value))}
+                    className="w-full p-3 bg-white border border-[color:var(--arume-gray-200)] rounded-xl text-sm outline-none focus:border-[color:var(--arume-ink)] transition">
+                    {[2023, 2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
+                  </select>
+                </div>
+
+                {/* Mes */}
+                <div>
+                  <label className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gray-500)] mb-1.5 block">Mes</label>
+                  <select value={exportMonth === 'all' ? 'all' : String(exportMonth)} onChange={e => setExportMonth(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                    className="w-full p-3 bg-white border border-[color:var(--arume-gray-200)] rounded-xl text-sm outline-none focus:border-[color:var(--arume-ink)] transition">
+                    <option value="all">— Año entero —</option>
+                    {['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'].map((m, i) =>
+                      <option key={i} value={i}>{m}</option>
+                    )}
+                  </select>
+                  <p className="text-[11px] text-[color:var(--arume-gray-400)] mt-1.5">
+                    Mensual = lo habitual para la gestoría. Año entero = cierre fiscal.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-4 border-t border-[color:var(--arume-gray-100)] flex gap-2 justify-end">
+                <button onClick={() => setIsExportModalOpen(false)}
+                  className="px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gray-600)] border border-[color:var(--arume-gray-200)] hover:bg-[color:var(--arume-gray-50)] transition">
+                  Cancelar
+                </button>
+                <button onClick={handleExportGestoria}
+                  className="inline-flex items-center gap-2 px-5 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-gold)] text-[color:var(--arume-ink)] hover:brightness-95 transition active:scale-[0.98]">
+                  <FileArchive className="w-3.5 h-3.5"/> Descargar Excel
+                </button>
+              </div>
             </motion.div>
-          </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>
