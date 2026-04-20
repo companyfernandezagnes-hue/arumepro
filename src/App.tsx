@@ -755,20 +755,39 @@ export default function App() {
 
   // ── Pantallas de carga / error ────────────────────────────────────────────
   if (loading) return (
-    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center">
-      <Loader2 className="w-8 h-8 text-indigo-500 animate-spin mb-4" />
-      <p className="text-indigo-400 font-bold text-[10px] uppercase tracking-widest">Iniciando Arume Sake Bar...</p>
+    <div className="min-h-screen bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] flex flex-col items-center justify-center relative overflow-hidden">
+      {/* halo dorado sutil */}
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full bg-[color:var(--arume-gold)]/5 blur-3xl pointer-events-none"/>
+      <div className="relative z-10 flex flex-col items-center">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.4em] text-[color:var(--arume-gold)] mb-3">Arume Pro</p>
+        <h1 className="font-serif text-4xl md:text-5xl font-semibold tracking-tight text-white mb-8">
+          Preparando tu negocio
+        </h1>
+        {/* 3 dots animados minimalistas */}
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-[color:var(--arume-gold)] animate-bounce" style={{ animationDelay: '0ms' }}/>
+          <span className="w-2 h-2 rounded-full bg-[color:var(--arume-gold)] animate-bounce" style={{ animationDelay: '150ms' }}/>
+          <span className="w-2 h-2 rounded-full bg-[color:var(--arume-gold)] animate-bounce" style={{ animationDelay: '300ms' }}/>
+        </div>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/40 mt-8">
+          Sincronizando con Supabase…
+        </p>
+      </div>
     </div>
   );
 
   if (!loading && !db) return (
-    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center text-center p-4">
-      <AlertTriangle className="w-12 h-12 text-amber-500 mb-4 animate-pulse" />
-      <h2 className="text-lg font-bold text-white mb-1">Error de conexión</h2>
-      <p className="text-slate-400 mb-6 text-xs max-w-sm">Supabase ha tardado en responder. Tus datos están a salvo.</p>
-      <button onClick={() => window.location.reload()} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-indigo-500 transition flex items-center gap-2">
-        <RefreshCw className="w-3 h-3" /> Reintentar
-      </button>
+    <div className="min-h-screen bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] flex flex-col items-center justify-center text-center p-4 relative overflow-hidden">
+      <div className="absolute top-0 left-0 w-full h-[2px] bg-[color:var(--arume-danger)]"/>
+      <div className="relative z-10 max-w-sm">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-[color:var(--arume-danger)]">Conexión</p>
+        <h2 className="font-serif text-3xl font-semibold tracking-tight text-white mt-2 mb-3">Error de conexión</h2>
+        <p className="text-sm text-white/60 mb-8">Supabase ha tardado en responder. Tus datos están a salvo.</p>
+        <button onClick={() => window.location.reload()}
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-gold)] text-[color:var(--arume-ink)] hover:brightness-95 transition active:scale-[0.98]">
+          <RefreshCw className="w-3.5 h-3.5" /> Reintentar
+        </button>
+      </div>
     </div>
   );
 
@@ -777,7 +796,7 @@ export default function App() {
   // ── RENDER PRINCIPAL ──────────────────────────────────────────────────────
   return (
     <AuthScreen>
-      <div id="app-root-container" className="min-h-screen w-full bg-slate-50 relative pt-safe overflow-x-hidden">
+      <div id="app-root-container" className="min-h-screen w-full bg-[color:var(--arume-paper)] relative pt-safe overflow-x-hidden">
 
         <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={handlePhotoCapture} className="hidden" />
 
@@ -822,10 +841,10 @@ export default function App() {
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+              initial={{ opacity: 0, y: 8, filter: 'blur(4px)' }}
+              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, y: -8, filter: 'blur(4px)' }}
+              transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
               className="p-2 md:p-6 w-full"
             >
               <ErrorBoundary key={activeTab}>
