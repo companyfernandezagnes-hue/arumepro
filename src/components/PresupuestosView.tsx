@@ -26,6 +26,8 @@ import { AppData, EstadoPresupuesto, LineaPresupuesto, Presupuesto } from '../ty
 import { askAI } from '../services/aiProviders';
 import { toast } from '../hooks/useToast';
 import { confirm } from '../hooks/useConfirm';
+import { AnimatedNumber } from './AnimatedNumber';
+import { triggerConfetti } from './Confetti';
 
 // ─── Tipos (importados desde ../types) ────────────────────────────────────────
 
@@ -182,6 +184,11 @@ export const PresupuestosView: React.FC<Props> = ({ data, onSave }) => {
     const list = presupuestos.map(p => p.id === id ? { ...p, estado } : p);
     await saveList(list);
     setSelected(prev => prev ? { ...prev, estado } : null);
+    // 🎉 celebración: presupuesto ganado
+    if (estado === 'aceptado') {
+      triggerConfetti();
+      toast.success('¡Presupuesto aceptado! ✨');
+    }
   };
 
   // ─── Generar número de factura de venta automático ─────────────────────────
@@ -406,18 +413,21 @@ Celoso de Palma SL`;
         {/* KPI strip */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5 pt-5 border-t border-slate-100">
           {[
-            { label:'Pipeline',          val: Num.fmt(kpis.totalPipe),    icon: TrendingUp,    color:'text-indigo-600',  bg:'bg-indigo-50'  },
-            { label:'Ganado',            val: Num.fmt(kpis.totalGan),     icon: Star,          color:'text-emerald-600', bg:'bg-emerald-50' },
-            { label:'Enviados pendientes', val: String(kpis.nEnviados),   icon: Send,          color:'text-amber-600',   bg:'bg-amber-50'   },
-            { label:'Tasa conversión',   val: `${kpis.convRate}%`,         icon: CheckCircle2,  color:'text-teal-600',    bg:'bg-teal-50'    },
+            { label:'Pipeline',            emoji: '🎯', val: kpis.totalPipe, isCurrency: true,  bg:'bg-indigo-50',  icon: TrendingUp,   color: 'text-indigo-600' },
+            { label:'Ganado',              emoji: '⭐', val: kpis.totalGan,  isCurrency: true,  bg:'bg-emerald-50', icon: Star,         color: 'text-emerald-600' },
+            { label:'Enviados pendientes', emoji: '✉️', val: kpis.nEnviados, isCurrency: false, bg:'bg-amber-50',   icon: Send,         color: 'text-amber-600' },
+            { label:'Tasa conversión',     emoji: '📊', val: kpis.convRate,  isCurrency: false, bg:'bg-teal-50',    icon: CheckCircle2, color: 'text-teal-600', isPct: true },
           ].map(k => {
             const Icon = k.icon;
             return (
-              <div key={k.label} className={cn('flex items-center gap-3 p-4 rounded-2xl', k.bg)}>
+              <div key={k.label} className={cn('flex items-center gap-3 p-4 rounded-2xl hover-lift', k.bg)}>
                 <Icon className={cn('w-6 h-6 flex-shrink-0', k.color)}/>
                 <div>
-                  <p className="font-black text-slate-800 text-lg leading-tight tabular-nums">{k.val}</p>
-                  <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">{k.label}</p>
+                  <p className="font-serif font-semibold text-slate-800 text-lg leading-tight tabular-nums">
+                    <AnimatedNumber value={k.val}
+                      format={(n) => k.isCurrency ? Num.fmt(n) : k.isPct ? `${Math.round(n)}%` : Math.round(n).toString()}/>
+                  </p>
+                  <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">{k.emoji} {k.label}</p>
                 </div>
               </div>
             );

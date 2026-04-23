@@ -13,6 +13,7 @@ import { NotificationService } from '../services/notifications';
 import { askAI } from '../services/aiProviders';
 import { toast } from '../hooks/useToast';
 import { ValoracionStock } from './ValoracionStock';
+import { AnimatedNumber } from './AnimatedNumber';
 
 interface StockViewProps {
   data: AppData;
@@ -245,18 +246,18 @@ Responde de forma profesional y directa. Máximo 100 palabras.`;
 
           <div className="flex items-center gap-2 mt-4 flex-wrap">
             <span className="text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)] px-3 py-1.5 rounded-full tabular-nums">
-              {kpis.refs} refs · {kpis.uds} uds
+              📦 <AnimatedNumber value={kpis.refs} format={(n) => Math.round(n).toString()}/> refs · <AnimatedNumber value={kpis.uds} format={(n) => Math.round(n).toString()}/> uds
             </span>
             <span className="text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)] px-3 py-1.5 rounded-full tabular-nums">
-              Coste stock: {Num.fmt(kpis.coste)}
+              💰 Coste: <AnimatedNumber value={kpis.coste} format={(n) => Num.fmt(n)}/>
             </span>
             {activeUnit === 'SHOP' && (
               <span className="text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)] px-3 py-1.5 rounded-full tabular-nums">
-                PVP estimado: {Num.fmt(kpis.pvp)}
+                🏷️ PVP: <AnimatedNumber value={kpis.pvp} format={(n) => Num.fmt(n)}/>
               </span>
             )}
             {kpis.criticos > 0 && (
-              <span className="text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-accent)] text-white px-3 py-1.5 rounded-full">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-accent)] text-white px-3 py-1.5 rounded-full glow-gold">
                 ⚠ {kpis.criticos} bajo mínimo
               </span>
             )}

@@ -8,6 +8,8 @@ import * as XLSX from 'xlsx';
 import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip } from 'recharts';
 import { toast } from '../hooks/useToast';
 import { confirm } from '../hooks/useConfirm';
+import { AnimatedNumber } from './AnimatedNumber';
+import { triggerConfetti } from './Confetti';
 interface CierreContableViewProps {
   data : AppData;
   onSave: (newData: AppData) => Promise<void>;
@@ -208,7 +210,8 @@ export const CierreContableView: React.FC<CierreContableViewProps> = ({ data, on
           ...nuevos,
         ],
       });
-      toast.success(`✅ Año ${year} cerrado — ${nuevos.length} meses congelados`);
+      toast.success(`✨ Año ${year} cerrado — ${nuevos.length} meses congelados`);
+      triggerConfetti(); // 🎉 año cerrado!
     } catch { toast.info('❌ Error al cerrar el año.'); }
     finally { setIsClosingYear(false); }
   }, [mesesAbiertosConDatos, year, data, cierresMensuales, meses, onSave]);
@@ -330,10 +333,12 @@ export const CierreContableView: React.FC<CierreContableViewProps> = ({ data, on
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
         <div className="lg:col-span-5 flex flex-col gap-3">
           {/* Break-even card — night elegante con dorado */}
-          <div className="relative overflow-hidden bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] p-6 rounded-2xl flex-1">
+          <div className="relative overflow-hidden bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] p-6 rounded-2xl flex-1 hover-lift">
             <div className="absolute top-0 left-0 w-[2px] h-full bg-[color:var(--arume-gold)]"/>
             <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gold)] flex items-center gap-1.5"><Scale className="w-3.5 h-3.5"/> Break-even</p>
-            <p className="font-serif text-3xl md:text-4xl font-semibold tabular-nums mt-2">{Num.fmt(puntoEquilibrio)}</p>
+            <p className="font-serif text-3xl md:text-4xl font-semibold tabular-nums mt-2">
+              <AnimatedNumber value={puntoEquilibrio} format={(n) => Num.fmt(n)}/>
+            </p>
             <p className="text-sm text-white/50 mt-1">Facturación YTD mínima para cubrir fijos <span className="text-white/80 tabular-nums">({Num.fmt(kpis.fijos)})</span></p>
             <div className="mt-5 pt-4 border-t border-white/10 flex justify-between items-end">
               <div>
@@ -540,21 +545,29 @@ export const CierreContableView: React.FC<CierreContableViewProps> = ({ data, on
           </button>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="bg-white/10 rounded-xl p-3 backdrop-blur">
-            <p className="text-[9px] font-black uppercase tracking-widest opacity-70">Ventas netas</p>
-            <p className="text-xl font-black tabular-nums">{Num.fmt(kpis.ventas)}</p>
+          <div className="bg-white/10 rounded-xl p-3 backdrop-blur hover-lift">
+            <p className="text-[9px] font-black uppercase tracking-widest opacity-70">💰 Ventas netas</p>
+            <p className="font-serif text-xl font-semibold tabular-nums mt-1">
+              <AnimatedNumber value={kpis.ventas} format={(n) => Num.fmt(n)}/>
+            </p>
           </div>
-          <div className="bg-white/10 rounded-xl p-3 backdrop-blur">
-            <p className="text-[9px] font-black uppercase tracking-widest opacity-70">Compras</p>
-            <p className="text-xl font-black tabular-nums">{Num.fmt(kpis.variables)}</p>
+          <div className="bg-white/10 rounded-xl p-3 backdrop-blur hover-lift">
+            <p className="text-[9px] font-black uppercase tracking-widest opacity-70">🛒 Compras</p>
+            <p className="font-serif text-xl font-semibold tabular-nums mt-1">
+              <AnimatedNumber value={kpis.variables} format={(n) => Num.fmt(n)}/>
+            </p>
           </div>
-          <div className="bg-white/10 rounded-xl p-3 backdrop-blur">
-            <p className="text-[9px] font-black uppercase tracking-widest opacity-70">Fijos + Amort.</p>
-            <p className="text-xl font-black tabular-nums">{Num.fmt(kpis.fijos)}</p>
+          <div className="bg-white/10 rounded-xl p-3 backdrop-blur hover-lift">
+            <p className="text-[9px] font-black uppercase tracking-widest opacity-70">🏛️ Fijos + Amort.</p>
+            <p className="font-serif text-xl font-semibold tabular-nums mt-1">
+              <AnimatedNumber value={kpis.fijos} format={(n) => Num.fmt(n)}/>
+            </p>
           </div>
-          <div className={cn('rounded-xl p-3 backdrop-blur', kpis.resultado >= 0 ? 'bg-emerald-500/30' : 'bg-rose-500/30')}>
-            <p className="text-[9px] font-black uppercase tracking-widest opacity-70">Resultado</p>
-            <p className="text-xl font-black tabular-nums">{Num.fmt(kpis.resultado)}</p>
+          <div className={cn('rounded-xl p-3 backdrop-blur hover-lift', kpis.resultado >= 0 ? 'bg-emerald-500/30' : 'bg-rose-500/30')}>
+            <p className="text-[9px] font-black uppercase tracking-widest opacity-70">✨ Resultado</p>
+            <p className="font-serif text-xl font-semibold tabular-nums mt-1">
+              <AnimatedNumber value={kpis.resultado} format={(n) => Num.fmt(n)}/>
+            </p>
             <p className="text-[9px] opacity-80 mt-0.5">Margen {margenNeto.toFixed(1)}%</p>
           </div>
         </div>

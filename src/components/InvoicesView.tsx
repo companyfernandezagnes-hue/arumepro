@@ -12,6 +12,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { scanBase64 } from '../services/aiProviders';
+import { AnimatedNumber } from './AnimatedNumber';
 
 // 🛡️ TIPOS Y SERVICIOS CONECTADOS AL MOTOR CENTRAL
 import { AppData, FacturaExtended, BusinessUnit, EmailDraft } from '../types';
@@ -941,17 +942,23 @@ Usa punto como separador decimal.`;
         {activeTab === 'hist' && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="bg-white p-5 rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Total facturado B2B</p>
-                <p className="font-serif text-2xl font-semibold mt-2 tabular-nums">{Num.fmt(totalFacturadoCalc)}</p>
+              <div className="bg-white p-5 rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm hover-lift">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">💼 Total facturado B2B</p>
+                <p className="font-serif text-2xl font-semibold mt-2 tabular-nums">
+                  <AnimatedNumber value={totalFacturadoCalc} format={(n) => Num.fmt(n)}/>
+                </p>
               </div>
-              <div className="bg-white p-5 rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-accent)]">Pendiente pago</p>
-                <p className="font-serif text-2xl font-semibold mt-2 tabular-nums text-[color:var(--arume-accent)]">{Num.fmt(totalFacturadoCalc - totalPagadoCalc)}</p>
+              <div className="bg-white p-5 rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm hover-lift">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-accent)]">⏳ Pendiente pago</p>
+                <p className="font-serif text-2xl font-semibold mt-2 tabular-nums text-[color:var(--arume-accent)]">
+                  <AnimatedNumber value={totalFacturadoCalc - totalPagadoCalc} format={(n) => Num.fmt(n)}/>
+                </p>
               </div>
-              <div className="bg-white p-5 rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-ok)]">Total pagado</p>
-                <p className="font-serif text-2xl font-semibold mt-2 tabular-nums text-[color:var(--arume-ok)]">{Num.fmt(totalPagadoCalc)}</p>
+              <div className="bg-white p-5 rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm hover-lift">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-ok)]">✅ Total pagado</p>
+                <p className="font-serif text-2xl font-semibold mt-2 tabular-nums text-[color:var(--arume-ok)]">
+                  <AnimatedNumber value={totalPagadoCalc} format={(n) => Num.fmt(n)}/>
+                </p>
               </div>
             </div>
             <div className="mt-3 bg-white border border-[color:var(--arume-gray-100)] rounded-xl p-3 shadow-sm flex items-center gap-4">

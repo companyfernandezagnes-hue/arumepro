@@ -9,6 +9,8 @@ import {
   Clock, AlertCircle, CheckCircle2, Plus, Upload, Loader2, Sparkles,
 } from 'lucide-react';
 import { scanBase64 } from '../services/aiProviders';
+import { AnimatedNumber } from './AnimatedNumber';
+import { triggerConfetti } from './Confetti';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppData } from '../types';
 import { Num } from '../services/engine';
@@ -415,6 +417,7 @@ Todos los importes SIN símbolo €, con punto decimal. Si algún campo no apare
       if (añadidas > 0) parts.push(`${añadidas} nómina${añadidas !== 1 ? 's' : ''}`);
       if (trabAñadidos > 0) parts.push(`${trabAñadidos} trabajador${trabAñadidos !== 1 ? 'es' : ''} nuevo${trabAñadidos !== 1 ? 's' : ''}`);
       toast.success(parts.join(' + ') + ' importado ✨');
+      triggerConfetti(); // 🎉 menos papeleo manual
     }
 
     setImportResults(results);
@@ -459,13 +462,13 @@ Todos los importes SIN símbolo €, con punto decimal. Si algún campo no apare
           <p className="text-sm text-white/60 mt-1">Celoso de Palma SL</p>
           <div className="flex items-center gap-2 mt-5 flex-wrap">
             <span className="text-[11px] font-semibold uppercase tracking-[0.15em] bg-white/5 border border-white/10 px-3 py-1.5 rounded-full">
-              {kpis.activos} empleados activos
+              👥 <AnimatedNumber value={kpis.activos} format={(n) => Math.round(n).toString()}/> empleados activos
             </span>
             <span className="text-[11px] font-semibold uppercase tracking-[0.15em] bg-white/5 border border-white/10 px-3 py-1.5 rounded-full tabular-nums">
-              Coste {year}: {Num.fmt(kpis.totalCoste)}
+              💼 Coste {year}: <AnimatedNumber value={kpis.totalCoste} format={(n) => Num.fmt(n)}/>
             </span>
             <span className="text-[11px] font-semibold uppercase tracking-[0.15em] bg-white/5 border border-white/10 px-3 py-1.5 rounded-full tabular-nums">
-              Media mensual: {Num.fmt(kpis.mediaCoste)}
+              📊 Media: <AnimatedNumber value={kpis.mediaCoste} format={(n) => Num.fmt(n)}/>
             </span>
           </div>
         </div>

@@ -16,6 +16,7 @@ import { cn } from '../lib/utils';
 import { proxyFetch } from '../services/api';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import * as XLSX from 'xlsx';
+import { AnimatedNumber } from './AnimatedNumber';
 
 import { findMatches, executeLink, undoLink, fingerprint, isSuspicious, normalizeDesc, daysBetween } from './bancoLogic';
 import { CashProjection } from './CashProjection';
@@ -753,13 +754,17 @@ REGLAS: "importe": positivo=ingreso, negativo=gasto. "fecha": YYYY-MM-DD. Ignora
               <p className="text-[11px] text-[color:var(--arume-gray-400)] mt-1 tabular-nums">{stats.matched}/{stats.total} mov. {new Date().getFullYear()}</p>
             </div>
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gray-500)]">Saldo confirmado</p>
-              <p className="font-serif text-3xl font-semibold tabular-nums mt-1">{Num.fmt(stats.saldo)}</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gray-500)]">💰 Saldo confirmado</p>
+              <p className="font-serif text-3xl font-semibold tabular-nums mt-1">
+                <AnimatedNumber value={stats.saldo} format={(n) => Num.fmt(n)}/>
+              </p>
             </div>
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gray-500)]">Saldo real</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gray-500)]">🔮 Saldo real</p>
               <p className={cn("font-serif text-xl font-semibold tabular-nums mt-1",
-                stats.saldoReal >= stats.saldo ? "text-[color:var(--arume-ok)]" : "text-[color:var(--arume-accent)]")}>{Num.fmt(stats.saldoReal)}</p>
+                stats.saldoReal >= stats.saldo ? "text-[color:var(--arume-ok)]" : "text-[color:var(--arume-accent)]")}>
+                <AnimatedNumber value={stats.saldoReal} format={(n) => Num.fmt(n)}/>
+              </p>
             </div>
           </div>
         </div>
