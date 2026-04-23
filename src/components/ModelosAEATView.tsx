@@ -16,6 +16,7 @@ import { cn } from '../lib/utils';
 import { toast } from '../hooks/useToast';
 import { confirm } from '../hooks/useConfirm';
 import { EmptyState } from './EmptyState';
+import { triggerConfetti } from './Confetti';
 
 interface Props {
   data: AppData;
@@ -220,7 +221,8 @@ export const ModelosAEATView: React.FC<Props> = ({ data, onSave }) => {
       };
       const newData = { ...data, modelos_aeat: [...modelos, nuevo] };
       await onSave(newData);
-      toast.success(`${getInfoModelo(uploadingFor.modelo).nombre} registrado correctamente`);
+      toast.success(`✨ ${getInfoModelo(uploadingFor.modelo).nombre} registrado`);
+      triggerConfetti(); // 🎉 un modelo menos del que preocuparse
       handleCloseModal();
     } catch (err: any) {
       toast.error('Error al guardar: ' + (err?.message || 'desconocido'));

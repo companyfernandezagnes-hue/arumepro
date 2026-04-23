@@ -14,6 +14,7 @@ import { AppData } from '../types';
 import { supabase } from '../services/supabase';
 import { DailyBriefing } from './DailyBriefing';
 import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatedNumber } from './AnimatedNumber';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 interface DashboardViewProps {
@@ -462,26 +463,34 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
 
         {/* KPIs dentro del hero — 4 métricas clave con separadores verticales */}
         <div className="relative mt-8 grid grid-cols-2 md:grid-cols-4 gap-px bg-white/10 rounded-2xl overflow-hidden">
-          <button onClick={() => onNavigate?.('diario')} className="bg-[color:var(--arume-night)] p-5 text-left hover:bg-white/5 transition group">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/50">Ingresos</p>
-            <p className="mt-2 font-serif text-2xl md:text-3xl font-semibold tabular-nums">{Num.fmt(stats.ingresos.total||0)}</p>
+          <button onClick={() => onNavigate?.('diario')} className="bg-[color:var(--arume-night)] p-5 text-left hover:bg-white/10 transition spring-tap group">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/50 group-hover:text-[color:var(--arume-gold)] transition">💰 Ingresos</p>
+            <p className="mt-2 font-serif text-2xl md:text-3xl font-semibold tabular-nums">
+              <AnimatedNumber value={stats.ingresos.total || 0} format={(n) => Num.fmt(n)}/>
+            </p>
             {renderTrend(stats.ingresos.total, previousPeriodStats.ingresos.total)}
           </button>
-          <button onClick={() => onNavigate?.('banco')} className="bg-[color:var(--arume-night)] p-5 text-left hover:bg-white/5 transition group">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/50">Saldo banco</p>
-            <p className={cn('mt-2 font-serif text-2xl md:text-3xl font-semibold tabular-nums', saldoBanco < 0 && 'text-rose-300')}>{Num.fmt(saldoBanco)}</p>
-            <p className="mt-1 text-[10px] text-white/40">En vivo</p>
+          <button onClick={() => onNavigate?.('banco')} className="bg-[color:var(--arume-night)] p-5 text-left hover:bg-white/10 transition spring-tap group">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/50 group-hover:text-[color:var(--arume-gold)] transition">🏦 Saldo banco</p>
+            <p className={cn('mt-2 font-serif text-2xl md:text-3xl font-semibold tabular-nums', saldoBanco < 0 && 'text-rose-300')}>
+              <AnimatedNumber value={saldoBanco} format={(n) => Num.fmt(n)}/>
+            </p>
+            <p className="mt-1 text-[10px] text-white/40 flex items-center gap-1">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"/> En vivo
+            </p>
           </button>
-          <button onClick={() => onNavigate?.('tesoreria')} className="bg-[color:var(--arume-night)] p-5 text-left hover:bg-white/5 transition group">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/50">Margen neto</p>
-            <p className={cn('mt-2 font-serif text-2xl md:text-3xl font-semibold tabular-nums', stats.neto >= 0 ? 'text-emerald-300' : 'text-rose-300')}>{Num.fmt(stats.neto||0)}</p>
+          <button onClick={() => onNavigate?.('tesoreria')} className="bg-[color:var(--arume-night)] p-5 text-left hover:bg-white/10 transition spring-tap group">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/50 group-hover:text-[color:var(--arume-gold)] transition">📈 Margen neto</p>
+            <p className={cn('mt-2 font-serif text-2xl md:text-3xl font-semibold tabular-nums', stats.neto >= 0 ? 'text-emerald-300' : 'text-rose-300')}>
+              <AnimatedNumber value={stats.neto || 0} format={(n) => Num.fmt(n)}/>
+            </p>
             {renderTrend(stats.neto, previousPeriodStats.neto)}
           </button>
-          <button onClick={() => onNavigate?.('informes')} className="bg-[color:var(--arume-night)] p-5 text-left hover:bg-white/5 transition group">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/50">Prime Cost <span className="text-white/30">· ideal 60%</span></p>
+          <button onClick={() => onNavigate?.('informes')} className="bg-[color:var(--arume-night)] p-5 text-left hover:bg-white/10 transition spring-tap group">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/50 group-hover:text-[color:var(--arume-gold)] transition">🎯 Prime Cost <span className="text-white/30">· ideal 60%</span></p>
             <p className={cn('mt-2 font-serif text-2xl md:text-3xl font-semibold tabular-nums',
               stats.ratios.primeCost <= 60 ? 'text-emerald-300' : stats.ratios.primeCost <= 70 ? 'text-amber-300' : 'text-rose-300')}>
-              {safeFixed(stats.ratios.primeCost)}%
+              <AnimatedNumber value={stats.ratios.primeCost || 0} format={(n) => n.toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%'}/>
             </p>
             <p className="mt-1 text-[10px] text-white/40">F.C {safeFixed(stats.ratios.foodCost)}% · L.C {safeFixed(stats.ratios.laborCost)}%</p>
           </button>
@@ -535,7 +544,7 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
       {/* ═════════════ ACCIONES RÁPIDAS ═════════════ */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <button onClick={() => onNavigate?.('diario')}
-          className="flex items-center gap-3 bg-white border border-[color:var(--arume-gray-100)] rounded-xl px-4 py-3 hover:border-[color:var(--arume-ink)]/30 hover:shadow-sm transition group">
+          className="flex items-center gap-3 bg-white border border-[color:var(--arume-gray-100)] rounded-xl px-4 py-3 hover-lift spring-tap hover:border-[color:var(--arume-ink)]/30 transition group">
           <div className="w-10 h-10 rounded-full bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] flex items-center justify-center group-hover:bg-[color:var(--arume-gold)] group-hover:text-[color:var(--arume-ink)] transition">
             <Wallet className="w-4 h-4"/>
           </div>
@@ -545,7 +554,7 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
           </div>
         </button>
         <button onClick={() => onNavigate?.('importador')}
-          className="flex items-center gap-3 bg-white border border-[color:var(--arume-gray-100)] rounded-xl px-4 py-3 hover:border-[color:var(--arume-ink)]/30 hover:shadow-sm transition group">
+          className="flex items-center gap-3 bg-white border border-[color:var(--arume-gray-100)] rounded-xl px-4 py-3 hover-lift spring-tap hover:border-[color:var(--arume-ink)]/30 transition group">
           <div className="w-10 h-10 rounded-full bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] flex items-center justify-center group-hover:bg-[color:var(--arume-gold)] group-hover:text-[color:var(--arume-ink)] transition">
             <Upload className="w-4 h-4"/>
           </div>
@@ -555,7 +564,7 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
           </div>
         </button>
         <button onClick={() => onNavigate?.('banco')}
-          className="flex items-center gap-3 bg-white border border-[color:var(--arume-gray-100)] rounded-xl px-4 py-3 hover:border-[color:var(--arume-ink)]/30 hover:shadow-sm transition group">
+          className="flex items-center gap-3 bg-white border border-[color:var(--arume-gray-100)] rounded-xl px-4 py-3 hover-lift spring-tap hover:border-[color:var(--arume-ink)]/30 transition group">
           <div className="w-10 h-10 rounded-full bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] flex items-center justify-center group-hover:bg-[color:var(--arume-gold)] group-hover:text-[color:var(--arume-ink)] transition">
             <Landmark className="w-4 h-4"/>
           </div>
@@ -565,7 +574,7 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
           </div>
         </button>
         <button onClick={() => onNavigate?.('marketing')}
-          className="flex items-center gap-3 bg-white border border-[color:var(--arume-gray-100)] rounded-xl px-4 py-3 hover:border-[color:var(--arume-ink)]/30 hover:shadow-sm transition group">
+          className="flex items-center gap-3 bg-white border border-[color:var(--arume-gray-100)] rounded-xl px-4 py-3 hover-lift spring-tap hover:border-[color:var(--arume-ink)]/30 transition group">
           <div className="w-10 h-10 rounded-full bg-[color:var(--arume-gold)] text-[color:var(--arume-ink)] flex items-center justify-center group-hover:scale-105 transition">
             <Sparkles className="w-4 h-4"/>
           </div>
@@ -578,30 +587,34 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
 
       {/* ═════════════ MÉTRICAS OPERATIVAS ═════════════ */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="bg-white border border-[color:var(--arume-gray-100)] rounded-2xl p-5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Ticket medio</p>
-          <p className="mt-2 font-serif text-2xl font-semibold tabular-nums">{Num.fmt(ticketMedio)}</p>
+        <div className="bg-white border border-[color:var(--arume-gray-100)] rounded-2xl p-5 hover-lift">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">🎟️ Ticket medio</p>
+          <p className="mt-2 font-serif text-2xl font-semibold tabular-nums">
+            <AnimatedNumber value={ticketMedio} format={(n) => Num.fmt(n)}/>
+          </p>
           <p className="mt-1 text-[11px] text-[color:var(--arume-gray-400)]">Promedio periodo</p>
         </div>
-        <div className="bg-white border border-[color:var(--arume-gray-100)] rounded-2xl p-5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Coste laboral</p>
+        <div className="bg-white border border-[color:var(--arume-gray-100)] rounded-2xl p-5 hover-lift">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">👥 Coste laboral</p>
           <p className={cn('mt-2 font-serif text-2xl font-semibold tabular-nums',
             stats.ratios.laborCost <= 30 ? 'text-[color:var(--arume-ok)]' : stats.ratios.laborCost <= 40 ? 'text-[color:var(--arume-warn)]' : 'text-[color:var(--arume-danger)]')}>
-            {safeFixed(stats.ratios.laborCost)}%
+            <AnimatedNumber value={stats.ratios.laborCost || 0} format={(n) => n.toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%'}/>
           </p>
           <p className="mt-1 text-[11px] text-[color:var(--arume-gray-400)]">Ideal &lt;30%</p>
         </div>
-        <div className="bg-white border border-[color:var(--arume-gray-100)] rounded-2xl p-5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Food cost</p>
+        <div className="bg-white border border-[color:var(--arume-gray-100)] rounded-2xl p-5 hover-lift">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">🍱 Food cost</p>
           <p className={cn('mt-2 font-serif text-2xl font-semibold tabular-nums',
             stats.ratios.foodCost <= 30 ? 'text-[color:var(--arume-ok)]' : stats.ratios.foodCost <= 35 ? 'text-[color:var(--arume-warn)]' : 'text-[color:var(--arume-danger)]')}>
-            {safeFixed(stats.ratios.foodCost)}%
+            <AnimatedNumber value={stats.ratios.foodCost || 0} format={(n) => n.toLocaleString('es-ES', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%'}/>
           </p>
           <p className="mt-1 text-[11px] text-[color:var(--arume-gray-400)]">Ideal &lt;30%</p>
         </div>
-        <div className="bg-white border border-[color:var(--arume-gray-100)] rounded-2xl p-5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Gastos totales</p>
-          <p className="mt-2 font-serif text-2xl font-semibold tabular-nums">{Num.fmt(stats.gastos.total||0)}</p>
+        <div className="bg-white border border-[color:var(--arume-gray-100)] rounded-2xl p-5 hover-lift">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">💸 Gastos totales</p>
+          <p className="mt-2 font-serif text-2xl font-semibold tabular-nums">
+            <AnimatedNumber value={stats.gastos.total || 0} format={(n) => Num.fmt(n)}/>
+          </p>
           {renderTrend(stats.gastos.total, previousPeriodStats.gastos.total)}
         </div>
       </div>

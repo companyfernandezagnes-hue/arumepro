@@ -16,6 +16,7 @@ import { toast } from '../hooks/useToast';
 import { CashWeekSummary, getLastCierreValues } from './CashWeekSummary';
 import { confirm } from '../hooks/useConfirm';
 import { useVoiceInput } from '../hooks/useVoiceInput';
+import { triggerConfetti } from './Confetti';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -315,7 +316,8 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
       }
 
       await onSave(newData);
-      toast.success(`✅ Caja del ${fecha} cerrada · Neto: ${Num.fmt(calc.totalRestauranteNeto)}`);
+      toast.success(`✨ Caja del ${fecha} cerrada · Neto: ${Num.fmt(calc.totalRestauranteNeto)}`);
+      triggerConfetti(); // 🎉 celebración
       setForm({
         date: getSafeDate(), efectivo: '', tpv1: '', tpv2: '', amex: '',
         glovo: '', uber: '', madisa: '', apperStreet: '',

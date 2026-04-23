@@ -1922,6 +1922,8 @@ Genera EXACTAMENTE este JSON válido (sin markdown, sin comentarios):
     await savePostToDB(post);
     setApproved(true);
     toast.success('Post agendado en el calendario ✨');
+    // 🎉 celebración: trabajo de comunicación hecho
+    import('./Confetti').then(m => m.triggerConfetti());
   };
 
   const reset = () => {

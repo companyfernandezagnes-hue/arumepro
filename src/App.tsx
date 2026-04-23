@@ -17,6 +17,7 @@ import { scanBase64 } from './services/aiProviders';
 import { DateUtil } from './services/engine';
 import { toast, ToastRenderer } from './hooks/useToast';
 import { ConfirmProvider } from './hooks/useConfirm';
+import { ConfettiRenderer } from './components/Confetti';
 import { PushService } from './services/pushNotifications';
 import { ArumeAgent } from './services/arumeAgent';
 
@@ -918,6 +919,7 @@ export default function App() {
       {/* Singletons globales — fuera del div principal, dentro de AuthScreen */}
       <ToastRenderer />
       <ConfirmProvider />
+      <ConfettiRenderer />
 
     </AuthScreen>
   );
