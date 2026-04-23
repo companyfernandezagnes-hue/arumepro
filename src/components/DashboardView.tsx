@@ -15,6 +15,7 @@ import { supabase } from '../services/supabase';
 import { DailyBriefing } from './DailyBriefing';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AnimatedNumber } from './AnimatedNumber';
+import { Skeleton, RowSkeleton } from './Skeleton';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 interface DashboardViewProps {
@@ -575,12 +576,12 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
         </button>
         <button onClick={() => onNavigate?.('marketing')}
           className="flex items-center gap-3 bg-white border border-[color:var(--arume-gray-100)] rounded-xl px-4 py-3 hover-lift spring-tap hover:border-[color:var(--arume-ink)]/30 transition group">
-          <div className="w-10 h-10 rounded-full bg-[color:var(--arume-gold)] text-[color:var(--arume-ink)] flex items-center justify-center group-hover:scale-105 transition">
-            <Sparkles className="w-4 h-4"/>
+          <div className="w-10 h-10 rounded-full bg-[color:var(--arume-gold)] text-[color:var(--arume-ink)] flex items-center justify-center group-hover:scale-110 transition">
+            <Sparkles className="w-4 h-4 ai-pulse"/>
           </div>
           <div className="text-left">
             <p className="font-semibold text-sm">Nuevo post</p>
-            <p className="text-[11px] text-[color:var(--arume-gray-500)]">Agente Auto</p>
+            <p className="text-[11px] text-[color:var(--arume-gray-500)]">Agente Auto IA</p>
           </div>
         </button>
       </div>
@@ -966,7 +967,11 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
             </h3>
           </div>
           {loadingEmails ? (
-            <div className="flex items-center gap-2 text-slate-400 py-4"><Loader2 className="w-4 h-4 animate-spin"/><span className="text-xs font-bold">Cargando correos...</span></div>
+            <div className="space-y-2">
+              <RowSkeleton/>
+              <RowSkeleton/>
+              <RowSkeleton/>
+            </div>
           ) : (
             <div className="space-y-2">
               {generalEmails.map((e,i) => (

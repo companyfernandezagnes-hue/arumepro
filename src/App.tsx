@@ -18,6 +18,7 @@ import { DateUtil } from './services/engine';
 import { toast, ToastRenderer } from './hooks/useToast';
 import { ConfirmProvider } from './hooks/useConfirm';
 import { ConfettiRenderer } from './components/Confetti';
+import { ScrollProgress } from './components/ScrollProgress';
 import { PushService } from './services/pushNotifications';
 import { ArumeAgent } from './services/arumeAgent';
 
@@ -917,6 +918,7 @@ export default function App() {
       </div>
 
       {/* Singletons globales — fuera del div principal, dentro de AuthScreen */}
+      <ScrollProgress />
       <ToastRenderer />
       <ConfirmProvider />
       <ConfettiRenderer />

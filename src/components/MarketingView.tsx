@@ -1938,7 +1938,7 @@ Genera EXACTAMENTE este JSON válido (sin markdown, sin comentarios):
     <div className="space-y-4">
       <div className={cn('p-5 rounded-2xl bg-gradient-to-br text-white shadow-lg', BRAND.color)}>
         <div className="flex items-start gap-3">
-          <Sparkles className="w-6 h-6 shrink-0"/>
+          <Sparkles className="w-6 h-6 shrink-0 ai-pulse"/>
           <div>
             <h3 className="text-sm font-black uppercase tracking-widest">Agente Auto</h3>
             <p className="text-xs opacity-90 mt-1">Sube 1 foto real → en 30 segundos tienes post mejorado, caption para IG/TikTok/Google, hashtags y fecha sugerida.</p>

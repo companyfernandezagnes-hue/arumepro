@@ -130,6 +130,28 @@
   animation: shimmer 1.4s ease-in-out infinite;
 }
 
+/* Sparkles IA — giro + pulso suave, discreto pero vivo */
+@keyframes aiPulse {
+  0%, 100% { transform: scale(1) rotate(0deg); opacity: 1; }
+  50%      { transform: scale(1.15) rotate(15deg); opacity: 0.85; }
+}
+.ai-pulse { animation: aiPulse 2.2s ease-in-out infinite; transform-origin: center; }
+
+/* Float suave — para iconos ambientales (p.ej. bot flotando) */
+@keyframes floaty {
+  0%, 100% { transform: translateY(0px); }
+  50%      { transform: translateY(-4px); }
+}
+.floaty { animation: floaty 3s ease-in-out infinite; }
+
+/* Bounce sutil al aparecer un número final */
+@keyframes popIn {
+  0%   { transform: scale(0.8); opacity: 0; }
+  60%  { transform: scale(1.05); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.pop-in { animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+
 /* === CUSTOM STYLES === */
 .btn-rueda { 
   @apply transition-all duration-500 ease-in-out cursor-pointer;

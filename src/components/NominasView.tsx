@@ -779,7 +779,7 @@ Todos los importes SIN símbolo €, con punto decimal. Si algún campo no apare
                 {isImporting ? (
                   <><Loader2 className="w-4 h-4 animate-spin" /> Leyendo…</>
                 ) : (
-                  <><Sparkles className="w-4 h-4" /> Importar con IA</>
+                  <><Sparkles className="w-4 h-4 ai-pulse" /> Importar con IA</>
                 )}
               </button>
               <button onClick={() => setShowNominaForm(true)}

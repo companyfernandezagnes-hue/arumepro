@@ -274,7 +274,7 @@ export const InvoicesList = React.memo(({
                       <td className="p-3 font-mono text-[10px] text-[color:var(--arume-gray-400)] group-hover:text-[color:var(--arume-gray-700)] transition-colors">{highlight(String(f.num || 'S/N'), searchQ, superNorm)}</td>
                       <td className="p-3">
                         <div className="flex items-center gap-2">
-                          {isIA && <span title="Extraído con IA" className="inline-flex shrink-0"><Sparkles className="w-3.5 h-3.5 text-[color:var(--arume-gold)]"/></span>}
+                          {isIA && <span title="Extraído con IA" className="inline-flex shrink-0"><Sparkles className="w-3.5 h-3.5 text-[color:var(--arume-gold)] ai-pulse"/></span>}
                           <span className="font-semibold text-[color:var(--arume-ink)] truncate max-w-[220px]">{highlight(titularStr, searchQ, superNorm)}</span>
                           {hasAlbaranes && <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-[color:var(--arume-gray-50)] text-[color:var(--arume-gray-500)] border border-[color:var(--arume-gray-100)]">{f.albaranIdsArr?.length} albs</span>}
                         </div>
