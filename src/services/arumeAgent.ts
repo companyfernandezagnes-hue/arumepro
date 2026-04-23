@@ -508,7 +508,14 @@ export class ArumeAgent {
   private static async _sendTelegram(data: AppData, text: string): Promise<boolean> {
     const token = data.config?.telegramToken;
     const chatId = data.config?.telegramChatId;
-    if (!token || !chatId) return false;
+    if (!token || !chatId) {
+      // Logueamos en el historial del agente para que se vea en la UI
+      ArumeAgent.logRun('telegram_config', 'error',
+        'Telegram no configurado',
+        'Falta telegramToken o telegramChatId en Ajustes. Las alertas solo llegarán como notificación nativa.'
+      );
+      return false;
+    }
 
     try {
       const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -523,13 +530,25 @@ export class ArumeAgent {
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        console.warn('[ArumeAgent] Telegram error:', err);
+        const errJson = await res.json().catch(() => ({} as any));
+        const description = errJson?.description || `HTTP ${res.status}`;
+        console.warn('[ArumeAgent] Telegram error:', description);
+        // Surfacear el error en el historial del agente
+        ArumeAgent.logRun('telegram_send', 'error',
+          `Telegram falló: ${description}`,
+          res.status === 401 ? 'Token inválido. Revisa Ajustes → Telegram.'
+            : res.status === 400 ? 'ChatID inválido o bloqueado. Envía /start al bot.'
+            : `Código HTTP ${res.status} — ${description}`
+        );
         return false;
       }
       return true;
-    } catch (err) {
+    } catch (err: any) {
       console.warn('[ArumeAgent] Telegram fetch error:', err);
+      ArumeAgent.logRun('telegram_send', 'error',
+        'Telegram sin conexión',
+        err?.message || 'No se pudo contactar con la API de Telegram (problema de red).'
+      );
       return false;
     }
   }

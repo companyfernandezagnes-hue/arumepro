@@ -298,13 +298,18 @@ Todos los importes SIN símbolo €, con punto decimal. Si algún campo no apare
         });
 
         const scan = await scanBase64(b64, file.type || 'application/pdf', prompt);
-        const raw = scan?.raw || {};
-        // Gemini suele devolver el JSON dentro de raw.copy o raw como objeto directo
-        let parsed: any = raw;
-        if (typeof raw === 'string') {
-          try { parsed = JSON.parse((raw as string).replace(/^```json\s*|\s*```$/g, '')); } catch { parsed = {}; }
-        } else if ((raw as any).copy && typeof (raw as any).copy === 'string') {
-          try { parsed = JSON.parse(((raw as any).copy as string).replace(/^```json\s*|\s*```$/g, '')); } catch { parsed = raw; }
+        // scanBase64 devuelve raw como objeto JSON ya parseado (o {} si falló el parseo).
+        // Los campos están directamente accesibles, no dentro de .copy.
+        const parsed: any = scan?.raw && typeof scan.raw === 'object' ? scan.raw : {};
+
+        // Si el objeto está vacío, la IA no devolvió JSON → mostrar error claro
+        if (Object.keys(parsed).length === 0) {
+          results.push({
+            name: file.name,
+            status: 'error',
+            msg: `La IA (${scan?.provider || 'sin proveedor'}) no devolvió datos. ¿PDF legible?`,
+          });
+          continue;
         }
 
         const nombre = String(parsed.nombre_trabajador || parsed.nombre || '').trim();
@@ -316,7 +321,11 @@ Todos los importes SIN símbolo €, con punto decimal. Si algún campo no apare
         const ssEmpresa = Num.parse(parsed.ss_empresa || 0);
 
         if (!nombre || !mes || !/^\d{4}-\d{2}$/.test(mes)) {
-          results.push({ name: file.name, status: 'error', msg: 'No se pudo extraer nombre o mes' });
+          results.push({
+            name: file.name,
+            status: 'error',
+            msg: `No se extrajo nombre o mes válido (leído: ${nombre || '¿?'} / ${mes || '¿?'})`,
+          });
           continue;
         }
 

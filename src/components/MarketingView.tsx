@@ -1835,10 +1835,13 @@ const AutoAgentPanel: React.FC<AutoAgentPanelProps> = ({ brand, BRAND, platos, p
 
       // ── 2. IDENTIFICAR QUÉ ES ─────────────────────────────────────────────
       setStage('identifying'); setProgress('Identificando el contenido…');
-      const idPrompt = `Describe en UNA sola frase corta (máx 15 palabras) qué aparece en esta foto de un restaurante japonés. Solo la descripción, sin introducción.`;
+      // Pedimos JSON estructurado — scanBase64 parsea raw como objeto
+      const idPrompt = `Analiza esta foto de un restaurante japonés. Devuelve SOLO un JSON con este formato exacto (sin markdown):
+{"description": "una frase corta de máx 15 palabras describiendo qué aparece", "type": "plato | ambiente | evento | otro"}`;
       const idRes = await scanBase64(b64, mime, idPrompt);
-      const idText = (idRes?.raw?.copy as string) || (idRes?.raw?.description as string) || (typeof idRes?.raw === 'string' ? idRes.raw : JSON.stringify(idRes?.raw || {}));
-      const identification = (idText || 'Contenido del restaurante').replace(/^["']|["']$/g, '').trim().slice(0, 200);
+      const idRaw: any = idRes?.raw || {};
+      const rawDesc = String(idRaw.description || idRaw.descripcion || '').trim();
+      const identification = (rawDesc || 'Contenido del restaurante').replace(/^["']|["']$/g, '').slice(0, 200);
 
       // ── 3. CAPTIONS + HASHTAGS ────────────────────────────────────────────
       setStage('writing'); setProgress('Escribiendo captions para IG, TikTok y Google…');

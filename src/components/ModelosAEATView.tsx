@@ -126,21 +126,27 @@ function generarPendientes(presentados: ModeloAEAT[]): ModeloAEAT[] {
 }
 
 // ─── Calcula urgencia de un vencimiento ───────────────────────────────────
+// Devolvemos clases Tailwind directas para evitar color-mix() (sin soporte en Safari <17)
 function urgencia(fechaVenc: string): {
   status: 'vencido' | 'urgente' | 'proximo' | 'futuro';
   dias: number;
   label: string;
-  color: string;
-  bg: string;
+  textCls: string;       // clase Tailwind para texto
+  bgCls: string;         // clase Tailwind para fondo
+  borderCls: string;     // clase Tailwind para borde
 } {
   const hoy = new Date();
   const v = new Date(fechaVenc + 'T23:59:59');
   const diff = Math.ceil((v.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24));
 
-  if (diff < 0)   return { status: 'vencido',  dias: diff, label: `Vencido ${Math.abs(diff)}d`, color: 'var(--arume-danger)', bg: 'var(--arume-danger)/10' };
-  if (diff <= 7)  return { status: 'urgente',  dias: diff, label: diff === 0 ? 'Hoy vence' : `${diff}d`, color: 'var(--arume-warn)',   bg: 'var(--arume-warn)/10'   };
-  if (diff <= 30) return { status: 'proximo',  dias: diff, label: `${diff}d`,               color: 'var(--arume-gray-600)', bg: 'var(--arume-gray-50)'   };
-  return              { status: 'futuro',   dias: diff, label: `${diff}d`,               color: 'var(--arume-gray-400)', bg: 'var(--arume-gray-50)'   };
+  if (diff < 0)   return { status: 'vencido', dias: diff, label: `Vencido ${Math.abs(diff)}d`,
+    textCls: 'text-[color:var(--arume-danger)]', bgCls: 'bg-[color:var(--arume-danger)]/10', borderCls: 'border-[color:var(--arume-danger)]/20' };
+  if (diff <= 7)  return { status: 'urgente', dias: diff, label: diff === 0 ? 'Hoy vence' : `${diff}d`,
+    textCls: 'text-[color:var(--arume-warn)]',   bgCls: 'bg-[color:var(--arume-warn)]/10',   borderCls: 'border-[color:var(--arume-warn)]/20' };
+  if (diff <= 30) return { status: 'proximo', dias: diff, label: `${diff}d`,
+    textCls: 'text-[color:var(--arume-gray-600)]', bgCls: 'bg-[color:var(--arume-gray-50)]', borderCls: 'border-[color:var(--arume-gray-200)]' };
+  return              { status: 'futuro',  dias: diff, label: `${diff}d`,
+    textCls: 'text-[color:var(--arume-gray-400)]', bgCls: 'bg-[color:var(--arume-gray-50)]', borderCls: 'border-[color:var(--arume-gray-100)]' };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -257,9 +263,8 @@ export const ModelosAEATView: React.FC<Props> = ({ data, onSave }) => {
     return (
       <div key={m.id}
         className="bg-white border border-[color:var(--arume-gray-100)] rounded-2xl p-4 flex items-center gap-4 hover:shadow-sm transition">
-        <div className="w-12 h-12 rounded-full flex items-center justify-center border"
-          style={{ backgroundColor: `color-mix(in srgb, ${urg.color} 8%, transparent)`, borderColor: `color-mix(in srgb, ${urg.color} 20%, transparent)` }}>
-          <Calendar className="w-5 h-5" style={{ color: urg.color }}/>
+        <div className={cn('w-12 h-12 rounded-full flex items-center justify-center border', urg.bgCls, urg.borderCls)}>
+          <Calendar className={cn('w-5 h-5', urg.textCls)}/>
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -274,8 +279,7 @@ export const ModelosAEATView: React.FC<Props> = ({ data, onSave }) => {
           </p>
         </div>
         <div className="flex flex-col items-end gap-2">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.15em] px-3 py-1 rounded-full border"
-            style={{ color: urg.color, backgroundColor: `color-mix(in srgb, ${urg.color} 8%, transparent)`, borderColor: `color-mix(in srgb, ${urg.color} 20%, transparent)` }}>
+          <span className={cn('text-[10px] font-semibold uppercase tracking-[0.15em] px-3 py-1 rounded-full border', urg.textCls, urg.bgCls, urg.borderCls)}>
             {urg.label}
           </span>
           <button onClick={() => handleOpenPresentar(m)}

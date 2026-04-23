@@ -123,16 +123,22 @@ export class GmailDirectSync {
 
     return new Promise((resolve) => {
       let settled = false;
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
       const finish = (tok: GmailToken | null) => {
         if (settled) return;
         settled = true;
+        // Limpiamos el failsafe para no dejar timers colgados (evita memory leak)
+        if (timeoutId !== null) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
         resolve(tok);
       };
       try {
         const client = w.google.accounts.oauth2.initTokenClient({
           client_id: clientId,
           scope: SCOPES,
-          prompt: '', // sin popup si la sesión Google está activa
+          prompt: '',
           callback: (response: any) => {
             if (response?.access_token) {
               const existing = GmailDirectSync.getToken();
@@ -152,7 +158,7 @@ export class GmailDirectSync {
         });
         client.requestAccessToken({ prompt: '' });
         // Failsafe: si en 10s no hay respuesta, damos por fallida la renovación silenciosa
-        setTimeout(() => finish(null), 10_000);
+        timeoutId = setTimeout(() => finish(null), 10_000);
       } catch {
         finish(null);
       }
