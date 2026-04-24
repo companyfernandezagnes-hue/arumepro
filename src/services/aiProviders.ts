@@ -187,34 +187,62 @@ export const scanBase64 = async (
   const cleanB64 = base64.includes(',') ? base64.split(',')[1] : base64;
   const isImage = mimeType.startsWith('image/');
 
+  // 🩺 Recopilamos errores específicos de cada proveedor para surfacearlos al
+  // final. Antes se perdían en console.warn y el usuario veía un mensaje
+  // genérico inútil.
+  const errors: string[] = [];
+
   const gemKey = keys.gemini();
   if (gemKey) {
     try {
       return await _scanBase64WithGemini(cleanB64, mimeType, prompt, gemKey);
-    } catch (e) {
-      console.warn('[aiProviders] Gemini falló en scanBase64, probando fallbacks…', e);
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      console.warn('[aiProviders] Gemini falló en scanBase64:', msg);
+      errors.push(`Gemini: ${msg}`);
     }
+  } else {
+    errors.push('Gemini: sin API key configurada');
   }
 
   const misKey = keys.mistral();
   if (misKey && isImage) {
     try {
       return await _scanBase64WithMistral(cleanB64, mimeType, prompt, misKey);
-    } catch (e) {
-      console.warn('[aiProviders] Mistral falló en scanBase64…', e);
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      console.warn('[aiProviders] Mistral falló en scanBase64:', msg);
+      errors.push(`Mistral: ${msg}`);
     }
+  } else if (!misKey) {
+    errors.push('Mistral: sin API key configurada');
+  } else if (!isImage) {
+    errors.push('Mistral: solo soporta imágenes, no PDFs');
   }
 
   const groqKey = keys.groq();
   if (groqKey && isImage) {
     try {
       return await _scanBase64WithGroqVision(cleanB64, mimeType, prompt, groqKey);
-    } catch (e) {
-      console.warn('[aiProviders] Groq Vision falló en scanBase64.', e);
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      console.warn('[aiProviders] Groq Vision falló en scanBase64:', msg);
+      errors.push(`Groq: ${msg}`);
     }
+  } else if (!groqKey) {
+    errors.push('Groq: sin API key configurada');
+  } else if (!isImage) {
+    errors.push('Groq: solo soporta imágenes, no PDFs');
   }
 
-  throw new Error('No hay ningún proveedor de visión configurado o todos fallaron. Añade una API Key en Ajustes.');
+  // Todos fallaron — construir mensaje de error rico con los motivos concretos
+  throw new Error(
+    `No se pudo escanear con ningún proveedor de visión.\n\n` +
+    errors.map(e => `• ${e}`).join('\n') +
+    (mimeType === 'application/pdf' && (!gemKey || errors[0]?.startsWith('Gemini:'))
+      ? '\n\n⚠️ IMPORTANTE: Mistral y Groq NO soportan PDFs. Para PDFs solo sirve Gemini.'
+      : '')
+  );
 };
 
 const _scanWithGemini = async (
