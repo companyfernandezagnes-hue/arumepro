@@ -13,6 +13,7 @@ import { ExportTools } from './ExportTools';
 import { PackGestoria } from './PackGestoria';
 import { toast } from '../hooks/useToast';
 import { confirm } from '../hooks/useConfirm';
+import { AIDiagnosticPanel } from './AIDiagnosticPanel';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -391,6 +392,13 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
                 </div>
 
               </div>
+            </div>
+
+            {/* ══════════════════════════════════════════════════════════════
+                1b. DIAGNÓSTICO DE IA — testea cada proveedor
+            ══════════════════════════════════════════════════════════════ */}
+            <div className="lg:col-span-2">
+              <AIDiagnosticPanel />
             </div>
 
             {/* ══════════════════════════════════════════════════════════════
