@@ -371,6 +371,16 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     newData.facturas = [...facturasUnicas, ...safeFacturas];
     newData.albaranes = [...albaranesUnicos, ...safeAlbaranes];
     await onSave(newData);
+
+    // Toast resumen indicando DÓNDE han caído para que el usuario sepa
+    // en qué módulo encontrarlos. Antes se guardaban silenciosamente.
+    if (facturasUnicas.length > 0 && albaranesUnicos.length > 0) {
+      toast.success(`✅ ${facturasUnicas.length} factura${facturasUnicas.length>1?'s':''} + ${albaranesUnicos.length} albarán${albaranesUnicos.length>1?'es':''} guardados. Míralos en Compras y Albaranes.`);
+    } else if (facturasUnicas.length > 0) {
+      toast.success(`✅ ${facturasUnicas.length} factura${facturasUnicas.length>1?'s':''} guardada${facturasUnicas.length>1?'s':''}. Ve a Compras → Bóveda.`);
+    } else if (albaranesUnicos.length > 0) {
+      toast.success(`✅ ${albaranesUnicos.length} albarán${albaranesUnicos.length>1?'es':''} guardado${albaranesUnicos.length>1?'s':''}. Ve a Compras → Albaranes (o Agrupar).`);
+    }
   }, [safeData, safeFacturas, safeAlbaranes, onSave]);
 
   // ─── Ejecutar cola ────────────────────────────────────────────────────────
@@ -451,8 +461,37 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
 
   const handleReviewConfirm = useCallback((editedResult: any) => {
     if (!reviewItem) return;
+
+    // 🐛 FIX: si el usuario cambió el tipo_documento en la review (ej. la IA
+    // lo marcó como factura pero realmente es un albarán), el queue item
+    // aún tenía el tipo antiguo. Re-derivamos el tipo desde editedResult
+    // para que saveResults lo clasifique bien al guardar en Supabase.
+    const nuevoTipoDoc = String(editedResult?.tipo_documento || '').toLowerCase();
+    const nuevoTipo =
+      nuevoTipoDoc.includes('albaran') ? 'albaran' :
+      nuevoTipoDoc.includes('ticket') || nuevoTipoDoc.includes('recibo') || nuevoTipoDoc.includes('simplif') ? 'factura' :
+      'factura';
+
+    // Adaptamos shape: si pasa de factura → albaran necesita campo `items`;
+    // si pasa de albaran → factura el campo `lineas` ya suele venir.
+    if (nuevoTipo === 'albaran' && !editedResult.items && Array.isArray(editedResult.lineas)) {
+      editedResult.items = editedResult.lineas.map((l: any) => ({
+        q: Num.parse(l.qty || 1),
+        n: String(l.name || ''),
+        u: String(l.unit || 'uds'),
+        rate: Num.parse(l.tax_rate || 10),
+        unitPrice: Num.parse(l.unit_price || 0),
+        base: Num.parse(l.total || 0) / (1 + Num.parse(l.tax_rate || 10) / 100),
+        tax: Num.parse(l.total || 0) - (Num.parse(l.total || 0) / (1 + Num.parse(l.tax_rate || 10) / 100)),
+        total: Num.parse(l.total || 0),
+        t: Num.parse(l.total || 0),
+      }));
+    }
+
     setQueue(prev => prev.map(item =>
-      item.id === reviewItem.id ? { ...item, result: { ...item.result, result: editedResult } } : item
+      item.id === reviewItem.id
+        ? { ...item, result: { tipo: nuevoTipo, result: editedResult } }
+        : item
     ));
     setReviewItem(null);
     if (reviewResolveRef.current) { reviewResolveRef.current(true); reviewResolveRef.current = null; }
