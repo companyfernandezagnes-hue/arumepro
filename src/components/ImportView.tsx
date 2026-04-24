@@ -469,8 +469,16 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     const nuevoTipoDoc = String(editedResult?.tipo_documento || '').toLowerCase();
     const nuevoTipo =
       nuevoTipoDoc.includes('albaran') ? 'albaran' :
+      nuevoTipoDoc.includes('abono') || nuevoTipoDoc.includes('rectific') ? 'factura' :  // abonos van a facturas con flag
       nuevoTipoDoc.includes('ticket') || nuevoTipoDoc.includes('recibo') || nuevoTipoDoc.includes('simplif') ? 'factura' :
       'factura';
+
+    // Si es abono, asegurar flags y total negativo
+    if (nuevoTipoDoc.includes('abono') || nuevoTipoDoc.includes('rectific')) {
+      editedResult.tipo_rectificativo = true;
+      const t = Num.parse(editedResult.total || 0);
+      if (t > 0) editedResult.total = String(-t);
+    }
 
     // Adaptamos shape: si pasa de factura → albaran necesita campo `items`;
     // si pasa de albaran → factura el campo `lineas` ya suele venir.
@@ -1223,11 +1231,29 @@ const ReviewModal = ({ item, queuePosition, onConfirm, onSkip }: ReviewModalProp
           </div>
           <select
             value={edited.tipo_documento || (isAlbaran ? 'albaran' : 'factura')}
-            onChange={e => setEdited((prev: any) => ({ ...prev, tipo_documento: e.target.value }))}
+            onChange={e => {
+              const newTipo = e.target.value;
+              setEdited((prev: any) => {
+                const updated = { ...prev, tipo_documento: newTipo };
+                // Si pasamos a abono, marcar como rectificativo y total negativo
+                if (newTipo === 'abono') {
+                  updated.tipo_rectificativo = true;
+                  const t = Num.parse(prev.total || 0);
+                  if (t > 0) updated.total = String(-t);
+                } else if (prev.tipo_rectificativo) {
+                  // Desmarcamos si cambia a otro tipo
+                  updated.tipo_rectificativo = false;
+                  const t = Num.parse(prev.total || 0);
+                  if (t < 0) updated.total = String(Math.abs(t));
+                }
+                return updated;
+              });
+            }}
             className="text-xs font-black bg-slate-100 border-0 rounded-xl px-3 py-2 outline-none text-slate-700 cursor-pointer"
           >
             <option value="albaran">📦 Albarán</option>
             <option value="factura">🧾 Factura</option>
+            <option value="abono">↩️ Abono / Rectificativa</option>
             <option value="ticket_simplificado">🎫 Ticket</option>
           </select>
         </div>
@@ -1460,6 +1486,98 @@ const ReviewModal = ({ item, queuePosition, onConfirm, onSkip }: ReviewModalProp
                 </span>
               </div>
             )}
+
+            {/* ══════════ BLOQUE ABONO (solo si tipo='abono') ══════════ */}
+            {edited.tipo_documento === 'abono' && (
+              <div className="bg-[color:var(--arume-accent)]/10 border border-[color:var(--arume-accent)]/30 rounded-xl p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-[color:var(--arume-accent)] text-lg">↩️</span>
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-accent)]">Abono / Factura rectificativa</p>
+                    <p className="text-[11px] text-[color:var(--arume-gray-500)]">Se guarda con total negativo. Rectifica una factura anterior.</p>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-[color:var(--arume-gray-500)] uppercase tracking-[0.15em] block mb-1">Nº factura que rectifica (opcional)</label>
+                  <input type="text" value={edited.factura_original_num || ''}
+                    onChange={e => setEdited((p: any) => ({ ...p, factura_original_num: e.target.value }))}
+                    placeholder="Ej: 2026/042"
+                    className="w-full text-sm font-mono text-[color:var(--arume-ink)] bg-white border border-[color:var(--arume-gray-200)] rounded-xl px-3 py-2 focus:outline-none focus:border-[color:var(--arume-ink)] transition"/>
+                  <p className="text-[10px] text-[color:var(--arume-gray-400)] mt-1">Si no lo sabes, déjalo vacío y búscalo luego en la Bóveda.</p>
+                </div>
+              </div>
+            )}
+
+            {/* ══════════ DESCUENTO GLOBAL ══════════ */}
+            <details className="bg-[color:var(--arume-gold)]/5 border border-[color:var(--arume-gold)]/30 rounded-xl p-3">
+              <summary className="cursor-pointer flex items-center gap-2">
+                <span className="text-[color:var(--arume-gold)] text-base">🎁</span>
+                <span className="text-xs font-semibold text-[color:var(--arume-ink)]">
+                  Descuento global {(edited.descuento_global_pct || edited.descuento_global_euros) ? `· ${edited.descuento_global_pct ? `${edited.descuento_global_pct}%` : `${edited.descuento_global_euros}€`}` : ''}
+                </span>
+                <span className="ml-auto text-[10px] text-[color:var(--arume-gray-400)]">Click para expandir</span>
+              </summary>
+              <div className="mt-3 space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] font-black text-[color:var(--arume-gray-500)] uppercase tracking-[0.15em] block mb-1">Descuento (%)</label>
+                    <input type="number" step="0.1" min="0" max="100" value={edited.descuento_global_pct || ''}
+                      onChange={e => {
+                        const pct = parseFloat(e.target.value) || 0;
+                        setEdited((p: any) => ({ ...p, descuento_global_pct: pct, descuento_global_euros: 0 }));
+                      }}
+                      placeholder="0"
+                      className="w-full text-sm font-bold bg-white border border-[color:var(--arume-gray-200)] rounded-xl px-3 py-2 focus:outline-none focus:border-[color:var(--arume-ink)]"/>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-[color:var(--arume-gray-500)] uppercase tracking-[0.15em] block mb-1">O importe fijo (€)</label>
+                    <input type="number" step="0.01" min="0" value={edited.descuento_global_euros || ''}
+                      onChange={e => {
+                        const eur = parseFloat(e.target.value) || 0;
+                        setEdited((p: any) => ({ ...p, descuento_global_euros: eur, descuento_global_pct: 0 }));
+                      }}
+                      placeholder="0.00"
+                      className="w-full text-sm font-bold bg-white border border-[color:var(--arume-gray-200)] rounded-xl px-3 py-2 focus:outline-none focus:border-[color:var(--arume-ink)]"/>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-[color:var(--arume-gray-500)] uppercase tracking-[0.15em] block mb-1">Motivo</label>
+                  <input type="text" value={edited.descuento_motivo || ''}
+                    onChange={e => setEdited((p: any) => ({ ...p, descuento_motivo: e.target.value }))}
+                    placeholder="Pronto pago / volumen / cliente fiel..."
+                    className="w-full text-sm bg-white border border-[color:var(--arume-gray-200)] rounded-xl px-3 py-2 focus:outline-none focus:border-[color:var(--arume-ink)]"/>
+                </div>
+                {(edited.descuento_global_pct || edited.descuento_global_euros) && (
+                  <p className="text-[11px] text-[color:var(--arume-gray-600)] italic">
+                    💡 Se aplicará sobre el total. El campo "Total" arriba ya debe reflejarlo.
+                  </p>
+                )}
+              </div>
+            </details>
+
+            {/* ══════════ NOTAS MANUSCRITAS (post-it amarillo) ══════════ */}
+            <div className="bg-amber-100/60 border-2 border-amber-200 rounded-xl p-4" style={{
+              background: 'linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)',
+              boxShadow: '0 2px 8px rgba(217, 119, 6, 0.12)',
+            }}>
+              <div className="flex items-start gap-2 mb-2">
+                <span className="text-lg">📝</span>
+                <div className="flex-1">
+                  <p className="text-xs font-bold text-amber-900">Notas manuscritas del albarán</p>
+                  <p className="text-[11px] text-amber-700/80">
+                    Todo lo escrito a mano que la IA no leyó: envases, descuentos apuntados a boli, devoluciones, cosas que dejaron, etc.
+                  </p>
+                </div>
+              </div>
+              <textarea
+                value={edited.notas_manuscritas || ''}
+                onChange={e => setEdited((p: any) => ({ ...p, notas_manuscritas: e.target.value }))}
+                placeholder={"Ej:\n  • 2 cajas envase retornable\n  • Faltan 3 uds merluza\n  • Descuento 5% pronto pago\n  • Devuelto el recipiente azul"}
+                rows={4}
+                className="w-full bg-white/60 border border-amber-300 rounded-lg px-3 py-2 text-sm text-amber-900 placeholder:text-amber-400/60 outline-none focus:border-amber-500 resize-y"
+                style={{ fontFamily: 'Georgia, serif', lineHeight: '1.5' }}
+              />
+            </div>
 
             {/* Checkbox "marcar para revisar" */}
             <div className="flex items-start gap-2 bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-200)] rounded-xl p-3">

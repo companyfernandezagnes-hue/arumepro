@@ -240,7 +240,9 @@ export const InvoicesList = React.memo(({
                 const isIA = f.source === 'gmail-sync' || f.source === 'dropzone' || f.source === 'email-ia' || f.source === 'ia-auto';
                 
                 // 🛡️ EXTRACCIÓN SEGURA DE TOTALES
-                const fTotal = Math.abs(Num.parse(f.total ?? 0));
+                const fTotalRaw = Num.parse(f.total ?? 0);
+                const fTotal = Math.abs(fTotalRaw);
+                const isNegative = fTotalRaw < 0 || (f as any).tipo_rectificativo;
                 const fBase = Math.abs(Num.parse(f.base)) || Num.round2(fTotal / 1.10);
                 const fTax = Math.abs(Num.parse(f.tax)) || Num.round2(fTotal - fBase);
                 
@@ -275,8 +277,26 @@ export const InvoicesList = React.memo(({
                       <td className="p-3">
                         <div className="flex items-center gap-2">
                           {isIA && <span title="Extraído con IA" className="inline-flex shrink-0"><Sparkles className="w-3.5 h-3.5 text-[color:var(--arume-gold)] ai-pulse"/></span>}
+                          {(f as any).tipo_rectificativo && (
+                            <span title={`Abono · rectifica ${(f as any).factura_original_num || 'factura previa'}`}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-[0.1em] bg-[color:var(--arume-accent)]/10 text-[color:var(--arume-accent)] border border-[color:var(--arume-accent)]/30 shrink-0">
+                              ↩️ Abono
+                            </span>
+                          )}
                           <span className="font-semibold text-[color:var(--arume-ink)] truncate max-w-[220px]">{highlight(titularStr, searchQ, superNorm)}</span>
                           {hasAlbaranes && <span className="px-2 py-0.5 rounded-full text-[9px] font-semibold bg-[color:var(--arume-gray-50)] text-[color:var(--arume-gray-500)] border border-[color:var(--arume-gray-100)]">{f.albaranIdsArr?.length} albs</span>}
+                          {(f as any).notas_manuscritas && (
+                            <span title={`Notas manuscritas: ${(f as any).notas_manuscritas.slice(0, 100)}`}
+                              className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] bg-amber-100 border border-amber-200 shrink-0">
+                              📝
+                            </span>
+                          )}
+                          {((f as any).descuento_global_pct || (f as any).descuento_global_euros) && (
+                            <span title={`Descuento ${(f as any).descuento_global_pct ? `${(f as any).descuento_global_pct}%` : `${(f as any).descuento_global_euros}€`}`}
+                              className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] bg-[color:var(--arume-gold)]/15 border border-[color:var(--arume-gold)]/30 shrink-0">
+                              🎁
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="p-3 text-center">
@@ -288,7 +308,9 @@ export const InvoicesList = React.memo(({
                       </td>
                       <td className="p-3 text-right text-[color:var(--arume-gray-500)] tabular-nums">{Num.fmt(fBase)}</td>
                       <td className="p-3 text-right text-[color:var(--arume-gray-500)] tabular-nums">{Num.fmt(fTax)}</td>
-                      <td className="p-3 text-right font-serif font-semibold text-[color:var(--arume-ink)] text-[14px] tabular-nums">{Num.fmt(fTotal)}</td>
+                      <td className={cn("p-3 text-right font-serif font-semibold text-[14px] tabular-nums", isNegative ? "text-[color:var(--arume-accent)]" : "text-[color:var(--arume-ink)]")}>
+                        {isNegative ? '-' : ''}{Num.fmt(fTotal)}
+                      </td>
 
                       <td className="p-3 text-center">
                         {f.reconciled ? (

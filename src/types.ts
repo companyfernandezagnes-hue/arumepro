@@ -77,6 +77,18 @@ export interface Albaran {
   currency?: string;        // Divisa original (EUR por defecto)
   exchangeRate?: number;    // Tipo de cambio a EUR en fecha del albarán
   totalEUR?: NumericValue;  // Total convertido a EUR
+  // ── Abonos / rectificativos ──
+  tipo_rectificativo?: boolean;
+  factura_original_id?: string;
+  factura_original_num?: string;
+  // ── Descuentos ──
+  descuento_global_pct?: number;
+  descuento_global_euros?: number;
+  descuento_motivo?: string;
+  // ── Notas manuscritas / revisión ──
+  notas_manuscritas?: string;
+  needs_review?: boolean;
+  reviewed?: boolean;
   [key: string]: unknown;
 }
 
@@ -105,6 +117,16 @@ export interface Factura {
   fecha_upload_gestoria?: string; // fecha en que se marcó como subida
   needs_review?: boolean;      // usuaria marcó al importar: IA leyó mal, revisar
   reviewed?: boolean;          // ya revisada y corregida manualmente
+  // ── Abonos (facturas rectificativas) ──
+  tipo_rectificativo?: boolean;        // true = es un abono (total negativo)
+  factura_original_id?: string;        // factura original que rectifica
+  factura_original_num?: string;       // número legible de la factura original
+  // ── Descuentos ──
+  descuento_global_pct?: number;       // % descuento global (0-100)
+  descuento_global_euros?: number;     // descuento absoluto en €
+  descuento_motivo?: string;           // 'pronto pago', 'volumen', etc.
+  // ── Notas manuscritas ──
+  notas_manuscritas?: string;          // texto que la usuaria añade al revisar
 }
 
 export interface FacturaExtended extends Factura {
