@@ -13,7 +13,7 @@ import { cn } from '../lib/utils';
 import { useColumnDetector } from '../hooks/useColumnDetector';
 import { toast } from '../hooks/useToast';
 import { confirm } from '../hooks/useConfirm';
-import { scanDocument, getActiveVisionProvider } from '../services/aiProviders';
+import { scanDocument, scanDocumentMultiPage, getActiveVisionProvider } from '../services/aiProviders';
 
 const MONTHS_FULL = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -54,6 +54,10 @@ interface QueueItem {
   id: string; file: File; name: string; status: FileStatus;
   thumb: string | null; attempts: number; maxAttempts: number;
   error?: string; result?: any;
+  // Páginas extra del mismo documento (solo hay `file` principal por defecto).
+  // Si additionalPages está definido, el documento es multi-página y se envía
+  // todo junto a la IA para fusionar productos+total en un solo JSON.
+  additionalPages?: File[];
 }
 
 // ─── Tipo para previsualización de albaranes Excel ────────────────────────────
@@ -299,7 +303,10 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     const file = item.file;
     if (!file.type.includes('pdf') && !file.type.startsWith('image/')) throw new Error('Formato no soportado (solo PDF/JPG/PNG).');
 
-    const scanResult = await scanDocument(file, PROMPT_OMNI_IA);
+    // Si hay páginas adicionales, usar multi-page scan para fusionar todo
+    const scanResult = item.additionalPages && item.additionalPages.length > 0
+      ? await scanDocumentMultiPage([file, ...item.additionalPages], PROMPT_OMNI_IA)
+      : await scanDocument(file, PROMPT_OMNI_IA);
     const datosIA = scanResult.raw as DocumentoIA & { _usedModel?: string };
     datosIA._usedModel = scanResult.provider;
 
@@ -519,6 +526,40 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     setQueue(prev => [...prev, ...newItems]);
     return newItems;
   }, []);
+
+  /**
+   * Agrupa varios archivos como UN SOLO documento multi-página.
+   * El primero se convierte en el 'principal' y los demás van en additionalPages.
+   * La IA recibirá todos juntos con prompt de fusión.
+   */
+  const addMultiPageToQueue = useCallback((files: File[]) => {
+    if (files.length === 0) return;
+    const [primary, ...rest] = files;
+    const item: QueueItem = {
+      id: `q-${crypto.randomUUID()}`,
+      file: primary,
+      name: `📎 ${primary.name || 'Factura'} (${files.length} páginas)`,
+      status: 'pending',
+      thumb: primary.type.startsWith('image/') ? URL.createObjectURL(primary) : 'pdf',
+      attempts: 0, maxAttempts: 4,
+      additionalPages: rest,
+    };
+    setQueue(prev => [...prev, item]);
+    toast.success(`📎 Documento de ${files.length} páginas añadido. La IA lo procesará como UN solo.`);
+  }, []);
+
+  const multiPageInputRef = useRef<HTMLInputElement>(null);
+  const handleMultiPageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    if (files.length === 1) {
+      toast.info('Selecciona 2 o más archivos para multi-página. He añadido el único como documento suelto.');
+      addFilesToQueue(files);
+    } else {
+      addMultiPageToQueue(files);
+    }
+    e.target.value = '';
+  };
 
   const retryFailed = useCallback(() => {
     setQueue(prev => prev.map(item => item.status === 'error' ? { ...item, status: 'pending', error: undefined, attempts: 0 } : item));
@@ -888,24 +929,44 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
             </div>
 
             {(!hasQueue || !isRunning) && (
-              <div
-                className={cn('border-2 border-dashed rounded-2xl p-10 flex flex-col items-center justify-center transition-all cursor-pointer relative overflow-hidden',
-                  isDragging ? 'border-indigo-500 bg-indigo-50/50 scale-[1.02]' : 'border-slate-200 bg-slate-50 hover:bg-slate-100',
-                  isRunning && 'opacity-50 pointer-events-none')}
-                onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} onClick={() => fileInputRef.current?.click()}
-              >
-                <input type="file" multiple ref={fileInputRef} onChange={handleFileUpload} accept=".pdf, image/jpeg, image/png" className="hidden" />
-                <div className="w-16 h-16 rounded-full bg-white flex items-center justify-center shadow-sm mb-4"><Sparkles className="w-7 h-7 text-indigo-500" /></div>
-                <h3 className="text-xl font-black text-slate-700 text-center">{hasQueue ? 'Añadir más archivos a la cola' : 'Arrastra hasta 100 fotos/PDFs'}</h3>
-                <p className="text-xs text-slate-400 font-bold mt-2 text-center">Fotos de WhatsApp · PDFs del correo · Ctrl+V para pegar</p>
-                <div className="flex flex-col items-center gap-2 mt-4">
-                  <div className="bg-amber-50 px-4 py-2 rounded-full border border-amber-200 text-amber-700 text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
-                    <Eye className="w-4 h-4 text-amber-500" /> Revisión obligatoria antes de guardar
-                  </div>
-                  <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-full border border-slate-200 text-slate-500 text-[10px] font-bold uppercase tracking-widest">
-                    <ShieldCheck className="w-3 h-3 text-slate-400" /> Corrige errores de la IA al momento
+              <div className="space-y-3">
+                <div
+                  className={cn('border-2 border-dashed rounded-2xl p-10 flex flex-col items-center justify-center transition-all cursor-pointer relative overflow-hidden',
+                    isDragging ? 'border-indigo-500 bg-indigo-50/50 scale-[1.02]' : 'border-slate-200 bg-slate-50 hover:bg-slate-100',
+                    isRunning && 'opacity-50 pointer-events-none')}
+                  onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} onClick={() => fileInputRef.current?.click()}
+                >
+                  <input type="file" multiple ref={fileInputRef} onChange={handleFileUpload} accept=".pdf, image/jpeg, image/png" className="hidden" />
+                  <div className="w-16 h-16 rounded-full bg-white flex items-center justify-center shadow-sm mb-4"><Sparkles className="w-7 h-7 text-indigo-500" /></div>
+                  <h3 className="text-xl font-black text-slate-700 text-center">{hasQueue ? 'Añadir más archivos a la cola' : 'Arrastra hasta 100 fotos/PDFs'}</h3>
+                  <p className="text-xs text-slate-400 font-bold mt-2 text-center">Fotos de WhatsApp · PDFs del correo · Ctrl+V para pegar</p>
+                  <div className="flex flex-col items-center gap-2 mt-4">
+                    <div className="bg-amber-50 px-4 py-2 rounded-full border border-amber-200 text-amber-700 text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
+                      <Eye className="w-4 h-4 text-amber-500" /> Revisión obligatoria antes de guardar
+                    </div>
+                    <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-full border border-slate-200 text-slate-500 text-[10px] font-bold uppercase tracking-widest">
+                      <ShieldCheck className="w-3 h-3 text-slate-400" /> Corrige errores de la IA al momento
+                    </div>
                   </div>
                 </div>
+
+                {/* Botón "Multi-página" — destacado dorado */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); multiPageInputRef.current?.click(); }}
+                  className="w-full bg-[color:var(--arume-gold)]/10 hover:bg-[color:var(--arume-gold)]/20 border-2 border-[color:var(--arume-gold)]/30 hover:border-[color:var(--arume-gold)] rounded-2xl p-5 flex items-center gap-4 transition group text-left"
+                >
+                  <div className="w-12 h-12 rounded-full bg-[color:var(--arume-gold)]/20 flex items-center justify-center text-2xl group-hover:scale-110 transition">
+                    📎
+                  </div>
+                  <div className="flex-1">
+                    <p className="font-serif text-lg font-semibold text-[color:var(--arume-ink)]">Factura multi-página</p>
+                    <p className="text-[11px] text-[color:var(--arume-gray-600)]">
+                      ¿Tu factura está repartida en 2 o más hojas? (productos en una, total en otra)
+                      Selecciona TODAS las páginas y la IA las fusiona en un solo documento.
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gold)]">Subir →</span>
+                </button>
               </div>
             )}
 
@@ -959,6 +1020,12 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
                     <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-2 bg-white border border-slate-200 text-slate-600 text-xs font-bold px-4 py-2 rounded-xl hover:bg-slate-50 transition">
                       <Upload className="w-3.5 h-3.5" /> Añadir más
                     </button>
+                    <button onClick={() => multiPageInputRef.current?.click()} title="Factura/albarán repartido en varias páginas — se procesa como UN solo documento"
+                      className="flex items-center gap-2 bg-[color:var(--arume-gold)]/15 border border-[color:var(--arume-gold)]/30 text-[color:var(--arume-ink)] text-xs font-bold px-4 py-2 rounded-xl hover:bg-[color:var(--arume-gold)]/25 transition">
+                      <span>📎</span> Multi-página
+                    </button>
+                    <input ref={multiPageInputRef} type="file" multiple accept=".pdf,image/jpeg,image/png"
+                      onChange={handleMultiPageUpload} className="hidden" />
                     <button onClick={clearQueue} className="flex items-center gap-2 bg-white border border-rose-200 text-rose-500 text-xs font-bold px-4 py-2 rounded-xl hover:bg-rose-50 transition">
                       <X className="w-3.5 h-3.5" /> Limpiar cola
                     </button>

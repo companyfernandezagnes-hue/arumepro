@@ -213,6 +213,78 @@ export const scanDocument = async (
 };
 
 /**
+ * scanDocumentMultiPage — Escaneo de UN documento repartido en varias páginas.
+ * Todas las páginas se envían JUNTAS a Gemini para que fusione la información
+ * en un solo JSON (líneas de la primera hoja + líneas y total de la segunda).
+ *
+ * Útil para facturas grandes donde los productos están en la hoja 1 y el
+ * total está en la hoja 2 (con o sin productos adicionales).
+ */
+export const scanDocumentMultiPage = async (
+  files: File[],
+  prompt: string,
+): Promise<ScanResult> => {
+  if (files.length === 0) throw new Error('No hay archivos que escanear.');
+  if (files.length === 1) return scanDocument(files[0], prompt);
+
+  // Gemini soporta múltiples imágenes/PDFs en UNA sola petición.
+  // Solo implementamos para Gemini — Mistral/Groq requieren N llamadas.
+  const gemKey = keys.gemini();
+  if (!gemKey) throw new Error('Gemini: sin API key configurada. Para multi-página se necesita Gemini.');
+
+  const model = VISION_MODELS.gemini!;
+  const allImages = await Promise.all(
+    files.map(async (f) => {
+      const isImage = f.type.startsWith('image/');
+      if (isImage) {
+        const { base64, mimeType } = await compressImage(f);
+        return { inline_data: { mime_type: mimeType, data: base64 } };
+      }
+      return { inline_data: { mime_type: 'application/pdf', data: await fileToBase64(f) } };
+    })
+  );
+
+  // Prompt enriquecido para fusionar
+  const mergePrompt = `${prompt}
+
+⚠️ IMPORTANTE: Este documento tiene ${files.length} páginas/imágenes. FUSIONA toda la información de TODAS las páginas en un solo JSON:
+- Agrupa TODAS las líneas de productos de todas las páginas en el array "lineas".
+- Usa el TOTAL final que aparezca (normalmente en la última página).
+- Si hay descuentos globales, aplícalos al total.
+- Número de factura, fecha, proveedor: usa los de la primera página (o la que los tenga).`;
+
+  const body = {
+    contents: [{
+      role: 'user',
+      parts: [
+        { text: mergePrompt },
+        ...allImages,
+      ],
+    }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
+  };
+
+  const res = await fetchWithTimeout(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${gemKey}`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+    120_000, // 2 minutos para multi-página
+  );
+  if (!res.ok) {
+    const errJson = await res.json().catch(() => ({} as any));
+    throw new Error(`Gemini Vision multi-página: ${errJson?.error?.message || `HTTP ${res.status}`}`);
+  }
+  const data = await res.json();
+  const candidate = data.candidates?.[0];
+  if (!candidate) throw new Error('Gemini no devolvió resultado para multi-página.');
+  if (candidate.finishReason && candidate.finishReason !== 'STOP') {
+    throw new Error(`Gemini multi-página ${candidate.finishReason}. Prueba con menos páginas o más ligeras.`);
+  }
+  const text = candidate.content?.parts?.[0]?.text || '';
+  if (!text.trim()) throw new Error('Gemini respondió vacío en multi-página.');
+  return { raw: parseJSON(text), provider: 'gemini', model };
+};
+
+/**
  * scanBase64 — Escaneo cuando ya tenemos datos en base64 (sin File).
  * Útil para imágenes de cámara, adjuntos de email, etc.
  */
