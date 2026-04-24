@@ -190,12 +190,21 @@ const classifyError=(msg:string):{retryable:boolean;friendly:string;waitMs?:numb
     return{retryable:true,friendly:'Tiempo agotado → reintentando…'};
   if(msg.includes('Failed to fetch')||msg.includes('NetworkError'))
     return{retryable:true,friendly:'Sin conexión → reintentando cuando se recupere la red…'};
-  // Solo mostrar "falta API key" cuando REALMENTE no hay key configurada
-  if(msg.includes('sin API key configurada') && msg.includes('Gemini:'))
-    return{retryable:false,friendly:'GEMINI_KEY_MISSING'};
-  // Fallback legacy por si aparece el mensaje antiguo
+  // Falta DE VERDAD la API key (ninguna configurada)
+  if(msg.includes('Gemini: sin API key configurada'))
+    return{retryable:false,friendly:'Sin API key de Gemini · configúrala en Ajustes'};
+  // Legacy
   if(msg.includes('No hay ningún proveedor'))
-    return{retryable:false,friendly:'GEMINI_KEY_MISSING'};
+    return{retryable:false,friendly:'Sin proveedor de visión disponible'};
+  // Errores específicos de Gemini ahora visibles
+  if(msg.includes('MAX_TOKENS'))
+    return{retryable:false,friendly:'Imagen/PDF demasiado grande. Prueba con una foto más ligera.'};
+  if(msg.includes('SAFETY'))
+    return{retryable:false,friendly:'Gemini bloqueó la imagen por seguridad. Prueba con otra.'};
+  if(msg.includes('cuota') || msg.includes('RESOURCE_EXHAUSTED'))
+    return{retryable:false,friendly:'Cuota de Gemini agotada. Se resetea a las 9h (hora España).'};
+  if(msg.includes('respuesta vacía') || msg.includes('respuesta vacia') || msg.includes('ilegible'))
+    return{retryable:false,friendly:'Gemini no pudo leer la imagen. Foto borrosa o pequeña.'};
   if(msg.includes('Formato de archivo'))
     return{retryable:false,friendly:'Formato no soportado (solo PDF/JPG/PNG).'};
   return{retryable:false,friendly:msg||'Error desconocido de procesado.'};
@@ -408,7 +417,14 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
           break;
         } catch (e: any) {
           const errMsg = e.message || '';
-          if (errMsg === 'GEMINI_KEY_MISSING') { setKeyModalReason('missing'); setShowKeyModal(true); abortRef.current = true; break; }
+          // Si es claramente falta de API key, mostramos el modal de config
+          if (errMsg.includes('Gemini: sin API key configurada') || errMsg === 'GEMINI_KEY_MISSING') {
+            setKeyModalReason('missing'); setShowKeyModal(true); abortRef.current = true; break;
+          }
+          // Si es cuota agotada, también modal (para que ofrezca poner 2ª key)
+          if (errMsg.includes('cuota') || errMsg.includes('RESOURCE_EXHAUSTED')) {
+            setKeyModalReason('exhausted'); setShowKeyModal(true);
+          }
           const { retryable, friendly, waitMs: cooldownWait } = classifyError(errMsg);
           lastError = friendly;
           updatedQueue[i] = { ...updatedQueue[i], error: `Intento ${attempt}/${item.maxAttempts}: ${friendly}`, attempts: attempt };
