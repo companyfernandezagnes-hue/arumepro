@@ -103,6 +103,9 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
     num: factura?.num || '',
     date: factura?.date || DateUtil.today(),
     prov: factura?.prov || factura?.cliente || '',
+    total: String(factura?.total ?? ''),
+    base: String(factura?.base ?? ''),
+    tax: String(factura?.tax ?? ''),
   });
   const [isSaving, setIsSaving] = useState(false);
 
@@ -120,6 +123,9 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
                               num:  factura?.num  || '',
                               date: factura?.date || DateUtil.today(),
                               prov: factura?.prov || factura?.cliente || '',
+                              total: String(factura?.total ?? ''),
+                              base:  String(factura?.base ?? ''),
+                              tax:   String(factura?.tax ?? ''),
                     });
             }
       }, [factura?.id]);
@@ -180,6 +186,50 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
   const base  = Math.abs(Num.parse(factura.base)  || Num.round2(total / 1.10));
   const iva   = Math.abs(Num.parse(factura.tax)   || Num.round2(total - base));
 
+  // 🧮 Desglose de IVA por tipo (4% / 10% / 21%) agregado de albaranes
+  // vinculados + líneas directas. Muy útil para contabilidad y modelo 303.
+  const desgloseIVA = useMemo(() => {
+    const acc = { base4: 0, iva4: 0, base10: 0, iva10: 0, base21: 0, iva21: 0 };
+    // Desde albaranes vinculados
+    for (const alb of albaranesVinculados) {
+      const byRate = (alb as any).by_rate;
+      if (byRate && typeof byRate === 'object') {
+        if (byRate[4])  { acc.base4 += Num.parse(byRate[4].base);  acc.iva4  += Num.parse(byRate[4].tax); }
+        if (byRate[10]) { acc.base10 += Num.parse(byRate[10].base); acc.iva10 += Num.parse(byRate[10].tax); }
+        if (byRate[21]) { acc.base21 += Num.parse(byRate[21].base); acc.iva21 += Num.parse(byRate[21].tax); }
+      } else if (Array.isArray(alb.items)) {
+        for (const it of alb.items) {
+          const rate = Num.parse((it as any).rate || 10);
+          const itBase = Num.parse((it as any).base || 0);
+          const itTax  = Num.parse((it as any).tax || 0);
+          if (rate <= 5)        { acc.base4 += itBase;  acc.iva4 += itTax; }
+          else if (rate <= 12)  { acc.base10 += itBase; acc.iva10 += itTax; }
+          else                  { acc.base21 += itBase; acc.iva21 += itTax; }
+        }
+      }
+    }
+    // Si no hay albaranes pero sí líneas directas en la factura
+    if (albaranesVinculados.length === 0 && Array.isArray((factura as any).lineas)) {
+      for (const l of (factura as any).lineas) {
+        const rate = Num.parse(l.tax_rate || l.rate || 10);
+        const lTotal = Num.parse(l.total || 0);
+        const lBase = rate > 0 ? Num.round2(lTotal / (1 + rate / 100)) : lTotal;
+        const lTax = Num.round2(lTotal - lBase);
+        if (rate <= 5)        { acc.base4 += lBase;  acc.iva4 += lTax; }
+        else if (rate <= 12)  { acc.base10 += lBase; acc.iva10 += lTax; }
+        else                  { acc.base21 += lBase; acc.iva21 += lTax; }
+      }
+    }
+    // Redondeo final
+    return {
+      base4: Num.round2(acc.base4), iva4: Num.round2(acc.iva4),
+      base10: Num.round2(acc.base10), iva10: Num.round2(acc.iva10),
+      base21: Num.round2(acc.base21), iva21: Num.round2(acc.iva21),
+    };
+  }, [albaranesVinculados, factura]);
+
+  const hayDesglose = desgloseIVA.base4 > 0 || desgloseIVA.base10 > 0 || desgloseIVA.base21 > 0;
+
   const diferencia = Num.round2(sumaAlbaranes - total);
   const diffAbsoluta = Math.abs(diferencia);
   const isPerfectMatch = diffAbsoluta <= Math.max(0.50, total * 0.005); 
@@ -197,15 +247,39 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
       const idx = newData.facturas?.findIndex(f => f.id === factura.id);
       
       if (idx !== undefined && idx > -1 && newData.facturas) {
+        // Parse totales; si el usuario los dejó vacíos, conservamos lo existente
+        const editedTotal = editForm.total.trim() ? Num.parse(editForm.total) : Num.parse(newData.facturas[idx].total);
+        const editedBase  = editForm.base.trim()  ? Num.parse(editForm.base)  : undefined;
+        const editedTax   = editForm.tax.trim()   ? Num.parse(editForm.tax)   : undefined;
+
+        // Si base/tax vacíos pero total cambió, recalcula con % IVA actual (o 10%)
+        let finalBase = editedBase, finalTax = editedTax;
+        if (editedBase === undefined && editedTax === undefined && editedTotal > 0) {
+          const basePrev = Num.parse(newData.facturas[idx].base || 0);
+          const taxPrev  = Num.parse(newData.facturas[idx].tax || 0);
+          const pctIva = basePrev > 0 && taxPrev > 0
+            ? Math.round((taxPrev / basePrev) * 100) <= 5 ? 4
+              : Math.round((taxPrev / basePrev) * 100) <= 12 ? 10 : 21
+            : 10;
+          finalBase = Num.round2(editedTotal / (1 + pctIva / 100));
+          finalTax  = Num.round2(editedTotal - finalBase);
+        }
+
         newData.facturas[idx] = {
           ...newData.facturas[idx],
           num: editForm.num,
           date: editForm.date,
           prov: mode === 'proveedor' ? editForm.prov : newData.facturas[idx].prov,
           cliente: mode === 'socio' ? editForm.prov : newData.facturas[idx].cliente,
+          total: editedTotal,
+          base: finalBase ?? newData.facturas[idx].base,
+          tax: finalTax ?? newData.facturas[idx].tax,
+          reviewed: true,         // marcamos como revisada manualmente
+          needs_review: false,    // si estaba pendiente de revisar, ya no lo está
         };
         await onSaveData(newData);
         setIsEditing(false);
+        toast.success('Factura actualizada correctamente');
       }
     } catch (error) {
       toast.info("Error al guardar los cambios.");
@@ -329,6 +403,30 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
                       onChange={(e) => setEditForm({...editForm, date: e.target.value})}
                       className="w-1/2 text-xs bg-[color:var(--arume-gray-50)] border-b-2 border-[color:var(--arume-ink)]/30 outline-none px-2 py-1"
                     />
+                  </div>
+                  {/* 💰 TOTALES EDITABLES (bug fix) */}
+                  <div className="grid grid-cols-3 gap-2 pt-2">
+                    <div>
+                      <label className="text-[9px] font-semibold uppercase tracking-[0.1em] text-[color:var(--arume-gray-400)] block mb-0.5">Total €</label>
+                      <input type="number" step="0.01" value={editForm.total}
+                        onChange={(e) => setEditForm({...editForm, total: e.target.value})}
+                        className="w-full text-sm font-serif font-semibold tabular-nums bg-[color:var(--arume-gold)]/10 border-b-2 border-[color:var(--arume-gold)]/40 outline-none px-2 py-1 focus:border-[color:var(--arume-gold)]"
+                        placeholder="0.00"/>
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-semibold uppercase tracking-[0.1em] text-[color:var(--arume-gray-400)] block mb-0.5">Base €</label>
+                      <input type="number" step="0.01" value={editForm.base}
+                        onChange={(e) => setEditForm({...editForm, base: e.target.value})}
+                        className="w-full text-xs tabular-nums bg-[color:var(--arume-gray-50)] border-b-2 border-[color:var(--arume-ink)]/30 outline-none px-2 py-1"
+                        placeholder="Auto"/>
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-semibold uppercase tracking-[0.1em] text-[color:var(--arume-gray-400)] block mb-0.5">IVA €</label>
+                      <input type="number" step="0.01" value={editForm.tax}
+                        onChange={(e) => setEditForm({...editForm, tax: e.target.value})}
+                        className="w-full text-xs tabular-nums bg-[color:var(--arume-gray-50)] border-b-2 border-[color:var(--arume-ink)]/30 outline-none px-2 py-1"
+                        placeholder="Auto"/>
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -473,6 +571,45 @@ export const InvoiceDetailModal = React.memo(function InvoiceDetailModal({
         <div className="bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] shrink-0 relative z-20 shadow-[0_-10px_30px_rgba(0,0,0,0.15)] rounded-t-3xl md:rounded-t-none">
           <div className="p-6 md:p-8 pb-safe">
             
+            {/* 🧮 DESGLOSE IVA por tipo — solo si hay varios tipos de IVA */}
+            {hayDesglose && (
+              <div className="mb-4 bg-white/5 rounded-xl p-3 border border-white/10">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gold)] mb-2">Desglose IVA</p>
+                <div className="space-y-1 text-xs">
+                  {desgloseIVA.base4 > 0 && (
+                    <div className="flex justify-between items-center text-white/80">
+                      <span>IVA 4%</span>
+                      <span className="tabular-nums">
+                        <span className="text-white/50">Base {Num.fmt(desgloseIVA.base4)}</span>
+                        <span className="mx-2">·</span>
+                        <span>IVA {Num.fmt(desgloseIVA.iva4)}</span>
+                      </span>
+                    </div>
+                  )}
+                  {desgloseIVA.base10 > 0 && (
+                    <div className="flex justify-between items-center text-white/80">
+                      <span>IVA 10%</span>
+                      <span className="tabular-nums">
+                        <span className="text-white/50">Base {Num.fmt(desgloseIVA.base10)}</span>
+                        <span className="mx-2">·</span>
+                        <span>IVA {Num.fmt(desgloseIVA.iva10)}</span>
+                      </span>
+                    </div>
+                  )}
+                  {desgloseIVA.base21 > 0 && (
+                    <div className="flex justify-between items-center text-white/80">
+                      <span>IVA 21%</span>
+                      <span className="tabular-nums">
+                        <span className="text-white/50">Base {Num.fmt(desgloseIVA.base21)}</span>
+                        <span className="mx-2">·</span>
+                        <span>IVA {Num.fmt(desgloseIVA.iva21)}</span>
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-3 gap-3 mb-6">
               <div className="bg-white/5 rounded-xl p-3 text-center border border-white/10">
                 <p className="text-[9px] font-black text-white/50 uppercase tracking-widest mb-1">Base</p>

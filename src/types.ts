@@ -49,6 +49,10 @@ export interface LineItem {
   /** Canónico: total por línea. Legacy usa `total`. Leer como: li.t ?? li.total */
   t: number;
   total?: number;
+  /** Descuento a nivel de LÍNEA — 0-100 */
+  descuento_pct?: number;
+  /** O descuento absoluto en € (se aplica antes de IVA) */
+  descuento_euros?: number;
   [key: string]: unknown;
 }
 

@@ -69,16 +69,17 @@ const extractYearSafe = (dateStr: string | undefined) => {
  * 🧠 HOOK DE FILTRADO Y ORDENACIÓN PRO (Blindado)
  * ======================================================= */
 function useInvoicesFilters(
-  facturas: FacturaExtended[], 
-  year: number, 
-  filterStatus: string, 
-  searchQ: string, 
-  selectedUnit: string, 
-  mode: string, 
-  sociosReales: string[], 
+  facturas: FacturaExtended[],
+  year: number,
+  filterStatus: string,
+  searchQ: string,
+  selectedUnit: string,
+  mode: string,
+  sociosReales: string[],
   superNorm: (s: string | undefined | null) => string,
   sortField: SortField,
-  sortOrder: SortOrder
+  sortOrder: SortOrder,
+  albaranesSeguros: Albaran[] = []   // 🆕 para búsqueda por producto en líneas vinculadas
 ) {
   return useMemo(() => {
     try {
@@ -117,9 +118,31 @@ function useInvoicesFilters(
           const matchProv = normProv.includes(searchN);
           const matchClient = normCliente.includes(searchN);
           const matchNum = superNorm(String(f.num || '')).includes(searchN);
-          if (!matchProv && !matchClient && !matchNum) return false;
+          // 🆕 Búsqueda también por nombre de producto dentro de albaranes vinculados
+          // y dentro de notas_manuscritas — clave para encontrar 'merluza' dentro
+          // de una factura de Can Jordi aunque no recuerdes el número.
+          let matchProducto = false;
+          let matchNotas = false;
+          if (!matchProv && !matchClient && !matchNum) {
+            // Notas manuscritas propias de la factura
+            const notas = superNorm(String((f as any).notas_manuscritas || ''));
+            if (notas.includes(searchN)) matchNotas = true;
+            // Productos en albaranes vinculados
+            if (!matchNotas && Array.isArray(f.albaranIdsArr) && f.albaranIdsArr.length > 0) {
+              const idsVinc = new Set(f.albaranIdsArr);
+              for (const a of albaranesSeguros) {
+                if (!a || !idsVinc.has(a.id)) continue;
+                const items = Array.isArray(a.items) ? a.items : [];
+                if (items.some((it: any) => superNorm(String(it.n || it.name || '')).includes(searchN))) {
+                  matchProducto = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (!matchProv && !matchClient && !matchNum && !matchProducto && !matchNotas) return false;
         }
-        
+
         return true;
       });
 
@@ -159,7 +182,7 @@ export const InvoicesList = React.memo(({
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const historyList = useInvoicesFilters(facturas, year, filterStatus, searchQ, selectedUnit, mode, sociosReales, superNorm, sortField, sortOrder);
+  const historyList = useInvoicesFilters(facturas, year, filterStatus, searchQ, selectedUnit, mode, sociosReales, superNorm, sortField, sortOrder, albaranesSeguros);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {

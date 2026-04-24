@@ -306,10 +306,22 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     const file = item.file;
     if (!file.type.includes('pdf') && !file.type.startsWith('image/')) throw new Error('Formato no soportado (solo PDF/JPG/PNG).');
 
-    // Si hay páginas adicionales, usar multi-page scan para fusionar todo
-    const scanResult = item.additionalPages && item.additionalPages.length > 0
-      ? await scanDocumentMultiPage([file, ...item.additionalPages], PROMPT_OMNI_IA)
-      : await scanDocument(file, PROMPT_OMNI_IA);
+    // Si hay páginas adicionales, usar multi-page scan para fusionar todo.
+    // Si la multi-page falla (p.ej. timeout / archivos muy pesados),
+    // fallback automático al single-page con solo la primera hoja +
+    // avisamos al usuario para que revise manualmente.
+    let scanResult;
+    if (item.additionalPages && item.additionalPages.length > 0) {
+      try {
+        scanResult = await scanDocumentMultiPage([file, ...item.additionalPages], PROMPT_OMNI_IA);
+      } catch (e: any) {
+        console.warn('[ImportView] Multi-page falló, fallback a single-page:', e?.message);
+        toast.warning(`Multi-página falló, procesando solo 1ª hoja. Añade las demás a mano en la revisión.`);
+        scanResult = await scanDocument(file, PROMPT_OMNI_IA);
+      }
+    } else {
+      scanResult = await scanDocument(file, PROMPT_OMNI_IA);
+    }
     const datosIA = scanResult.raw as DocumentoIA & { _usedModel?: string };
     datosIA._usedModel = scanResult.provider;
 
@@ -1265,12 +1277,19 @@ const ReviewModal = ({ item, queuePosition, onConfirm, onSkip }: ReviewModalProp
       if (!prev) return prev;
       const items = [...(prev.items || [])];
       items[idx] = { ...items[idx], [field]: value };
-      if (field === 'q' || field === 'unitPrice') {
-        const q  = field === 'q'         ? Num.parse(value) : Num.parse(items[idx].q);
-        const up = field === 'unitPrice' ? Num.parse(value) : Num.parse(items[idx].unitPrice);
+      // Recalcular si cambia cualquier campo que afecte al total de línea
+      if (field === 'q' || field === 'unitPrice' || field === 'descuento_pct' || field === 'descuento_euros' || field === 'rate') {
+        const q  = Num.parse(items[idx].q);
+        const up = Num.parse(items[idx].unitPrice);
         const rate = Num.parse(items[idx].rate) || 10;
-        const base = round2(q * up);
-        const tax  = round2(base * rate / 100);
+        const descPct = Num.parse(items[idx].descuento_pct || 0);
+        const descEur = Num.parse(items[idx].descuento_euros || 0);
+        let base = round2(q * up);
+        // Aplicar descuento de línea
+        if (descPct > 0) base = round2(base * (1 - descPct / 100));
+        else if (descEur > 0) base = round2(base - descEur);
+        if (base < 0) base = 0;
+        const tax = round2(base * rate / 100);
         items[idx] = { ...items[idx], base, tax, total: round2(base + tax) };
       }
       return { ...prev, items };
@@ -1486,23 +1505,51 @@ const ReviewModal = ({ item, queuePosition, onConfirm, onSkip }: ReviewModalProp
                     <Plus className="w-3 h-3" /> Añadir línea
                   </button>
                 </div>
-                <div className="space-y-2 max-h-52 overflow-y-auto custom-scrollbar">
+                <div className="space-y-2 max-h-72 overflow-y-auto custom-scrollbar">
                   {(edited.items || []).map((lineItem: any, idx: number) => (
-                    <div key={idx} className="grid grid-cols-12 gap-1.5 bg-slate-50 rounded-xl p-2.5 border border-slate-100">
-                      <input type="text" value={lineItem.n || ''} onChange={e => updateLine(idx, 'n', e.target.value)}
-                        placeholder="Descripción" className="col-span-5 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                      <input type="number" value={lineItem.q || ''} onChange={e => updateLine(idx, 'q', e.target.value)}
-                        placeholder="Qty" className="col-span-1 text-xs font-bold text-center text-slate-700 bg-white border border-slate-200 rounded-lg px-1 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                      <input type="text" value={lineItem.u || ''} onChange={e => updateLine(idx, 'u', e.target.value)}
-                        placeholder="Ud." className="col-span-1 text-xs font-medium text-center text-slate-700 bg-white border border-slate-200 rounded-lg px-1 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                      <input type="number" step="0.01" value={lineItem.unitPrice || ''} onChange={e => updateLine(idx, 'unitPrice', e.target.value)}
-                        placeholder="P/u" className="col-span-2 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-300" />
-                      <div className="col-span-2 flex items-center justify-end">
-                        <span className="text-xs font-black text-indigo-600">{Num.fmt(Num.parse(lineItem.total) || 0)}</span>
+                    <div key={idx} className="bg-slate-50 rounded-xl p-2.5 border border-slate-100 space-y-1.5">
+                      {/* Fila principal: descripción + cantidad + unidad + precio + total + eliminar */}
+                      <div className="grid grid-cols-12 gap-1.5">
+                        <input type="text" value={lineItem.n || ''} onChange={e => updateLine(idx, 'n', e.target.value)}
+                          placeholder="Descripción" className="col-span-5 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                        <input type="number" value={lineItem.q || ''} onChange={e => updateLine(idx, 'q', e.target.value)}
+                          placeholder="Qty" className="col-span-1 text-xs font-bold text-center text-slate-700 bg-white border border-slate-200 rounded-lg px-1 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                        <input type="text" value={lineItem.u || ''} onChange={e => updateLine(idx, 'u', e.target.value)}
+                          placeholder="Ud." className="col-span-1 text-xs font-medium text-center text-slate-700 bg-white border border-slate-200 rounded-lg px-1 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                        <input type="number" step="0.01" value={lineItem.unitPrice || ''} onChange={e => updateLine(idx, 'unitPrice', e.target.value)}
+                          placeholder="P/u" className="col-span-2 text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-300" />
+                        <div className="col-span-2 flex items-center justify-end">
+                          <span className={cn("text-xs font-black", (lineItem.descuento_pct > 0 || lineItem.descuento_euros > 0) ? "text-[color:var(--arume-gold)]" : "text-indigo-600")}>
+                            {Num.fmt(Num.parse(lineItem.total) || 0)}
+                          </span>
+                        </div>
+                        <button onClick={() => removeLine(idx)} className="col-span-1 flex items-center justify-center text-slate-300 hover:text-rose-500 transition">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
                       </div>
-                      <button onClick={() => removeLine(idx)} className="col-span-1 flex items-center justify-center text-slate-300 hover:text-rose-500 transition">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {/* Fila secundaria: IVA% + descuento% o descuento€ — colapsable */}
+                      <div className="grid grid-cols-12 gap-1.5 items-center">
+                        <span className="col-span-2 text-[9px] font-bold text-slate-400 uppercase tracking-widest pl-2">IVA</span>
+                        <select value={lineItem.rate || 10} onChange={e => updateLine(idx, 'rate', parseInt(e.target.value))}
+                          className="col-span-2 text-[10px] font-bold text-slate-600 bg-white border border-slate-200 rounded-md px-1 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-300">
+                          <option value="4">4%</option>
+                          <option value="10">10%</option>
+                          <option value="21">21%</option>
+                        </select>
+                        <span className="col-span-2 text-[9px] font-bold text-slate-400 uppercase tracking-widest pl-2">Dcto</span>
+                        <input type="number" step="0.1" min="0" max="100" value={lineItem.descuento_pct || ''}
+                          onChange={e => updateLine(idx, 'descuento_pct', parseFloat(e.target.value) || 0)}
+                          placeholder="%"
+                          title="Descuento por línea en %"
+                          className="col-span-2 text-[10px] font-bold text-center text-[color:var(--arume-gold)] bg-white border border-[color:var(--arume-gold)]/30 rounded-md px-1 py-1 focus:outline-none focus:border-[color:var(--arume-gold)]" />
+                        <span className="col-span-1 text-[9px] text-slate-300 text-center">o</span>
+                        <input type="number" step="0.01" min="0" value={lineItem.descuento_euros || ''}
+                          onChange={e => updateLine(idx, 'descuento_euros', parseFloat(e.target.value) || 0)}
+                          placeholder="€"
+                          title="Descuento por línea en €"
+                          className="col-span-2 text-[10px] font-bold text-center text-[color:var(--arume-gold)] bg-white border border-[color:var(--arume-gold)]/30 rounded-md px-1 py-1 focus:outline-none focus:border-[color:var(--arume-gold)]" />
+                        <div className="col-span-1"/>
+                      </div>
                     </div>
                   ))}
                   {(edited.items || []).length === 0 && (
