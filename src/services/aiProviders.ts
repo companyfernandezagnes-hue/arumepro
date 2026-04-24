@@ -67,7 +67,9 @@ const MODELS: Record<AIProvider, string> = {
 const VISION_MODELS: Partial<Record<AIProvider, string>> = {
   gemini:  'gemini-2.5-flash',
   mistral: 'pixtral-12b-2409',
-  groq:    'llama-3.2-11b-vision-preview',
+  // llama-3.2-11b-vision-preview fue deprecado en dic 2025. Reemplazado por
+  // el modelo de producción de Meta con visión.
+  groq:    'meta-llama/llama-4-scout-17b-16e-instruct',
 };
 
 // ─── Helper: fetch con timeout ────────────────────────────────────────────────
