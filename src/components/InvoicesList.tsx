@@ -184,6 +184,22 @@ export const InvoicesList = React.memo(({
 
   const historyList = useInvoicesFilters(facturas, year, filterStatus, searchQ, selectedUnit, mode, sociosReales, superNorm, sortField, sortOrder, albaranesSeguros);
 
+  // 🔍 Pre-computamos las CLAVES DUPLICADAS (proveedor+num+total) para
+  // pintar un badge ⚠️ en las filas que tienen un gemelo idéntico.
+  const duplicateKeys = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const f of facturas) {
+      if ((f as any).tipo === 'caja') continue;
+      const prov = String((f as any).prov || (f as any).cliente || '').trim().toLowerCase();
+      const num = String((f as any).num || '').trim().toLowerCase();
+      const total = Math.abs(Num.parse((f as any).total || 0)).toFixed(2);
+      if (!prov || !num || total === '0.00') continue;
+      const key = `${prov}__${num}__${total}`;
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    return new Set(Object.entries(counts).filter(([, c]) => c > 1).map(([k]) => k));
+  }, [facturas]);
+
   const handleSort = (field: SortField) => {
     if (sortField === field) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
@@ -266,6 +282,11 @@ export const InvoicesList = React.memo(({
                 const fTotalRaw = Num.parse(f.total ?? 0);
                 const fTotal = Math.abs(fTotalRaw);
                 const isNegative = fTotalRaw < 0 || (f as any).tipo_rectificativo;
+
+                // Detectar si esta factura tiene duplicado (mismo prov+num+total)
+                const prov = String((f as any).prov || (f as any).cliente || '').trim().toLowerCase();
+                const num = String((f as any).num || '').trim().toLowerCase();
+                const isDup = prov && num && duplicateKeys.has(`${prov}__${num}__${fTotal.toFixed(2)}`);
                 const fBase = Math.abs(Num.parse(f.base)) || Num.round2(fTotal / 1.10);
                 const fTax = Math.abs(Num.parse(f.tax)) || Num.round2(fTotal - fBase);
                 
@@ -300,6 +321,12 @@ export const InvoicesList = React.memo(({
                       <td className="p-3">
                         <div className="flex items-center gap-2">
                           {isIA && <span title="Extraído con IA" className="inline-flex shrink-0"><Sparkles className="w-3.5 h-3.5 text-[color:var(--arume-gold)] ai-pulse"/></span>}
+                          {isDup && (
+                            <span title="⚠️ DUPLICADO: hay otra factura con mismo proveedor + nº + total. Revisa antes de pagar."
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-[0.1em] bg-[color:var(--arume-danger)]/10 text-[color:var(--arume-danger)] border border-[color:var(--arume-danger)]/30 shrink-0 animate-pulse">
+                              ⚠ Duplicado
+                            </span>
+                          )}
                           {(f as any).tipo_rectificativo && (
                             <span title={`Abono · rectifica ${(f as any).factura_original_num || 'factura previa'}`}
                               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-[0.1em] bg-[color:var(--arume-accent)]/10 text-[color:var(--arume-accent)] border border-[color:var(--arume-accent)]/30 shrink-0">

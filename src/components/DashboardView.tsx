@@ -393,6 +393,35 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
   // ── Facturas marcadas "mal procesadas" por la usuaria al subirlas ─────
   const facturasMalProcesadas = facturas.filter((f: any) => f.needs_review === true && !f.reviewed);
 
+  // ── Detección de DUPLICADOS (facturas y albaranes) ──
+  // Agrupa por proveedor+nº+total. Si hay ≥2 con misma clave → duplicado.
+  const duplicados = useMemo(() => {
+    const groupsFact: Record<string, any[]> = {};
+    for (const f of facturas) {
+      if ((f as any).tipo === 'caja') continue;
+      const prov = String((f as any).prov || (f as any).cliente || '').trim().toLowerCase();
+      const num = String((f as any).num || '').trim().toLowerCase();
+      const total = Math.abs(Num.parse((f as any).total || 0)).toFixed(2);
+      if (!prov || !num || total === '0.00') continue;
+      const key = `F__${prov}__${num}__${total}`;
+      if (!groupsFact[key]) groupsFact[key] = [];
+      groupsFact[key].push(f);
+    }
+    const groupsAlb: Record<string, any[]> = {};
+    for (const a of (safeData.albaranes || [])) {
+      const prov = String((a as any).prov || '').trim().toLowerCase();
+      const num = String((a as any).num || '').trim().toLowerCase();
+      const total = Math.abs(Num.parse((a as any).total || 0)).toFixed(2);
+      if (!prov || !num || num === 's/n' || total === '0.00') continue;
+      const key = `A__${prov}__${num}__${total}`;
+      if (!groupsAlb[key]) groupsAlb[key] = [];
+      groupsAlb[key].push(a);
+    }
+    const facturasDups = Object.values(groupsFact).filter(g => g.length > 1);
+    const albaranesDups = Object.values(groupsAlb).filter(g => g.length > 1);
+    return { facturasDups, albaranesDups, total: facturasDups.length + albaranesDups.length };
+  }, [facturas, safeData.albaranes]);
+
   const facturasHoy = facturas.filter((f: any) => {
     if (f.paid) return false;
     if (f.tipo === 'caja') return false;
@@ -500,6 +529,41 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
           </button>
         </div>
       </div>
+
+      {/* ═════════════ BANNER DUPLICADOS ═════════════ */}
+      {duplicados.total > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-[color:var(--arume-danger)]/10 border border-[color:var(--arume-danger)]/30 rounded-2xl p-4"
+        >
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-[color:var(--arume-danger)] shrink-0"/>
+            <div className="flex-1">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-danger)]">
+                ⚠ Posibles duplicados detectados
+              </p>
+              <p className="text-sm font-semibold text-[color:var(--arume-ink)]">
+                {duplicados.facturasDups.length > 0 && `${duplicados.facturasDups.length} factura${duplicados.facturasDups.length > 1 ? 's' : ''} duplicada${duplicados.facturasDups.length > 1 ? 's' : ''}`}
+                {duplicados.facturasDups.length > 0 && duplicados.albaranesDups.length > 0 && ' · '}
+                {duplicados.albaranesDups.length > 0 && `${duplicados.albaranesDups.length} albarán${duplicados.albaranesDups.length > 1 ? 'es' : ''} duplicado${duplicados.albaranesDups.length > 1 ? 's' : ''}`}
+              </p>
+              <p className="text-[11px] text-[color:var(--arume-gray-600)] mt-0.5">
+                Mismo proveedor + nº + total aparece más de una vez. Revisa antes de pagar dos veces.
+              </p>
+              {duplicados.facturasDups.slice(0, 3).map((grupo, i) => (
+                <p key={i} className="text-[11px] text-[color:var(--arume-gray-500)] mt-1 font-mono">
+                  · {grupo[0].prov || grupo[0].cliente} · {grupo[0].num} · {Num.fmt(Math.abs(Num.parse(grupo[0].total)))} ({grupo.length} copias)
+                </p>
+              ))}
+            </div>
+            <button onClick={() => onNavigate?.('compras')}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-danger)] text-white hover:brightness-95 transition shrink-0">
+              Revisar →
+            </button>
+          </div>
+        </motion.div>
+      )}
 
       {/* ═════════════ BANNER FACTURAS MAL PROCESADAS ═════════════ */}
       {facturasMalProcesadas.length > 0 && (

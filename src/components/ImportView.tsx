@@ -388,11 +388,50 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     const newData = JSON.parse(JSON.stringify(safeData));
     const existingFactIds = new Set((safeFacturas as any[]).map((f: any) => f.id));
     const existingAlbIds = new Set((safeAlbaranes as any[]).map((a: any) => a.id));
+
+    // 🔍 DETECTOR DE DUPLICADOS AL GUARDAR
+    // Buscamos en la base de datos si ya existe un documento con mismo
+    // proveedor+nº+total. Si sí, avisamos al usuario pero NO bloqueamos
+    // el guardado (podría ser legítimo: factura original + abono con mismo nº).
+    const makeKey = (x: any) =>
+      `${String(x.prov || x.proveedor || x.cliente || '').trim().toLowerCase()}__${String(x.num || '').trim().toLowerCase()}__${Math.abs(Num.parse(x.total || 0)).toFixed(2)}`;
+    const existingFactKeys = new Map<string, any>();
+    (safeFacturas as any[]).forEach((f: any) => existingFactKeys.set(makeKey(f), f));
+    const existingAlbKeys = new Map<string, any>();
+    (safeAlbaranes as any[]).forEach((a: any) => existingAlbKeys.set(makeKey(a), a));
+
+    const duplicadosDetectados: { tipo: string; nuevo: any; existente: any }[] = [];
+    for (const f of nuevasFacturas) {
+      const k = makeKey(f);
+      if (existingFactKeys.has(k) && !existingFactIds.has(f.id)) {
+        duplicadosDetectados.push({ tipo: 'factura', nuevo: f, existente: existingFactKeys.get(k) });
+      }
+    }
+    for (const a of nuevosAlbaranes) {
+      const k = makeKey(a);
+      if (existingAlbKeys.has(k) && !existingAlbIds.has(a.id)) {
+        duplicadosDetectados.push({ tipo: 'albaran', nuevo: a, existente: existingAlbKeys.get(k) });
+      }
+    }
+
     const facturasUnicas = nuevasFacturas.filter((f: any) => !existingFactIds.has(f.id));
     const albaranesUnicos = nuevosAlbaranes.filter((a: any) => !existingAlbIds.has(a.id));
     newData.facturas = [...facturasUnicas, ...safeFacturas];
     newData.albaranes = [...albaranesUnicos, ...safeAlbaranes];
     await onSave(newData);
+
+    // Avisar de duplicados después de guardar (pero separado del toast de éxito)
+    if (duplicadosDetectados.length > 0) {
+      setTimeout(() => {
+        const resumen = duplicadosDetectados.slice(0, 3).map(d =>
+          `· ${d.nuevo.prov || d.nuevo.proveedor || '?'} · ${d.nuevo.num || 'S/N'} · ${Num.fmt(Math.abs(Num.parse(d.nuevo.total)))}`
+        ).join('\n');
+        toast.warning(
+          `⚠️ ${duplicadosDetectados.length} posible${duplicadosDetectados.length > 1 ? 's' : ''} duplicado${duplicadosDetectados.length > 1 ? 's' : ''} detectado${duplicadosDetectados.length > 1 ? 's' : ''}. Revisa en Compras:\n${resumen}`,
+          9000
+        );
+      }, 800);
+    }
 
     // Toast resumen indicando DÓNDE han caído para que el usuario sepa
     // en qué módulo encontrarlos. Antes se guardaban silenciosamente.
