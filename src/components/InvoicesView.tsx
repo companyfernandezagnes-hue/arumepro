@@ -14,6 +14,7 @@ import * as XLSX from 'xlsx';
 import { scanBase64 } from '../services/aiProviders';
 import { AnimatedNumber } from './AnimatedNumber';
 import { ReconciliadorEmails } from './ReconciliadorEmails';
+import { FixYearsModal } from './FixYearsModal';
 
 // 🛡️ TIPOS Y SERVICIOS CONECTADOS AL MOTOR CENTRAL
 import { AppData, FacturaExtended, BusinessUnit, EmailDraft } from '../types';
@@ -197,6 +198,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
   const [isExportModalOpen,setIsExportModalOpen]= useState(false);
   const [isReconcilerOpen, setIsReconcilerOpen] = useState(false);
+  const [isFixYearsOpen, setIsFixYearsOpen]   = useState(false);
   const [exportQuarter,    setExportQuarter]    = useState(Math.floor(new Date().getMonth() / 3) + 1);
 
   const [isSyncing,        setIsSyncing]        = useState(false);
@@ -936,6 +938,11 @@ Usa punto como separador decimal.`;
             title="Lee tus emails, busca los PDFs de facturas y los compara con las que tienes en la app"
             className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] hover:bg-[color:var(--arume-gray-700)] transition active:scale-[0.98] relative">
             <Sparkles className="w-3.5 h-3.5 ai-pulse" /> Auto-cuadrar
+          </button>
+          <button onClick={() => setIsFixYearsOpen(true)}
+            title="Detecta documentos con año incorrecto (ej. 2019 en lugar de 2026) y los corrige en bloque"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-warn)]/15 text-[color:var(--arume-warn)] border border-[color:var(--arume-warn)]/30 hover:bg-[color:var(--arume-warn)]/25 transition active:scale-[0.98]">
+            <Calendar className="w-3.5 h-3.5" /> Arreglar años
           </button>
           <button onClick={() => setIsExportModalOpen(true)}
             className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-gold)] text-[color:var(--arume-ink)] hover:brightness-95 transition active:scale-[0.98]">
@@ -1952,6 +1959,14 @@ Usa punto como separador decimal.`;
       <ReconciliadorEmails
         isOpen={isReconcilerOpen}
         onClose={() => setIsReconcilerOpen(false)}
+        data={data}
+        onSave={onSave}
+      />
+
+      {/* ── MODAL ARREGLAR AÑOS MASIVO ─────────────────────────────────── */}
+      <FixYearsModal
+        isOpen={isFixYearsOpen}
+        onClose={() => setIsFixYearsOpen(false)}
         data={data}
         onSave={onSave}
       />
