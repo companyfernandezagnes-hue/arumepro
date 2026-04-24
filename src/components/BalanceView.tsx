@@ -261,7 +261,7 @@ export const BalanceView: React.FC<{ data: AppData }> = ({ data }) => {
     <div className="space-y-6 animate-fade-in pb-24 max-w-[1200px] mx-auto">
 
       {/* ── HEADER ─────────────────────────────────────────── */}
-      <div className="relative overflow-hidden bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] p-6 md:p-8 rounded-2xl">
+      <div className="relative overflow-hidden hero-breathing bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] p-6 md:p-8 rounded-2xl">
         <div className="absolute top-0 left-0 w-full h-[2px] bg-[color:var(--arume-gold)]/80"/>
         <div className="absolute -right-20 -top-20 w-64 h-64 rounded-full bg-[color:var(--arume-gold)]/5 pointer-events-none"/>
         <div className="relative z-10">

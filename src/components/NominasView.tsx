@@ -453,7 +453,7 @@ Todos los importes SIN símbolo €, con punto decimal. Si algún campo no apare
     <div className="animate-fade-in space-y-6 pb-24">
 
       {/* ── HEADER EDITORIAL NIGHT ── */}
-      <header className="relative overflow-hidden bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] p-6 md:p-8 rounded-2xl shadow-[0_12px_40px_rgba(11,11,12,0.18)]">
+      <header className="relative overflow-hidden hero-breathing bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] p-6 md:p-8 rounded-2xl shadow-[0_12px_40px_rgba(11,11,12,0.18)]">
         <div className="absolute top-0 left-0 w-full h-[2px] bg-[color:var(--arume-gold)]/80"/>
         <div className="absolute -right-20 -top-20 w-64 h-64 rounded-full bg-[color:var(--arume-gold)]/5 pointer-events-none"/>
         <div className="relative z-10">

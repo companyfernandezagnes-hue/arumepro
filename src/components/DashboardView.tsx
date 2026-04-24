@@ -723,7 +723,7 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
 
       {/* PROYECCIÓN IA — rediseño night + dorado */}
       {projection && (
-        <div className="relative overflow-hidden bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] p-6 rounded-2xl border border-white/5 flex flex-col md:flex-row items-center justify-between gap-6">
+        <div className="relative overflow-hidden hero-breathing bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] p-6 rounded-2xl border border-white/5 flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="absolute top-0 left-0 w-[2px] h-full bg-[color:var(--arume-gold)]"/>
           <div className="flex items-center gap-4">
             <div className="w-11 h-11 rounded-full bg-[color:var(--arume-gold)]/15 flex items-center justify-center">

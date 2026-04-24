@@ -358,7 +358,7 @@ function MobileTabBar<T extends string>({ items, activeKey, onChange }: { items:
 function MobileTabButton<T extends string>({ item, active, onClick }: { item: DockItemDef<T>, active: boolean, onClick: () => void }) {
   const Icon = item.icon;
   return (
-    <button type="button" onClick={onClick} className={cn("min-w-[64px] w-[64px] h-12 px-1 rounded-xl border border-transparent text-[8px] font-black flex flex-col items-center justify-center gap-1 transition-all shrink-0", active ? "bg-slate-800 text-white shadow-md" : "text-slate-500 hover:bg-slate-100")}>
+    <button type="button" onClick={onClick} className={cn("min-w-[64px] w-[64px] h-12 px-1 rounded-xl border border-transparent text-[8px] font-black flex flex-col items-center justify-center gap-1 transition-all shrink-0", active ? "bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] nav-active-glow" : "text-slate-500 hover:bg-slate-100")}>
       <Icon className={cn("w-4 h-4", active ? "text-white" : "")} />
       <span className="truncate w-full text-center px-0.5">{item.label}</span>
     </button>
@@ -450,7 +450,7 @@ function DesktopDock<T extends string>({ items, activeKey, onChange }: { items: 
 function DesktopTabButton<T extends string>({ item, active, onClick }: { item: DockItemDef<T>, active: boolean, onClick: () => void }) {
   const Icon = item.icon;
   return (
-    <button type="button" onClick={onClick} className={cn("min-w-[60px] h-14 px-1 rounded-2xl border border-transparent text-[9px] font-bold flex flex-col items-center justify-center gap-1 transition-all shrink-0", active ? "bg-slate-800 text-white shadow-md" : "text-slate-500 hover:bg-slate-100 hover:text-slate-800 hover:border-slate-200")}>
+    <button type="button" onClick={onClick} className={cn("min-w-[60px] h-14 px-1 rounded-2xl border border-transparent text-[9px] font-bold flex flex-col items-center justify-center gap-1 transition-all shrink-0", active ? "bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] nav-active-glow" : "text-slate-500 hover:bg-slate-100 hover:text-slate-800 hover:border-slate-200")}>
       <Icon className={cn("w-4 h-4", active ? "text-white" : "")} />
       <span className="truncate w-full text-center px-0.5">{item.label}</span>
     </button>

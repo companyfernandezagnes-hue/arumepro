@@ -333,7 +333,7 @@ export const CierreContableView: React.FC<CierreContableViewProps> = ({ data, on
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
         <div className="lg:col-span-5 flex flex-col gap-3">
           {/* Break-even card — night elegante con dorado */}
-          <div className="relative overflow-hidden bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] p-6 rounded-2xl flex-1 hover-lift">
+          <div className="relative overflow-hidden hero-breathing bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] p-6 rounded-2xl flex-1 hover-lift">
             <div className="absolute top-0 left-0 w-[2px] h-full bg-[color:var(--arume-gold)]"/>
             <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gold)] flex items-center gap-1.5"><Scale className="w-3.5 h-3.5"/> Break-even</p>
             <p className="font-serif text-3xl md:text-4xl font-semibold tabular-nums mt-2">

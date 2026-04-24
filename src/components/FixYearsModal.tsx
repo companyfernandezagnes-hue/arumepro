@@ -13,6 +13,7 @@ import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
 import { toast } from '../hooks/useToast';
 import { EmptyState } from './EmptyState';
+import { triggerConfetti } from './Confetti';
 
 interface Props {
   isOpen: boolean;
@@ -147,6 +148,7 @@ export const FixYearsModal: React.FC<Props> = ({ isOpen, onClose, data, onSave }
 
       await onSave(newData);
       toast.success(`✨ Corregidos ${facturasCount} factura${facturasCount !== 1 ? 's' : ''} + ${albaranesCount} albarán${albaranesCount !== 1 ? 'es' : ''}`);
+      triggerConfetti();
       setSeleccionados(new Set());
       onClose();
     } catch (err: any) {
