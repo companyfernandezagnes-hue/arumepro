@@ -13,6 +13,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { scanBase64 } from '../services/aiProviders';
 import { AnimatedNumber } from './AnimatedNumber';
+import { ReconciliadorEmails } from './ReconciliadorEmails';
 
 // 🛡️ TIPOS Y SERVICIOS CONECTADOS AL MOTOR CENTRAL
 import { AppData, FacturaExtended, BusinessUnit, EmailDraft } from '../types';
@@ -195,6 +196,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [selectedUnit,     setSelectedUnit]     = useState<BusinessUnit | 'ALL'>('ALL');
 
   const [isExportModalOpen,setIsExportModalOpen]= useState(false);
+  const [isReconcilerOpen, setIsReconcilerOpen] = useState(false);
   const [exportQuarter,    setExportQuarter]    = useState(Math.floor(new Date().getMonth() / 3) + 1);
 
   const [isSyncing,        setIsSyncing]        = useState(false);
@@ -930,6 +932,11 @@ Usa punto como separador decimal.`;
             </button>
           </div>
 
+          <button onClick={() => setIsReconcilerOpen(true)}
+            title="Lee tus emails, busca los PDFs de facturas y los compara con las que tienes en la app"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] hover:bg-[color:var(--arume-gray-700)] transition active:scale-[0.98] relative">
+            <Sparkles className="w-3.5 h-3.5 ai-pulse" /> Auto-cuadrar
+          </button>
           <button onClick={() => setIsExportModalOpen(true)}
             className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-gold)] text-[color:var(--arume-ink)] hover:brightness-95 transition active:scale-[0.98]">
             <Download className="w-3.5 h-3.5" /> Excel gestoría
@@ -1940,6 +1947,14 @@ Usa punto como separador decimal.`;
           </div>
         </div>
       </div>
+
+      {/* ── MODAL RECONCILIADOR EMAILS ─────────────────────────────────── */}
+      <ReconciliadorEmails
+        isOpen={isReconcilerOpen}
+        onClose={() => setIsReconcilerOpen(false)}
+        data={data}
+        onSave={onSave}
+      />
 
       {/* ── MODAL EXPORTAR EXCEL ─────────────────────────────────────────── */}
       <AnimatePresence>
