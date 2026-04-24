@@ -261,7 +261,10 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
   const pauseRef = useRef(false);
   const abortRef = useRef(false);
 
-  const reviewResolveRef = useRef<((confirmed: boolean) => void) | null>(null);
+  // 🐛 FIX: el resolve ahora devuelve también el result editado para que
+  // runQueue lo pueda persistir en su variable local updatedQueue antes
+  // del siguiente setQueue (que sobreescribiría la edición).
+  const reviewResolveRef = useRef<((res: { ok: boolean; editedResult?: any }) => void) | null>(null);
 
   const [processedData, setProcessedData] = useState<{
     tpvPreview?:     any;
@@ -416,13 +419,17 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
           updatedQueue[i] = { ...updatedQueue[i], status: 'pending_review', result, error: undefined, attempts: attempt };
           setQueue([...updatedQueue]);
 
-          const confirmed = await new Promise<boolean>((resolve) => {
+          const review = await new Promise<{ ok: boolean; editedResult?: any }>((resolve) => {
             reviewResolveRef.current = resolve;
             setReviewItem({ ...updatedQueue[i] });
           });
 
-          if (confirmed) {
-            updatedQueue[i] = { ...updatedQueue[i], status: 'success' };
+          if (review.ok) {
+            // 🐛 FIX: usar el result EDITADO devuelto por la review, no el
+            // result original de la IA. Si el usuario corrigió el total,
+            // fecha, proveedor, etc., DEBE persistirse.
+            const finalResult = review.editedResult || result;
+            updatedQueue[i] = { ...updatedQueue[i], status: 'success', result: finalResult };
             setQueue([...updatedQueue]);
             const successCount = updatedQueue.filter(q => q.status === 'success').length;
             if (processStartTime) { const elapsed = Date.now() - processStartTime; setAvgTimePerDoc(elapsed / Math.max(successCount, 1)); }
@@ -503,18 +510,28 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       }));
     }
 
+    const newResult = { tipo: nuevoTipo, result: editedResult };
     setQueue(prev => prev.map(item =>
       item.id === reviewItem.id
-        ? { ...item, result: { tipo: nuevoTipo, result: editedResult } }
+        ? { ...item, result: newResult }
         : item
     ));
     setReviewItem(null);
-    if (reviewResolveRef.current) { reviewResolveRef.current(true); reviewResolveRef.current = null; }
+    // 🐛 FIX crítico: pasamos el editedResult completo para que runQueue
+    // pueda sincronizarlo en su variable local updatedQueue. Sin esto,
+    // la siguiente mutación de updatedQueue sobreescribía los cambios.
+    if (reviewResolveRef.current) {
+      reviewResolveRef.current({ ok: true, editedResult: newResult });
+      reviewResolveRef.current = null;
+    }
   }, [reviewItem]);
 
   const handleReviewSkip = useCallback(() => {
     setReviewItem(null);
-    if (reviewResolveRef.current) { reviewResolveRef.current(false); reviewResolveRef.current = null; }
+    if (reviewResolveRef.current) {
+      reviewResolveRef.current({ ok: false });
+      reviewResolveRef.current = null;
+    }
   }, []);
 
   const addFilesToQueue = useCallback((files: File[]) => {
@@ -578,7 +595,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     abortRef.current = true;
     queue.forEach(q => { if (q.thumb && q.thumb !== 'pdf') URL.revokeObjectURL(q.thumb); });
     setQueue([]); setIsRunning(false); setIsPaused(false); setReviewItem(null);
-    if (reviewResolveRef.current) { reviewResolveRef.current(false); reviewResolveRef.current = null; }
+    if (reviewResolveRef.current) { reviewResolveRef.current({ ok: false }); reviewResolveRef.current = null; }
   };
 
   const startProcessing = useCallback((items?: QueueItem[]) => {
