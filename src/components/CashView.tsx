@@ -339,6 +339,55 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     await onSave(newData);
   };
 
+  /**
+   * 📝 Cargar un cierre ya guardado al formulario para poder editarlo.
+   * El usuario pulsa en un cierre del histórico → se cargan todos sus
+   * valores al formulario → puede corregir fecha, gastos, lo que sea
+   * → al pulsar 'Cerrar Caja' se sobreescribe (upsert por id) y
+   * actualiza también la factura Z asociada.
+   */
+  const handleEditCierre = useCallback(async (cierre: Cierre & any) => {
+    // Confirmación si ya hay valores escritos sin guardar
+    const hayDatosSinGuardar = Boolean(
+      form.efectivo || form.tpv1 || form.tpv2 || form.amex ||
+      form.glovo || form.uber || form.madisa || form.apperStreet ||
+      form.cajaFisica || form.tienda || form.notas ||
+      gastosCaja.length > 0 || depositoBanco
+    );
+    if (hayDatosSinGuardar) {
+      const ok = await confirm({
+        title: '¿Descartar lo que estás escribiendo?',
+        message: `Vas a cargar el cierre del ${cierre.date} para editarlo. Lo que tienes ahora en el formulario se perderá.`,
+        danger: true,
+        confirmLabel: 'Sí, cargar',
+      });
+      if (!ok) return;
+    }
+
+    // Cargamos valores al formulario
+    setForm({
+      date:        cierre.date || getSafeDate(),
+      efectivo:    String(Num.parse(cierre.efectivo || 0) || ''),
+      tpv1:        String(Num.parse(cierre.tpv1 || 0) || ''),
+      tpv2:        String(Num.parse(cierre.tpv2 || 0) || ''),
+      amex:        String(Num.parse(cierre.amex || 0) || ''),
+      glovo:       String(Num.parse(cierre.glovo || 0) || ''),
+      uber:        String(Num.parse(cierre.uber || 0) || ''),
+      madisa:      String(Num.parse(cierre.madisa || 0) || ''),
+      apperStreet: String(Num.parse(cierre.apperStreet || 0) || ''),
+      cajaFisica:  String(Num.parse(cierre.cajaFisica || 0) || ''),
+      tienda:      String(Num.parse(cierre.tienda || 0) || ''),
+      notas:       String(cierre.notas || ''),
+    });
+
+    // Scroll suave al formulario arriba
+    setTimeout(() => {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }, 100);
+
+    toast.info(`📝 Editando cierre del ${cierre.date}. Corrige y pulsa "Cerrar Caja" para sobreescribir.`);
+  }, [form, gastosCaja, depositoBanco]);
+
   const handleExportGestoria = () => {
     // ─── Filtrado por periodo ─────────────────────────────────────────────
     const prefix = exportMonth === 'all'
@@ -673,10 +722,28 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
 
             {/* Fecha + botones */}
             <div className="flex items-center justify-between flex-wrap gap-3">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Fecha del Cierre</label>
                 <input type="date" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })}
                   className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:border-indigo-400 transition"/>
+                {/* 📅 Día de la semana + fecha larga tipo Google Calendar */}
+                {form.date && (() => {
+                  const d = new Date(form.date + 'T00:00:00');
+                  if (isNaN(d.getTime())) return null;
+                  const diaLargo = d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+                  const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                  const isToday = getSafeDate() === form.date;
+                  return (
+                    <span className={cn(
+                      'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold uppercase tracking-[0.1em] border capitalize',
+                      isToday ? 'bg-[color:var(--arume-gold)]/15 text-[color:var(--arume-ink)] border-[color:var(--arume-gold)]/30' :
+                      isWeekend ? 'bg-[color:var(--arume-accent)]/10 text-[color:var(--arume-accent)] border-[color:var(--arume-accent)]/20' :
+                      'bg-[color:var(--arume-gray-50)] text-[color:var(--arume-gray-600)] border-[color:var(--arume-gray-200)]'
+                    )}>
+                      {isToday ? '✨ Hoy · ' : ''}{diaLargo}
+                    </span>
+                  );
+                })()}
               </div>
               <div className="flex gap-2">
                 <button onClick={toggleRecording}
@@ -867,7 +934,7 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
       <CashWeekSummary data={data}/>
 
       <div className="space-y-6">
-        <CashHistoryList cierres={kpis.cierresMes} onDelete={handleDeleteCierre}/>
+        <CashHistoryList cierres={kpis.cierresMes} onDelete={handleDeleteCierre} onEdit={handleEditCierre}/>
       </div>
 
       {/* MODAL EXPORT — rediseñado editorial */}
