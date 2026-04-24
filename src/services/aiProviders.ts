@@ -71,12 +71,19 @@ const VISION_MODELS: Partial<Record<AIProvider, string>> = {
 };
 
 // ─── Helper: fetch con timeout ────────────────────────────────────────────────
+// 90s para visión: imágenes grandes o Gemini saturado necesitan más margen.
 
-const fetchWithTimeout = async (url: string, opts: RequestInit, ms = 30000): Promise<Response> => {
+const fetchWithTimeout = async (url: string, opts: RequestInit, ms = 90000): Promise<Response> => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
   try {
     return await fetch(url, { ...opts, signal: controller.signal });
+  } catch (e: any) {
+    // Mensaje claro cuando el timeout interno aborta
+    if (e?.name === 'AbortError' || /aborted|signal is aborted/i.test(e?.message || '')) {
+      throw new Error(`Timeout: el servidor tardó más de ${ms / 1000}s en responder. Prueba con una imagen más pequeña.`);
+    }
+    throw e;
   } finally {
     clearTimeout(timer);
   }
@@ -95,9 +102,12 @@ const fileToBase64 = (file: File | Blob): Promise<string> =>
 // ─── Helper: comprimir imagen antes de enviar ────────────────────────────────
 
 const compressImage = async (file: File | Blob): Promise<{ base64: string; mimeType: string }> => {
-  const QUALITY_LEVELS = [0.85, 0.65, 0.45];
-  const MAX_BYTES = 3 * 1024 * 1024;
-  const MAX_W = 1600, MAX_H = 1600;
+  // Parámetros más agresivos — las fotos de WhatsApp suelen venir a 1920x1080+
+  // y provocan timeouts al subir a Gemini. 1200px + calidad 0.7 mantiene
+  // legibilidad para OCR pero divide el tamaño por 3-4.
+  const QUALITY_LEVELS = [0.8, 0.6, 0.4, 0.3];
+  const MAX_BYTES = 1.5 * 1024 * 1024; // 1.5MB límite (antes 3MB)
+  const MAX_W = 1200, MAX_H = 1200;     // antes 1600
 
   const bitmap = await createImageBitmap(file);
   const ratio  = Math.min(MAX_W / bitmap.width, MAX_H / bitmap.height, 1);

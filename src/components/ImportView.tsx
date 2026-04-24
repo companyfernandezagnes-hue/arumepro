@@ -205,6 +205,8 @@ const classifyError=(msg:string):{retryable:boolean;friendly:string;waitMs?:numb
     return{retryable:false,friendly:'Cuota de Gemini agotada. Se resetea a las 9h (hora España).'};
   if(msg.includes('respuesta vacía') || msg.includes('respuesta vacia') || msg.includes('ilegible'))
     return{retryable:false,friendly:'Gemini no pudo leer la imagen. Foto borrosa o pequeña.'};
+  if(msg.includes('Timeout') || msg.includes('signal is aborted') || msg.includes('AbortError'))
+    return{retryable:true,friendly:'Servidor IA lento, reintentando… (si falla, reduce el tamaño de la imagen)'};
   if(msg.includes('Formato de archivo'))
     return{retryable:false,friendly:'Formato no soportado (solo PDF/JPG/PNG).'};
   return{retryable:false,friendly:msg||'Error desconocido de procesado.'};
