@@ -95,21 +95,78 @@ const MONTHS_ES: Record<string, string> = {
   july:'07', august:'08', september:'09', october:'10', november:'11', december:'12',
 };
 
+/**
+ * Sanity check: rechaza fechas con año fuera de [año_actual - 2, año_actual + 1]
+ * y fuerza el año actual. Evita que la IA guarde albaranes de 2019 o 2030.
+ */
+const sanitizeYear = (dateStr: string): string => {
+  const m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return dateStr;
+  const year = parseInt(m[1], 10);
+  const currentYear = new Date().getFullYear();
+  // Rango válido: año actual -2 hasta año actual +1
+  if (year < currentYear - 2 || year > currentYear + 1) {
+    console.warn(`[normalizeDate] Año inusual ${year} → corrigiendo a ${currentYear}`);
+    return `${currentYear}-${m[2]}-${m[3]}`;
+  }
+  return dateStr;
+};
+
 const normalizeDate = (s?: string): string => {
   const today = new Date().toLocaleDateString('sv-SE');
+  const currentYear = new Date().getFullYear();
   const v = String(s ?? '').trim().toLowerCase();
   if (!v || v === 'null' || v === 'undefined') return today;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+
+  // ISO ya formateada
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return sanitizeYear(v);
+
+  // DD/MM/YYYY o DD-MM-YY
   const dmy = v.match(/^(\d{1,2})[-\/\.](\d{1,2})[-\/\.](\d{2,4})$/);
-  if (dmy) { const y = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3]; return `${y}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`; }
+  if (dmy) {
+    const y = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
+    return sanitizeYear(`${y}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`);
+  }
+
+  // YYYY/MM/DD
   const ymd = v.match(/^(\d{4})[-\/\.](\d{1,2})[-\/\.](\d{1,2})$/);
-  if (ymd) return `${ymd[1]}-${ymd[2].padStart(2,'0')}-${ymd[3].padStart(2,'0')}`;
+  if (ymd) return sanitizeYear(`${ymd[1]}-${ymd[2].padStart(2,'0')}-${ymd[3].padStart(2,'0')}`);
+
+  // 🆕 DD/MM sin año — usar año actual (Español común)
+  const dm = v.match(/^(\d{1,2})[-\/\.](\d{1,2})$/);
+  if (dm) {
+    const day = parseInt(dm[1], 10);
+    const month = parseInt(dm[2], 10);
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+      return `${currentYear}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  // "12 de abril de 2026"
   const textDate = v.match(/(\d{1,2})\s+(?:de\s+)?([a-záéíóú]+)\s+(?:de\s+)?(\d{4})/);
-  if (textDate) { const month = MONTHS_ES[textDate[2]]; if (month) return `${textDate[3]}-${month}-${textDate[1].padStart(2,'0')}`; }
+  if (textDate) {
+    const month = MONTHS_ES[textDate[2]];
+    if (month) return sanitizeYear(`${textDate[3]}-${month}-${textDate[1].padStart(2,'0')}`);
+  }
+
+  // 🆕 "12 de abril" sin año
+  const textDateNoYear = v.match(/^(\d{1,2})\s+(?:de\s+)?([a-záéíóú]+)$/);
+  if (textDateNoYear) {
+    const month = MONTHS_ES[textDateNoYear[2]];
+    if (month) return `${currentYear}-${month}-${textDateNoYear[1].padStart(2,'0')}`;
+  }
+
+  // "abril 2026"
   const monthYear = v.match(/^([a-záéíóú]+)\s+(\d{4})$/);
-  if (monthYear) { const month = MONTHS_ES[monthYear[1]]; if (month) return `${monthYear[2]}-${month}-01`; }
+  if (monthYear) {
+    const month = MONTHS_ES[monthYear[1]];
+    if (month) return sanitizeYear(`${monthYear[2]}-${month}-01`);
+  }
+
+  // Fallback: intentar parsear con Date
   const parsed = Date.parse(v);
-  if (!isNaN(parsed)) return new Date(parsed).toLocaleDateString('sv-SE');
+  if (!isNaN(parsed)) return sanitizeYear(new Date(parsed).toLocaleDateString('sv-SE'));
+
   return today;
 };
 
@@ -216,9 +273,20 @@ const classifyError=(msg:string):{retryable:boolean;friendly:string;waitMs?:numb
   return{retryable:false,friendly:msg||'Error desconocido de procesado.'};
 };
 
+const CURRENT_YEAR_FOR_PROMPT = new Date().getFullYear();
+const TODAY_ISO_FOR_PROMPT = new Date().toLocaleDateString('sv-SE');
+
 const PROMPT_OMNI_IA = `Eres un Auditor Contable Experto español. Analiza el documento y extrae los datos con precisión milimétrica.
 
-REGLA FECHAS: Devuelve siempre en formato YYYY-MM-DD. Si no hay fecha visible, usa la fecha de hoy.
+CONTEXTO DE FECHA ACTUAL: Hoy es ${TODAY_ISO_FOR_PROMPT} (año ${CURRENT_YEAR_FOR_PROMPT}).
+
+REGLA FECHAS (CRÍTICO):
+  - Devuelve siempre en formato YYYY-MM-DD.
+  - El año DEBE ser ${CURRENT_YEAR_FOR_PROMPT - 1}, ${CURRENT_YEAR_FOR_PROMPT} o ${CURRENT_YEAR_FOR_PROMPT + 1}. NUNCA pongas años antiguos como 2020, 2019, etc.
+  - Si ves día/mes sin año (ej: "12/04"), usa año ${CURRENT_YEAR_FOR_PROMPT}.
+  - Si ves una fecha escrita a mano que no estás 100% seguro de qué año es, usa ${CURRENT_YEAR_FOR_PROMPT}.
+  - Si no hay fecha visible en absoluto, usa ${TODAY_ISO_FOR_PROMPT}.
+  - Si la fecha está en formato americano (MM/DD/YYYY), conviértela correctamente.
 REGLA TIPO:
   - "factura" si tiene número de factura oficial (F-XXX, FAC-XXX, etc.)
   - "ticket_simplificado" si es un ticket de caja o recibo sin NIF del receptor
@@ -1433,8 +1501,37 @@ const ReviewModal = ({ item, queuePosition, onConfirm, onSkip }: ReviewModalProp
                 </div>
                 <div>
                   <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Fecha</label>
-                  <input type="date" value={edited.date || edited.fecha || ''} onChange={e => setEdited((p: any) => ({ ...p, date: e.target.value, fecha: e.target.value }))}
-                    className="w-full text-sm font-medium text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-300 transition" />
+                  {(() => {
+                    const d = edited.date || edited.fecha || '';
+                    const today = new Date();
+                    const fechaValida = /^\d{4}-\d{2}-\d{2}$/.test(d);
+                    let alerta: string | null = null;
+                    if (fechaValida) {
+                      const parsed = new Date(d + 'T12:00:00');
+                      const year = parsed.getFullYear();
+                      const currentYear = today.getFullYear();
+                      const diffDays = Math.floor((today.getTime() - parsed.getTime()) / 86_400_000);
+                      if (year < currentYear - 1) alerta = `⚠️ Año ${year} parece incorrecto`;
+                      else if (year > currentYear + 1) alerta = `⚠️ Año futuro ${year}`;
+                      else if (diffDays > 365) alerta = `⚠️ Fecha hace más de 1 año`;
+                      else if (diffDays < -30) alerta = `⚠️ Fecha futura`;
+                    }
+                    return (
+                      <>
+                        <input type="date" value={d}
+                          onChange={e => setEdited((p: any) => ({ ...p, date: e.target.value, fecha: e.target.value }))}
+                          className={cn("w-full text-sm font-medium text-slate-700 bg-slate-50 border rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 transition",
+                            alerta
+                              ? "border-[color:var(--arume-warn)] focus:ring-[color:var(--arume-warn)]/30"
+                              : "border-slate-200 focus:ring-indigo-300")} />
+                        {alerta && (
+                          <p className="text-[10px] font-semibold text-[color:var(--arume-warn)] mt-1">
+                            {alerta} — revisa
+                          </p>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
