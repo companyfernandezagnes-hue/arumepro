@@ -3,12 +3,13 @@
 // Testea cada API (Gemini, Groq, Mistral, Cerebras, DeepSeek) y muestra el
 // estado exacto: OK, key vacía, cuota agotada, key inválida, etc.
 // ============================================================================
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   CheckCircle2, XCircle, AlertTriangle, Loader2, RefreshCw,
-  Eye, EyeOff, Key, Zap, Image as ImageIcon, MessageSquare,
+  Eye, EyeOff, Key, Zap, Image as ImageIcon, MessageSquare, Upload,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { scanBase64 } from '../services/aiProviders';
 
 type ProviderId = 'gemini' | 'groq' | 'mistral' | 'cerebras' | 'deepseek';
 type Status = 'idle' | 'testing' | 'ok' | 'no_key' | 'quota' | 'invalid_key' | 'network' | 'unknown';
@@ -264,6 +265,43 @@ export const AIDiagnosticPanel: React.FC = () => {
   const [testing, setTesting] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
 
+  // ── Test OCR con imagen real (sube un PDF/foto y ver qué pasa) ──
+  const [ocrResult, setOcrResult] = useState<{ status: 'ok'|'error'|'empty'; text?: string; error?: string; raw?: any; provider?: string } | null>(null);
+  const [ocrTesting, setOcrTesting] = useState(false);
+  const ocrInputRef = useRef<HTMLInputElement>(null);
+
+  const runOcrTest = async (file: File) => {
+    setOcrTesting(true);
+    setOcrResult(null);
+    try {
+      const b64: string = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+        reader.readAsDataURL(file);
+      });
+      // Prompt simple de test: extraer texto y devolver JSON
+      const prompt = `Lee esta imagen/PDF y devuelve SOLO un JSON con este formato:
+{"texto_detectado": "primer renglón de texto legible o descripción breve", "tipo": "factura|albaran|nomina|foto|otro", "legible": true}`;
+      const scan = await scanBase64(b64, file.type || 'application/pdf', prompt);
+      const raw: any = scan?.raw || {};
+      if (Object.keys(raw).length === 0) {
+        setOcrResult({ status: 'empty', error: `El proveedor ${scan?.provider || '?'} respondió pero sin datos extraíbles`, raw, provider: scan?.provider });
+      } else {
+        setOcrResult({
+          status: 'ok',
+          text: String(raw.texto_detectado || raw.description || JSON.stringify(raw).slice(0, 200)),
+          raw,
+          provider: scan?.provider,
+        });
+      }
+    } catch (err: any) {
+      setOcrResult({ status: 'error', error: err?.message || 'Error desconocido' });
+    } finally {
+      setOcrTesting(false);
+    }
+  };
+
   const runAll = async () => {
     setTesting(true);
     const newResults: Record<string, TestResult> = {};
@@ -428,6 +466,87 @@ export const AIDiagnosticPanel: React.FC = () => {
             </div>
           );
         })}
+      </div>
+
+      {/* TEST OCR CON IMAGEN REAL ─────────────────────────────────────── */}
+      <div className="bg-[color:var(--arume-paper)] border border-[color:var(--arume-gray-100)] rounded-2xl p-5">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Test de visión (OCR)</p>
+            <h3 className="font-serif text-xl font-semibold tracking-tight mt-1">¿La IA lee tus imágenes?</h3>
+            <p className="text-sm text-[color:var(--arume-gray-500)] mt-1">Sube una factura, nómina o foto de prueba. Te dirá EXACTO qué pasó.</p>
+          </div>
+          <input ref={ocrInputRef} type="file" accept="application/pdf,image/*" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) runOcrTest(f); e.target.value = ''; }}
+          />
+          <button onClick={() => ocrInputRef.current?.click()} disabled={ocrTesting}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-gold)] text-[color:var(--arume-ink)] hover:brightness-95 transition active:scale-[0.98] disabled:opacity-50">
+            {ocrTesting
+              ? <><Loader2 className="w-3.5 h-3.5 animate-spin"/> Leyendo…</>
+              : <><Upload className="w-3.5 h-3.5"/> Subir imagen de prueba</>
+            }
+          </button>
+        </div>
+
+        {ocrResult && (
+          <div className="mt-4">
+            {ocrResult.status === 'ok' && (
+              <div className="bg-[color:var(--arume-ok)]/10 border border-[color:var(--arume-ok)]/20 rounded-xl p-4">
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-[color:var(--arume-ok)] shrink-0 mt-0.5"/>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-[color:var(--arume-ink)]">
+                      ¡OCR funciona! ({ocrResult.provider})
+                    </p>
+                    <p className="text-xs text-[color:var(--arume-gray-600)] mt-1">
+                      <b>Texto detectado:</b> {ocrResult.text}
+                    </p>
+                    <details className="mt-2">
+                      <summary className="text-[11px] text-[color:var(--arume-gray-500)] cursor-pointer hover:text-[color:var(--arume-ink)]">Ver respuesta completa</summary>
+                      <pre className="mt-1 bg-white rounded p-2 text-[10px] font-mono text-[color:var(--arume-gray-600)] overflow-auto max-h-32">
+{JSON.stringify(ocrResult.raw, null, 2)}
+                      </pre>
+                    </details>
+                  </div>
+                </div>
+              </div>
+            )}
+            {ocrResult.status === 'empty' && (
+              <div className="bg-[color:var(--arume-warn)]/10 border border-[color:var(--arume-warn)]/20 rounded-xl p-4">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-[color:var(--arume-warn)] shrink-0 mt-0.5"/>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-[color:var(--arume-ink)]">La IA respondió vacío</p>
+                    <p className="text-xs text-[color:var(--arume-gray-600)] mt-1">{ocrResult.error}</p>
+                    <p className="text-[11px] text-[color:var(--arume-gray-500)] mt-2 leading-relaxed">
+                      💡 Suele pasar cuando la imagen es ilegible, muy pequeña, o Gemini la bloqueó por seguridad.
+                      Prueba con una foto más grande y clara.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            {ocrResult.status === 'error' && (
+              <div className="bg-[color:var(--arume-danger)]/10 border border-[color:var(--arume-danger)]/20 rounded-xl p-4">
+                <div className="flex items-start gap-2">
+                  <XCircle className="w-4 h-4 text-[color:var(--arume-danger)] shrink-0 mt-0.5"/>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-[color:var(--arume-ink)]">Error al escanear</p>
+                    <code className="block mt-1 text-[11px] font-mono text-[color:var(--arume-gray-700)] bg-white rounded p-2 break-all">
+                      {ocrResult.error}
+                    </code>
+                    <p className="text-[11px] text-[color:var(--arume-gray-500)] mt-2 leading-relaxed">
+                      💡 Si pone "cuota agotada" → espera a mañana 9h.<br/>
+                      Si pone "MAX_TOKENS" → el PDF es demasiado grande, prueba con uno más pequeño.<br/>
+                      Si pone "SAFETY" → Gemini bloqueó por seguridad, prueba con otra imagen.<br/>
+                      Si pone "HTTP 404" → el modelo no está disponible desde tu cuenta.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Leyenda */}

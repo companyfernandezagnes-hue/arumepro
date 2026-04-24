@@ -323,10 +323,53 @@ const _scanBase64WithGemini = async (
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
   );
-  if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
+  if (!res.ok) {
+    // Intentamos extraer el mensaje de error específico de Gemini para debug
+    const errJson = await res.json().catch(() => ({} as any));
+    const errMsg = errJson?.error?.message || `HTTP ${res.status}`;
+    throw new Error(`Gemini Vision: ${errMsg}`);
+  }
   const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  return { raw: parseJSON(text), provider: 'gemini', model };
+
+  // 🩺 Diagnóstico detallado — muchas veces Gemini responde 200 pero sin texto
+  // por motivos como SAFETY/RECITATION/MAX_TOKENS o promptFeedback.blockReason.
+  const candidate = data.candidates?.[0];
+  const promptFeedback = data.promptFeedback;
+
+  if (promptFeedback?.blockReason) {
+    console.error('[Gemini Vision] Prompt bloqueado:', promptFeedback);
+    throw new Error(`Gemini bloqueó la petición: ${promptFeedback.blockReason}. Prueba con otra imagen.`);
+  }
+
+  if (!candidate) {
+    console.error('[Gemini Vision] Sin candidates en la respuesta:', data);
+    throw new Error('Gemini no devolvió ningún resultado (posible cuota agotada o imagen corrupta).');
+  }
+
+  if (candidate.finishReason && candidate.finishReason !== 'STOP') {
+    // Razones típicas: SAFETY (contenido bloqueado), MAX_TOKENS (corto), RECITATION (plagio),
+    // OTHER (formato inválido). Sin texto útil.
+    console.warn('[Gemini Vision] finishReason inusual:', candidate.finishReason, data);
+    if (candidate.finishReason === 'MAX_TOKENS') {
+      throw new Error('Gemini se cortó (MAX_TOKENS). La imagen/PDF es demasiado grande o compleja.');
+    }
+    if (candidate.finishReason === 'SAFETY') {
+      throw new Error('Gemini bloqueó por seguridad (filtro de contenido). Prueba con otra imagen.');
+    }
+    // Sigue intentando leer el texto aunque finishReason sea raro
+  }
+
+  const text = candidate.content?.parts?.[0]?.text || '';
+  if (!text.trim()) {
+    console.error('[Gemini Vision] Respuesta vacía. Datos brutos:', data);
+    throw new Error('Gemini devolvió una respuesta vacía. La imagen puede ser ilegible.');
+  }
+
+  const parsed = parseJSON(text);
+  if (Object.keys(parsed).length === 0) {
+    console.warn('[Gemini Vision] JSON vacío tras parseJSON. Respuesta raw:', text);
+  }
+  return { raw: parsed, provider: 'gemini', model };
 };
 
 const _scanBase64WithMistral = async (
