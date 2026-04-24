@@ -390,6 +390,9 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
 
   // ── Facturas que vencen hoy o ya vencidas ────────────────────────────────
   const hoyISO = new Date().toISOString().slice(0, 10);
+  // ── Facturas marcadas "mal procesadas" por la usuaria al subirlas ─────
+  const facturasMalProcesadas = facturas.filter((f: any) => f.needs_review === true && !f.reviewed);
+
   const facturasHoy = facturas.filter((f: any) => {
     if (f.paid) return false;
     if (f.tipo === 'caja') return false;
@@ -497,6 +500,34 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
           </button>
         </div>
       </div>
+
+      {/* ═════════════ BANNER FACTURAS MAL PROCESADAS ═════════════ */}
+      {facturasMalProcesadas.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-[color:var(--arume-warn)]/10 border border-[color:var(--arume-warn)]/30 rounded-2xl p-4"
+        >
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-[color:var(--arume-warn)] shrink-0"/>
+            <div className="flex-1">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-warn)]">
+                Pendientes de revisar
+              </p>
+              <p className="text-sm font-semibold text-[color:var(--arume-ink)]">
+                {facturasMalProcesadas.length} factura{facturasMalProcesadas.length > 1 ? 's' : ''} marcada{facturasMalProcesadas.length > 1 ? 's' : ''} como "mal procesada{facturasMalProcesadas.length > 1 ? 's' : ''}"
+              </p>
+              <p className="text-[11px] text-[color:var(--arume-gray-600)] mt-0.5">
+                Son facturas que subiste y la IA leyó mal. Ábrelas en Compras → Bóveda y corrige manualmente.
+              </p>
+            </div>
+            <button onClick={() => onNavigate?.('compras')}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-warn)] text-white hover:brightness-95 transition shrink-0">
+              Revisar ahora →
+            </button>
+          </div>
+        </motion.div>
+      )}
 
       {/* ═════════════ HOY TOCA — alertas accionables solo si hay algo ═════════════ */}
       {(facturasHoy.length > 0 || lowStock.length > 0 || saldoBanco < 1000) && (

@@ -1363,35 +1363,103 @@ const ReviewModal = ({ item, queuePosition, onConfirm, onSkip }: ReviewModalProp
               </div>
             )}
 
-            {/* Total */}
-            <div className="flex items-center justify-between bg-slate-900 px-5 py-4 rounded-2xl">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total</span>
-              <span className="text-2xl font-black text-emerald-400">{Num.fmt(calculatedTotal)}</span>
+            {/* Total — EDITABLE */}
+            <div className="bg-[color:var(--arume-night)] text-[color:var(--arume-paper)] px-5 py-4 rounded-2xl">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] font-black text-white/50 uppercase tracking-widest">Total</span>
+                <span className="text-[10px] text-white/40 uppercase tracking-widest">Edita si la IA se equivocó</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={Num.parse(edited.total) || ''}
+                  placeholder="0.00"
+                  onChange={e => {
+                    const nuevoTotal = parseFloat(e.target.value) || 0;
+                    setEdited((p: any) => {
+                      // Recalcula base e IVA manteniendo el % actual (por defecto 10)
+                      const ivaPrev  = Num.parse(p.iva ?? p.taxes ?? p.tax ?? 0);
+                      const basePrev = Num.parse(p.base ?? 0);
+                      const pct = basePrev > 0 && ivaPrev > 0
+                        ? Math.round((ivaPrev / basePrev) * 100) <= 5 ? 4
+                          : Math.round((ivaPrev / basePrev) * 100) <= 12 ? 10 : 21
+                        : 10;
+                      const nuevaBase = Num.round2(nuevoTotal / (1 + pct / 100));
+                      const nuevoIva  = Num.round2(nuevoTotal - nuevaBase);
+                      return {
+                        ...p,
+                        total: String(nuevoTotal),
+                        base: nuevaBase,
+                        iva: nuevoIva,
+                        taxes: nuevoIva,
+                        tax: String(nuevoIva),
+                      };
+                    });
+                  }}
+                  className="flex-1 text-3xl font-black bg-transparent text-[color:var(--arume-gold)] placeholder-white/30 outline-none tabular-nums"
+                />
+                <span className="text-xl text-white/40">€</span>
+              </div>
+              {/* Si hay líneas, muestra también el total calculado de líneas para comparar */}
+              {isAlbaran && Array.isArray(edited.items) && edited.items.length > 0 && (
+                <p className="text-[10px] text-white/40 mt-2">
+                  Suma de líneas: {Num.fmt(calculatedTotal)}
+                  {Math.abs(calculatedTotal - Num.parse(edited.total)) > 0.05 && ' · NO cuadra con el total declarado'}
+                </p>
+              )}
             </div>
 
+            {/* Aviso de descuadre líneas vs total */}
             {isAlbaran && edited.items && Math.abs(calculatedTotal - Num.parse(edited.total)) > 0.05 && (
-              <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs font-bold text-amber-700">
-                <AlertTriangle className="w-4 h-4 shrink-0" />
-                El total calculado ({Num.fmt(calculatedTotal)}) difiere del original ({Num.fmt(Num.parse(edited.total))}). Se guardará el total calculado.
+              <div className="flex items-center gap-2 bg-[color:var(--arume-warn)]/10 border border-[color:var(--arume-warn)]/30 rounded-xl px-4 py-3 text-xs font-medium text-[color:var(--arume-ink)]">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-[color:var(--arume-warn)]" />
+                <span>
+                  La suma de líneas ({Num.fmt(calculatedTotal)}) no cuadra con el total ({Num.fmt(Num.parse(edited.total))}).
+                  Revisa líneas o IVA. <b>Se guardará el total que indiques arriba.</b>
+                </span>
               </div>
             )}
+
+            {/* Checkbox "marcar para revisar" */}
+            <div className="flex items-start gap-2 bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-200)] rounded-xl p-3">
+              <input
+                type="checkbox"
+                id="needs-review"
+                checked={!!edited.needs_review}
+                onChange={e => setEdited((p: any) => ({ ...p, needs_review: e.target.checked }))}
+                className="mt-0.5 w-4 h-4 accent-[color:var(--arume-warn)]"
+              />
+              <label htmlFor="needs-review" className="flex-1 cursor-pointer">
+                <p className="text-xs font-semibold text-[color:var(--arume-ink)]">⚠️ Marcar como "mal procesada"</p>
+                <p className="text-[11px] text-[color:var(--arume-gray-500)] mt-0.5">
+                  Si la IA leyó mal y no estás segura, márcala. Aparecerá en el Dashboard como pendiente de revisar.
+                </p>
+              </label>
+            </div>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50/50 shrink-0">
-          <button onClick={onSkip} className="flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-200 transition">
-            <SkipForward className="w-4 h-4" /> Descartar este documento
+        <div className="flex items-center justify-between px-6 py-4 border-t border-[color:var(--arume-gray-100)] bg-[color:var(--arume-gray-50)] shrink-0">
+          <button onClick={onSkip} className="flex items-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gray-600)] border border-[color:var(--arume-gray-200)] hover:bg-white transition">
+            <SkipForward className="w-3.5 h-3.5" /> Descartar
           </button>
           <button
             onClick={() => {
-              const finalResult = { ...edited, total: String(calculatedTotal) };
-              if (isAlbaran) finalResult.total = String(calculatedTotal);
+              // El usuario ya editó edited.total directamente en el input.
+              // Para albaranes con líneas, si NO ha tocado total, usa el calculado;
+              // si lo ha editado, respeta su edición.
+              const totalFinal = Num.parse(edited.total) > 0
+                ? Num.parse(edited.total)
+                : calculatedTotal;
+              const finalResult = { ...edited, total: String(totalFinal) };
               onConfirm(finalResult);
             }}
-            className="flex items-center gap-2 px-8 py-3 rounded-xl text-sm font-black bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] hover:bg-[color:var(--arume-gray-700)] transition shadow-lg shadow-indigo-200 active:scale-95"
+            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] hover:bg-[color:var(--arume-gray-700)] transition active:scale-[0.98]"
           >
-            <Check className="w-4 h-4" /> Confirmar y guardar
+            <Check className="w-3.5 h-3.5" /> Confirmar y guardar
           </button>
         </div>
       </motion.div>

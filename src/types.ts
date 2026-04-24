@@ -103,6 +103,8 @@ export interface Factura {
   irpfAmount?: NumericValue; // importe retención IRPF
   uploaded_gestoria?: boolean; // marcada como subida a Bilky/gestoría
   fecha_upload_gestoria?: string; // fecha en que se marcó como subida
+  needs_review?: boolean;      // usuaria marcó al importar: IA leyó mal, revisar
+  reviewed?: boolean;          // ya revisada y corregida manualmente
 }
 
 export interface FacturaExtended extends Factura {
