@@ -16,6 +16,7 @@ import { DailyBriefing } from './DailyBriefing';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AnimatedNumber } from './AnimatedNumber';
 import { Skeleton, RowSkeleton } from './Skeleton';
+import { proximasFestividades } from '../services/festividades';
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 interface DashboardViewProps {
@@ -393,6 +394,10 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
   // ── Facturas marcadas "mal procesadas" por la usuaria al subirlas ─────
   const facturasMalProcesadas = facturas.filter((f: any) => f.needs_review === true && !f.reviewed);
 
+  // ── 🎉 Próxima festividad (dentro de 14 días) para avisar de marketing
+  const proximasFiestas = useMemo(() => proximasFestividades(14), []);
+  const proximaFiesta = proximasFiestas.find(f => f.relevancia >= 2) || proximasFiestas[0];
+
   // ── Detección de DUPLICADOS (facturas y albaranes) ──
   // Agrupa por proveedor+nº+total. Si hay ≥2 con misma clave → duplicado.
   const duplicados = useMemo(() => {
@@ -529,6 +534,37 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
           </button>
         </div>
       </div>
+
+      {/* ═════════════ BANNER PRÓXIMA FESTIVIDAD ═════════════ */}
+      {proximaFiesta && (
+        <motion.button
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          onClick={() => onNavigate?.('marketing')}
+          className="w-full bg-gradient-to-r from-[color:var(--arume-gold)]/15 via-[color:var(--arume-gold)]/25 to-[color:var(--arume-accent)]/10 border border-[color:var(--arume-gold)]/40 rounded-2xl p-4 flex items-center gap-3 hover:brightness-105 transition text-left group"
+        >
+          <div className="text-4xl hero-breathing-text">{proximaFiesta.emoji}</div>
+          <div className="flex-1">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-accent)]">
+              {proximaFiesta.diasRestantes === 0 ? '🔥 Hoy es' :
+                proximaFiesta.diasRestantes === 1 ? '⏰ Mañana es' :
+                `📆 En ${proximaFiesta.diasRestantes} días`}
+            </p>
+            <p className="font-serif text-xl font-semibold text-[color:var(--arume-ink)] mt-0.5">
+              {proximaFiesta.nombre}
+            </p>
+            <p className="text-[11px] text-[color:var(--arume-gray-600)] mt-0.5 italic">
+              💡 {proximaFiesta.sugerencia}
+            </p>
+          </div>
+          <div className="shrink-0 flex flex-col items-end gap-1">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] group-hover:bg-[color:var(--arume-gold)] group-hover:text-[color:var(--arume-ink)] transition">
+              <Sparkles className="w-3.5 h-3.5 ai-pulse"/> Crear historia
+            </span>
+            <span className="text-[10px] text-[color:var(--arume-gray-400)]">Agente Auto Marketing</span>
+          </div>
+        </motion.button>
+      )}
 
       {/* ═════════════ BANNER DUPLICADOS ═════════════ */}
       {duplicados.total > 0 && (

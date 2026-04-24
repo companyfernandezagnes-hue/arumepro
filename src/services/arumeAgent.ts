@@ -1078,6 +1078,20 @@ export class ArumeAgent {
       lines.push(`⚠️ Descuadre caja ayer: ${Num.fmt(cierreAyer.descuadre)}`);
     }
 
+    // 🎉 Festividad próxima (≤7 días) — avisar para preparar marketing
+    try {
+      const { proximasFestividades } = await import('./festividades');
+      const festis = proximasFestividades(7);
+      const fiesta = festis.find(f => f.relevancia >= 2) || festis[0];
+      if (fiesta) {
+        const when = fiesta.diasRestantes === 0 ? 'HOY'
+          : fiesta.diasRestantes === 1 ? 'mañana'
+          : `en ${fiesta.diasRestantes} días`;
+        lines.push('');
+        lines.push(`${fiesta.emoji} *${fiesta.nombre}* ${when} — ¿preparas post?`);
+      }
+    } catch {}
+
     lines.push('');
     lines.push(`¡A por el día! 💪`);
 
