@@ -190,6 +190,10 @@ const classifyError=(msg:string):{retryable:boolean;friendly:string;waitMs?:numb
     return{retryable:true,friendly:'Tiempo agotado → reintentando…'};
   if(msg.includes('Failed to fetch')||msg.includes('NetworkError'))
     return{retryable:true,friendly:'Sin conexión → reintentando cuando se recupere la red…'};
+  // Solo mostrar "falta API key" cuando REALMENTE no hay key configurada
+  if(msg.includes('sin API key configurada') && msg.includes('Gemini:'))
+    return{retryable:false,friendly:'GEMINI_KEY_MISSING'};
+  // Fallback legacy por si aparece el mensaje antiguo
   if(msg.includes('No hay ningún proveedor'))
     return{retryable:false,friendly:'GEMINI_KEY_MISSING'};
   if(msg.includes('Formato de archivo'))

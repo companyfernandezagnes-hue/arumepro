@@ -144,34 +144,60 @@ export const scanDocument = async (
 
   if (!isImage && !isPDF) throw new Error('Solo se admiten imágenes y PDFs.');
 
+  // 🩺 Recopilamos el error específico de cada proveedor para surfacearlos al
+  // final en vez de un mensaje genérico inútil (como hace scanBase64).
+  const errors: string[] = [];
+
   const gemKey = keys.gemini();
   if (gemKey) {
     try {
       return await _scanWithGemini(file, prompt, gemKey, isImage);
-    } catch (e) {
-      console.warn('[aiProviders] Gemini falló, probando Mistral…', e);
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      console.warn('[aiProviders] Gemini falló en scanDocument:', msg);
+      errors.push(`Gemini: ${msg}`);
     }
+  } else {
+    errors.push('Gemini: sin API key configurada');
   }
 
   const misKey = keys.mistral();
   if (misKey && isImage) {
     try {
       return await _scanWithMistral(file, prompt, misKey);
-    } catch (e) {
-      console.warn('[aiProviders] Mistral falló, probando Groq Vision…', e);
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      console.warn('[aiProviders] Mistral falló en scanDocument:', msg);
+      errors.push(`Mistral: ${msg}`);
     }
+  } else if (!misKey) {
+    errors.push('Mistral: sin API key configurada');
+  } else if (!isImage) {
+    errors.push('Mistral: solo soporta imágenes, no PDFs');
   }
 
   const groqKey = keys.groq();
   if (groqKey && isImage) {
     try {
       return await _scanWithGroqVision(file, prompt, groqKey);
-    } catch (e) {
-      console.warn('[aiProviders] Groq Vision falló.', e);
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      console.warn('[aiProviders] Groq Vision falló en scanDocument:', msg);
+      errors.push(`Groq: ${msg}`);
     }
+  } else if (!groqKey) {
+    errors.push('Groq: sin API key configurada');
+  } else if (!isImage) {
+    errors.push('Groq: solo soporta imágenes, no PDFs');
   }
 
-  throw new Error('No hay ningún proveedor de visión configurado o todos fallaron. Añade una API Key en Ajustes.');
+  throw new Error(
+    `No se pudo escanear con ningún proveedor de visión.\n\n` +
+    errors.map(e => `• ${e}`).join('\n') +
+    (isPDF && errors[0]?.startsWith('Gemini:')
+      ? '\n\n⚠️ IMPORTANTE: Mistral y Groq NO soportan PDFs. Para PDFs solo sirve Gemini.'
+      : '')
+  );
 };
 
 /**
@@ -269,9 +295,39 @@ const _scanWithGemini = async (
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
     { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
   );
-  if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
+  if (!res.ok) {
+    const errJson = await res.json().catch(() => ({} as any));
+    const errMsg = errJson?.error?.message || `HTTP ${res.status}`;
+    throw new Error(`Gemini Vision: ${errMsg}`);
+  }
   const data = await res.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+  // 🩺 Mismo diagnóstico que _scanBase64WithGemini — detectar SAFETY,
+  // MAX_TOKENS, promptFeedback, respuesta vacía, etc.
+  const candidate = data.candidates?.[0];
+  const promptFeedback = data.promptFeedback;
+  if (promptFeedback?.blockReason) {
+    console.error('[Gemini Vision scanDocument] Prompt bloqueado:', promptFeedback);
+    throw new Error(`Gemini bloqueó la petición: ${promptFeedback.blockReason}. Prueba con otra imagen.`);
+  }
+  if (!candidate) {
+    console.error('[Gemini Vision scanDocument] Sin candidates:', data);
+    throw new Error('Gemini no devolvió resultado (posible cuota agotada o imagen corrupta).');
+  }
+  if (candidate.finishReason && candidate.finishReason !== 'STOP') {
+    console.warn('[Gemini Vision scanDocument] finishReason:', candidate.finishReason, data);
+    if (candidate.finishReason === 'MAX_TOKENS') {
+      throw new Error('Gemini se cortó (MAX_TOKENS). La imagen/PDF es demasiado grande o compleja.');
+    }
+    if (candidate.finishReason === 'SAFETY') {
+      throw new Error('Gemini bloqueó por seguridad. Prueba con otra imagen.');
+    }
+  }
+  const text = candidate.content?.parts?.[0]?.text || '';
+  if (!text.trim()) {
+    console.error('[Gemini Vision scanDocument] Respuesta vacía:', data);
+    throw new Error('Gemini devolvió respuesta vacía. La imagen puede ser ilegible.');
+  }
   return { raw: parseJSON(text), provider: 'gemini', model };
 };
 
