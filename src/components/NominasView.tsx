@@ -9,6 +9,7 @@ import {
   Clock, AlertCircle, CheckCircle2, Plus, Upload, Loader2, Sparkles,
 } from 'lucide-react';
 import { scanBase64 } from '../services/aiProviders';
+import { pdfFirstPageToImage } from '../services/pdfToImage';
 import { AnimatedNumber } from './AnimatedNumber';
 import { triggerConfetti } from './Confetti';
 import { motion, AnimatePresence } from 'motion/react';
@@ -291,15 +292,30 @@ Todos los importes SIN símbolo €, con punto decimal. Si algún campo no apare
       const file = fileList[i];
       setImportProgress(`Leyendo ${i + 1}/${fileList.length}: ${file.name}`);
       try {
-        // Convertir a base64
-        const b64: string = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.onerror = () => reject(new Error('Error leyendo archivo'));
-          reader.readAsDataURL(file);
-        });
+        // Si es PDF, convertimos la primera página a imagen JPEG.
+        // Así cualquier proveedor de visión (Gemini/Mistral/Groq) puede procesarlo,
+        // y no dependemos solo de Gemini (que a veces está saturado).
+        let b64: string;
+        let mimeType: string;
+        const isPdf = (file.type || '').includes('pdf') || file.name.toLowerCase().endsWith('.pdf');
 
-        const scan = await scanBase64(b64, file.type || 'application/pdf', prompt);
+        if (isPdf) {
+          setImportProgress(`Convirtiendo PDF ${i + 1}/${fileList.length}: ${file.name}`);
+          const img = await pdfFirstPageToImage(file);
+          b64 = img.base64;
+          mimeType = img.mimeType;
+          setImportProgress(`Leyendo ${i + 1}/${fileList.length}: ${file.name}`);
+        } else {
+          b64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = () => reject(new Error('Error leyendo archivo'));
+            reader.readAsDataURL(file);
+          });
+          mimeType = file.type || 'image/jpeg';
+        }
+
+        const scan = await scanBase64(b64, mimeType, prompt);
         // scanBase64 devuelve raw como objeto JSON ya parseado (o {} si falló el parseo).
         // Los campos están directamente accesibles, no dentro de .copy.
         const parsed: any = scan?.raw && typeof scan.raw === 'object' ? scan.raw : {};
