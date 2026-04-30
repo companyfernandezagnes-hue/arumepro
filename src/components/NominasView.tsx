@@ -253,7 +253,7 @@ export const NominasView: React.FC<Props> = ({ data, onSave }) => {
       ssEmpresa: parseFloat(fd.get('ssEmpresa') as string) || 0,
       costeTotalEmpresa: 0,
     };
-    nomina.costeTotalEmpresa = Num.round2(nomina.liquido + nomina.ssEmpresa);
+    nomina.costeTotalEmpresa = Num.round2(nomina.bruto + nomina.ssEmpresa);
 
     const newData = JSON.parse(JSON.stringify(data));
     if (!newData.nominas_registro) newData.nominas_registro = [];
@@ -265,9 +265,9 @@ export const NominasView: React.FC<Props> = ({ data, onSave }) => {
 
   // ── Importar nóminas del mes con IA (OCR + extracción estructurada) ──
   const handleBulkImportNominas = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
+    const fileList = Array.from(e.target.files || []);
     e.target.value = '';
-    if (!files || files.length === 0) return;
+    if (fileList.length === 0) return;
 
     setIsImporting(true);
     setImportResults([]);
@@ -287,9 +287,9 @@ export const NominasView: React.FC<Props> = ({ data, onSave }) => {
 }
 Todos los importes SIN símbolo €, con punto decimal. Si algún campo no aparece, usa 0.`;
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      setImportProgress(`Leyendo ${i + 1}/${files.length}: ${file.name}`);
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      setImportProgress(`Leyendo ${i + 1}/${fileList.length}: ${file.name}`);
       try {
         // Convertir a base64
         const b64: string = await new Promise((resolve, reject) => {
@@ -320,7 +320,9 @@ Todos los importes SIN símbolo €, con punto decimal. Si algún campo no apare
         const irpf = Num.parse(parsed.irpf_retenido || parsed.irpf || 0);
         const ssEmp = Num.parse(parsed.ss_empleado || 0);
         const liquido = Num.parse(parsed.liquido || (bruto - irpf - ssEmp));
-        const ssEmpresa = Num.parse(parsed.ss_empresa || 0);
+        const ssEmpresaRaw = Num.parse(parsed.ss_empresa || 0);
+        // Si la nómina no incluye SS empresa (habitual), estimamos ~30% del bruto
+        const ssEmpresa = ssEmpresaRaw > 0 ? ssEmpresaRaw : Num.round2(bruto * 0.30);
 
         if (!nombre || !mes || !/^\d{4}-\d{2}$/.test(mes)) {
           results.push({
@@ -349,7 +351,7 @@ Todos los importes SIN símbolo €, con punto decimal. Si algún campo no apare
           ssEmpleado: Num.round2(ssEmp),
           liquido: Num.round2(liquido),
           ssEmpresa: Num.round2(ssEmpresa),
-          costeTotalEmpresa: Num.round2(liquido + ssEmpresa),
+          costeTotalEmpresa: Num.round2(bruto + ssEmpresa),
         };
 
         nuevas.push(nomina);
@@ -371,10 +373,11 @@ Todos los importes SIN símbolo €, con punto decimal. Si algún campo no apare
           });
         }
 
+        const ssNote = ssEmpresaRaw === 0 ? ' · SS empresa estimada (30%)' : '';
         results.push({
           name: file.name,
           status: 'ok',
-          msg: `${nomina.nombre} · ${mes} · Líquido ${Num.fmt(nomina.liquido)}${esNuevo ? ' · 🆕 ficha creada (completar desde gestoría)' : ''}`,
+          msg: `${nomina.nombre} · ${mes} · Líquido ${Num.fmt(nomina.liquido)} · Coste empresa ${Num.fmt(nomina.costeTotalEmpresa)}${ssNote}${esNuevo ? ' · 🆕 ficha creada (completar desde gestoría)' : ''}`,
         });
       } catch (err: any) {
         results.push({ name: file.name, status: 'error', msg: err?.message || 'Error al procesar' });
