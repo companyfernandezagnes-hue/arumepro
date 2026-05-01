@@ -292,40 +292,56 @@ Todos los importes SIN símbolo €, con punto decimal. Si algún campo no apare
       const file = fileList[i];
       setImportProgress(`Leyendo ${i + 1}/${fileList.length}: ${file.name}`);
       try {
-        // Si es PDF, convertimos la primera página a imagen JPEG.
-        // Así cualquier proveedor de visión (Gemini/Mistral/Groq) puede procesarlo,
-        // y no dependemos solo de Gemini (que a veces está saturado).
-        let b64: string;
-        let mimeType: string;
         const isPdf = (file.type || '').includes('pdf') || file.name.toLowerCase().endsWith('.pdf');
 
-        if (isPdf) {
-          setImportProgress(`Convirtiendo PDF ${i + 1}/${fileList.length}: ${file.name}`);
-          const img = await pdfFirstPageToImage(file);
-          b64 = img.base64;
-          mimeType = img.mimeType;
-          setImportProgress(`Leyendo ${i + 1}/${fileList.length}: ${file.name}`);
-        } else {
-          b64 = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result as string);
-            reader.onerror = () => reject(new Error('Error leyendo archivo'));
-            reader.readAsDataURL(file);
-          });
-          mimeType = file.type || 'image/jpeg';
+        // Estrategia: 1º intentar como PDF nativo (mejor calidad en Gemini),
+        // 2º si devuelve vacío, convertir a imagen y reintentar.
+        const readAsDataUrl = (f: File) => new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error('Error leyendo archivo'));
+          reader.readAsDataURL(f);
+        });
+
+        let scan: any = null;
+        let parsed: any = {};
+        let lastProvider = '';
+
+        // 1) Intento con el archivo original (PDF como PDF, imagen como imagen)
+        try {
+          const b64 = await readAsDataUrl(file);
+          scan = await scanBase64(b64, file.type || (isPdf ? 'application/pdf' : 'image/jpeg'), prompt);
+          lastProvider = scan?.provider || '';
+          parsed = scan?.raw && typeof scan.raw === 'object' ? scan.raw : {};
+        } catch (firstErr: any) {
+          console.warn('[NominasImport] Primer intento falló:', firstErr?.message);
         }
 
-        const scan = await scanBase64(b64, mimeType, prompt);
-        // scanBase64 devuelve raw como objeto JSON ya parseado (o {} si falló el parseo).
-        // Los campos están directamente accesibles, no dentro de .copy.
-        const parsed: any = scan?.raw && typeof scan.raw === 'object' ? scan.raw : {};
+        // 2) Fallback: si es PDF y no se obtuvo nada, convertir a imagen y reintentar
+        if (isPdf && Object.keys(parsed).length === 0) {
+          try {
+            setImportProgress(`Reintentando como imagen ${i + 1}/${fileList.length}: ${file.name}`);
+            const img = await pdfFirstPageToImage(file, 2.5);
+            scan = await scanBase64(img.base64, img.mimeType, prompt);
+            lastProvider = scan?.provider || lastProvider;
+            parsed = scan?.raw && typeof scan.raw === 'object' ? scan.raw : {};
+          } catch (secondErr: any) {
+            console.warn('[NominasImport] Fallback imagen falló:', secondErr?.message);
+            results.push({
+              name: file.name,
+              status: 'error',
+              msg: `Sin proveedor disponible. ${secondErr?.message || ''}`.slice(0, 220),
+            });
+            continue;
+          }
+        }
 
-        // Si el objeto está vacío, la IA no devolvió JSON → mostrar error claro
+        // Si el objeto está vacío tras ambos intentos, la IA no devolvió JSON
         if (Object.keys(parsed).length === 0) {
           results.push({
             name: file.name,
             status: 'error',
-            msg: `La IA (${scan?.provider || 'sin proveedor'}) no devolvió datos. ¿PDF legible?`,
+            msg: `La IA (${lastProvider || scan?.provider || 'sin proveedor'}) no devolvió datos tras 2 intentos (PDF nativo + imagen). ¿PDF legible?`,
           });
           continue;
         }
