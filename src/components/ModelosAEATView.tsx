@@ -68,6 +68,10 @@ function formatPeriodo(m: ModeloAEAT): string {
   return String(m.anio);
 }
 
+// Año mínimo del ejercicio fiscal — Arume empezó en 2025, no se generan
+// modelos pendientes anteriores a este año.
+const ANIO_INICIO_EJERCICIO = 2025;
+
 // ─── Generador de vencimientos pendientes ──────────────────────────────────
 // Devuelve los modelos pendientes desde el trimestre anterior hasta el actual + 1
 function generarPendientes(presentados: ModeloAEAT[]): ModeloAEAT[] {
@@ -87,6 +91,8 @@ function generarPendientes(presentados: ModeloAEAT[]): ModeloAEAT[] {
     const anioOffset = anioActual + Math.floor(q / 4);
     const trimOffset = ((q % 4) + 4) % 4 + 1 as 1|2|3|4;
 
+    if (anioOffset < ANIO_INICIO_EJERCICIO) continue;
+
     for (const info of CATALOGO.filter(c => c.frecuencia === 'trimestral')) {
       const key = `${info.id}__${anioOffset}__${trimOffset}`;
       if (presentadoKey.has(key)) continue;
@@ -104,8 +110,9 @@ function generarPendientes(presentados: ModeloAEAT[]): ModeloAEAT[] {
     }
   }
 
-  // Anuales (solo cuando aplica: generar los 2 últimos años)
+  // Anuales (solo cuando aplica: generar los 2 últimos años, respetando inicio ejercicio)
   for (const anio of [anioActual - 2, anioActual - 1, anioActual]) {
+    if (anio < ANIO_INICIO_EJERCICIO) continue;
     for (const info of CATALOGO.filter(c => c.frecuencia === 'anual')) {
       const key = `${info.id}__${anio}__`;
       if (presentadoKey.has(key)) continue;
