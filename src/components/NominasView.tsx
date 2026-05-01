@@ -276,17 +276,27 @@ export const NominasView: React.FC<Props> = ({ data, onSave }) => {
     const nuevas: NominaRegistro[] = [];
     const nuevosTrabajadores: Trabajador[] = [];
 
-    const prompt = `Eres un experto en nóminas españolas. Extrae de esta nómina los siguientes campos y devuelve SOLO un JSON válido sin markdown ni comentarios:
+    const prompt = `Eres un experto en nóminas españolas. Este documento puede contener UNA o VARIAS nóminas (una por empleado, normalmente una por página). Extrae TODAS las nóminas del documento y devuelve SOLO un JSON válido sin markdown ni comentarios con esta estructura exacta:
 {
-  "nombre_trabajador": "nombre completo del empleado",
-  "mes": "YYYY-MM del periodo de la nómina",
-  "bruto": número (devengos brutos totales),
-  "irpf_retenido": número (retención IRPF en euros),
-  "ss_empleado": número (aportación del trabajador a la SS),
-  "liquido": número (líquido a percibir),
-  "ss_empresa": número (coste SS a cargo de la empresa, si aparece; 0 si no)
+  "nominas": [
+    {
+      "nombre_trabajador": "nombre completo del empleado tal como aparece (APELLIDOS, NOMBRE)",
+      "mes": "YYYY-MM del periodo de la nómina",
+      "categoria": "categoría profesional / puesto (ej: Cocinero, Camarero, AyudCocina)",
+      "bruto": número (TOTAL DEVENGO de la nómina),
+      "irpf_retenido": número (RETENCION IRPF en euros),
+      "irpf_pct": número (porcentaje IRPF aplicado, ej: 15.24),
+      "ss_empleado": número (suma de DTO. CONT. COMUNES + DTO. BASE ACCIDENTE),
+      "liquido": número (LIQUIDO TOTAL A PERCIBIR),
+      "ss_empresa": número (suma de aportaciones de la empresa: contingencias comunes + AT y EP + desempleo + formación profesional + fondo garantía salarial)
+    }
+  ]
 }
-Todos los importes SIN símbolo €, con punto decimal. Si algún campo no aparece, usa 0.`;
+Reglas estrictas:
+- Devuelve SIEMPRE el array "nominas", incluso si solo hay una nómina.
+- Procesa CADA página del PDF como una nómina diferente si tiene distinto nombre de trabajador.
+- Todos los importes SIN símbolo €, con punto decimal (no coma).
+- Si un campo no aparece, usa 0 o cadena vacía según corresponda.`;
 
     for (let i = 0; i < fileList.length; i++) {
       const file = fileList[i];
@@ -346,71 +356,93 @@ Todos los importes SIN símbolo €, con punto decimal. Si algún campo no apare
           continue;
         }
 
-        const nombre = String(parsed.nombre_trabajador || parsed.nombre || '').trim();
-        const mes = String(parsed.mes || '').trim().slice(0, 7);
-        const bruto = Num.parse(parsed.bruto || 0);
-        const irpf = Num.parse(parsed.irpf_retenido || parsed.irpf || 0);
-        const ssEmp = Num.parse(parsed.ss_empleado || 0);
-        const liquido = Num.parse(parsed.liquido || (bruto - irpf - ssEmp));
-        const ssEmpresaRaw = Num.parse(parsed.ss_empresa || 0);
-        // Si la nómina no incluye SS empresa (habitual), estimamos ~30% del bruto
-        const ssEmpresa = ssEmpresaRaw > 0 ? ssEmpresaRaw : Num.round2(bruto * 0.30);
+        // Soporta varias nóminas por archivo (una nómina por página) o una sola
+        const items: any[] = Array.isArray(parsed.nominas) && parsed.nominas.length > 0
+          ? parsed.nominas
+          : [parsed];
 
-        if (!nombre || !mes || !/^\d{4}-\d{2}$/.test(mes)) {
+        let okEnArchivo = 0;
+        let errEnArchivo = 0;
+        const nombresOk: string[] = [];
+
+        for (let j = 0; j < items.length; j++) {
+          const item = items[j];
+          const nombre = String(item.nombre_trabajador || item.nombre || '').trim();
+          const mes = String(item.mes || '').trim().slice(0, 7);
+          const categoria = String(item.categoria || item.puesto || '').trim();
+          const bruto = Num.parse(item.bruto || 0);
+          const irpf = Num.parse(item.irpf_retenido || item.irpf || 0);
+          const irpfPct = Num.parse(item.irpf_pct || (bruto > 0 ? (irpf / bruto) * 100 : 0));
+          const ssEmp = Num.parse(item.ss_empleado || 0);
+          const liquido = Num.parse(item.liquido || (bruto - irpf - ssEmp));
+          const ssEmpresaRaw = Num.parse(item.ss_empresa || 0);
+          // Si la nómina no incluye SS empresa, estimamos ~30% del bruto
+          const ssEmpresa = ssEmpresaRaw > 0 ? ssEmpresaRaw : Num.round2(bruto * 0.30);
+
+          if (!nombre || !mes || !/^\d{4}-\d{2}$/.test(mes)) {
+            errEnArchivo++;
+            continue;
+          }
+
+          // Buscar trabajador existente por nombre (match flexible)
+          const nomLow = nombre.toLowerCase();
+          const trab = plantilla.find(t =>
+            t.nombre.toLowerCase().includes(nomLow) || nomLow.includes(t.nombre.toLowerCase())
+          ) || nuevosTrabajadores.find(t =>
+            t.nombre.toLowerCase().includes(nomLow) || nomLow.includes(t.nombre.toLowerCase())
+          );
+
+          const trabajadorIdFinal = trab?.id || `trab-auto-${Date.now()}-${i}-${j}`;
+          const esNuevo = !trab;
+
+          const nomina: NominaRegistro = {
+            id: `nom-${Date.now()}-${i}-${j}`,
+            mes,
+            trabajadorId: trabajadorIdFinal,
+            nombre: trab?.nombre || nombre,
+            bruto: Num.round2(bruto),
+            irpfRetenido: Num.round2(irpf),
+            ssEmpleado: Num.round2(ssEmp),
+            liquido: Num.round2(liquido),
+            ssEmpresa: Num.round2(ssEmpresa),
+            costeTotalEmpresa: Num.round2(bruto + ssEmpresa),
+          };
+
+          nuevas.push(nomina);
+          okEnArchivo++;
+          nombresOk.push(nombre.split(',')[0]);
+
+          if (esNuevo) {
+            nuevosTrabajadores.push({
+              id: trabajadorIdFinal,
+              nombre,
+              puesto: categoria,
+              contrato: 'indefinido',
+              jornada: 'completa',
+              fechaAlta: `${mes}-01`,
+              salarioBrutoAnual: 0,
+              grupoSS: '',
+              irpfPct: Num.round2(irpfPct),
+              activo: true,
+              notas: 'Creado automáticamente al importar nómina con IA — completar datos con la gestoría',
+            });
+          }
+        }
+
+        if (okEnArchivo === 0) {
           results.push({
             name: file.name,
             status: 'error',
-            msg: `No se extrajo nombre o mes válido (leído: ${nombre || '¿?'} / ${mes || '¿?'})`,
+            msg: `No se extrajo ninguna nómina válida (la IA devolvió ${items.length} ítem(s) pero ninguno tenía nombre + mes válidos)`,
           });
-          continue;
-        }
-
-        // Buscar trabajador existente por nombre (match flexible)
-        const nomLow = nombre.toLowerCase();
-        const trab = plantilla.find(t => t.nombre.toLowerCase().includes(nomLow) || nomLow.includes(t.nombre.toLowerCase()));
-
-        // Si no existe, marcamos para auto-crear ficha mínima en plantilla
-        const trabajadorIdFinal = trab?.id || `trab-auto-${Date.now()}-${i}`;
-        const esNuevo = !trab;
-
-        const nomina: NominaRegistro = {
-          id: `nom-${Date.now()}-${i}`,
-          mes,
-          trabajadorId: trabajadorIdFinal,
-          nombre: trab?.nombre || nombre,
-          bruto: Num.round2(bruto),
-          irpfRetenido: Num.round2(irpf),
-          ssEmpleado: Num.round2(ssEmp),
-          liquido: Num.round2(liquido),
-          ssEmpresa: Num.round2(ssEmpresa),
-          costeTotalEmpresa: Num.round2(bruto + ssEmpresa),
-        };
-
-        nuevas.push(nomina);
-
-        if (esNuevo) {
-          // Guardamos una ficha mínima que se creará al guardar en lote
-          nuevosTrabajadores.push({
-            id: trabajadorIdFinal,
-            nombre,
-            puesto: '',
-            contrato: 'indefinido',
-            jornada: 'completa',
-            fechaAlta: `${mes}-01`,
-            salarioBrutoAnual: 0,
-            grupoSS: '',
-            irpfPct: bruto > 0 ? Num.round2((irpf / bruto) * 100) : 0,
-            activo: true,
-            notas: 'Creado automáticamente al importar nómina con IA — completar datos con la gestoría',
+        } else {
+          const resumen = nombresOk.slice(0, 3).join(', ') + (nombresOk.length > 3 ? `… +${nombresOk.length - 3}` : '');
+          results.push({
+            name: file.name,
+            status: 'ok',
+            msg: `${okEnArchivo} nómina${okEnArchivo !== 1 ? 's' : ''} extraída${okEnArchivo !== 1 ? 's' : ''}${errEnArchivo > 0 ? ` (${errEnArchivo} con errores)` : ''} · ${resumen}`,
           });
         }
-
-        const ssNote = ssEmpresaRaw === 0 ? ' · SS empresa estimada (30%)' : '';
-        results.push({
-          name: file.name,
-          status: 'ok',
-          msg: `${nomina.nombre} · ${mes} · Líquido ${Num.fmt(nomina.liquido)} · Coste empresa ${Num.fmt(nomina.costeTotalEmpresa)}${ssNote}${esNuevo ? ' · 🆕 ficha creada (completar desde gestoría)' : ''}`,
-        });
       } catch (err: any) {
         results.push({ name: file.name, status: 'error', msg: err?.message || 'Error al procesar' });
       }
