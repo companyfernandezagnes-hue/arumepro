@@ -1,10 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  TrendingUp, TrendingDown, ChevronLeft, ChevronRight, 
+import {
+  TrendingUp, TrendingDown, ChevronLeft, ChevronRight,
   Building2, Hotel, ShoppingBag, Users, Brain,
   BarChart3, Landmark, Target, FolderOpen, Trophy,
-  Sparkles, FileText, Loader2, X, Receipt, Globe
+  Sparkles, FileText, Loader2, X, Receipt, Globe, Calculator
 } from 'lucide-react';
 const FileSpreadsheet = FileText;
 
@@ -15,6 +15,7 @@ import { ArumeEngine, Num } from '../services/engine';
 import { cn } from '../lib/utils';
 import { askAI } from '../services/aiProviders';
 import { Modelo303View } from './Modelo303View';
+import { ContableView } from './ContableView';
 import { PackGestoria } from './PackGestoria';
 import { RankingProveedores } from './RankingProveedores';
 import { FlujosEfectivo } from './FlujosEfectivo';
@@ -22,7 +23,7 @@ import { PresupuestoVsReal } from './PresupuestoVsReal';
 import { MultiDivisaView } from './MultiDivisaView';
 
 export type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
-type TabType = 'resultados' | 'fiscal' | 'kpis' | 'carpeta' | 'modelo303' | 'auditoria' | 'comparativa' | 'ranking' | 'flujos' | 'pvsreal' | 'divisas';
+type TabType = 'resultados' | 'fiscal' | 'kpis' | 'carpeta' | 'modelo303' | 'auditoria' | 'comparativa' | 'ranking' | 'flujos' | 'pvsreal' | 'divisas' | 'contable';
 
 const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string; bg: string }[] = [
   { id: 'REST', name: 'Restaurante',      icon: Building2,  color: 'text-indigo-600', bg: 'bg-indigo-50'  },
@@ -33,6 +34,7 @@ const BUSINESS_UNITS: { id: BusinessUnit; name: string; icon: any; color: string
 
 const TABS: { id: TabType; label: string; icon: any }[] = [
   { id: 'resultados', label: 'Resultados P&L', icon: BarChart3  },
+  { id: 'contable',   label: 'Modo Contable',  icon: Calculator },
   { id: 'fiscal',     label: 'Cierre Fiscal',  icon: Landmark   },
   { id: 'kpis',       label: 'KPIs & BI',      icon: Target     },
   { id: 'carpeta',    label: 'Carpeta Docs',    icon: FolderOpen },
@@ -529,6 +531,12 @@ Escribe 3 párrafos muy cortos: evalúa la salud, el mayor problema y un consejo
       {activeTab === 'divisas' && onSave && (
         <motion.div initial={{opacity:0,y:8}} animate={{opacity:1,y:0}}>
           <MultiDivisaView data={data} onSave={onSave} />
+        </motion.div>
+      )}
+
+      {activeTab === 'contable' && (
+        <motion.div initial={{opacity:0,y:8}} animate={{opacity:1,y:0}}>
+          <ContableView data={data} />
         </motion.div>
       )}
 
