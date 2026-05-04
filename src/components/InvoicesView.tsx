@@ -550,50 +550,54 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const fetchPendingAudits = async () => {
     setIsSyncing(true);
     try {
-      let allEmails: EmailDraft[] = [];
+      const byId = new Map<string, EmailDraft>();
+      let gmailError: string | undefined;
 
-      // 1. Intentar leer del inbox local (puesto por ArumeAgent → Gmail directo)
+      // 1. Inbox local (puesto por ArumeAgent / sincronizaciones previas)
       try {
         const localInbox = JSON.parse(localStorage.getItem('arume_gmail_inbox') || '[]');
-        if (localInbox.length > 0) {
-          allEmails.push(...localInbox);
-        }
+        for (const e of localInbox) if (e?.id) byId.set(e.id, e);
       } catch { /* ignore */ }
 
-      // 2. Si Gmail directo está autenticado, buscar también en tiempo real
+      // 2. Gmail directo en tiempo real si hay sesión
       if (GmailDirectSync.isAuthenticated()) {
         try {
           const result = await GmailDirectSync.fetchNewEmails(10);
+          if (result.error) gmailError = result.error;
           if (result.emails.length > 0) {
             const drafts = GmailDirectSync.toEmailDrafts(result.emails);
-            const existingIds = new Set(allEmails.map(e => e.id));
-            const nuevos = drafts.filter(d => !existingIds.has(d.id));
-            allEmails.push(...nuevos as any);
-            // Marcar como leídos
-            for (const msg of result.emails) {
-              await GmailDirectSync.markAsRead(msg.id);
-            }
+            for (const d of drafts) if (!byId.has(d.id)) byId.set(d.id, d as any);
+            // Persistimos el inbox para no perderlo al recargar
+            const merged = Array.from(byId.values()).slice(0, 100);
+            localStorage.setItem('arume_gmail_inbox', JSON.stringify(merged));
+            // Marcar como leídos sólo después de almacenarlos
+            for (const msg of result.emails) await GmailDirectSync.markAsRead(msg.id);
           }
-        } catch (err) {
-          console.warn('Gmail directo error:', err);
+        } catch (err: any) {
+          gmailError = err?.message || 'Error de Gmail directo';
         }
       }
 
-      // 3. Fallback: Supabase inbox_gmail (método original)
-      if (allEmails.length === 0) {
+      // 3. Fallback Supabase si no hubo nada en local ni Gmail
+      if (byId.size === 0) {
         try {
           const supaEmails = await fetchNewEmails();
-          allEmails.push(...supaEmails);
+          for (const e of supaEmails) if (e?.id) byId.set(e.id, e);
         } catch { /* ignore */ }
       }
 
+      const allEmails = Array.from(byId.values());
       if (allEmails.length > 0) {
         setEmailAuditInbox(allEmails);
-        toast.success(`📬 ${allEmails.length} PDFs encontrados en el buzón.`);
+        toast.success(`📬 ${allEmails.length} PDFs en el buzón.`);
+      } else if (gmailError) {
+        toast.warning(`⚠️ ${gmailError}`);
       } else {
         toast.warning('📭 No hay PDFs nuevos en el buzón para auditar.');
       }
-    } catch { toast.error('⚠️ Error conectando al buzón.'); }
+    } catch (err: any) {
+      toast.error(`⚠️ Error conectando al buzón: ${err?.message || 'desconocido'}`);
+    }
     setIsSyncing(false);
   };
 
@@ -633,6 +637,13 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
             await onSave(newData);
             await markEmailAsParsed(email.id);
             setEmailAuditInbox(prev => prev.filter(e => e.id !== email.id));
+            // También fuera del estado: limpiar el inbox persistido para que no
+            // reaparezca al volver a "Escanear Buzón".
+            try {
+              const stored = JSON.parse(localStorage.getItem('arume_gmail_inbox') || '[]');
+              const filtered = stored.filter((e: any) => e?.id !== email.id);
+              localStorage.setItem('arume_gmail_inbox', JSON.stringify(filtered));
+            } catch { /* ignore */ }
             toast.success('📎 PDF adjuntado correctamente.');
           }
         }
@@ -652,7 +663,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       if (GmailDirectSync.isAuthenticated()) {
         // Ya autenticado → sincronizar
         const result = await GmailDirectSync.fetchNewEmails(20);
-        if (result.emails.length > 0) {
+        if (result.error) {
+          // Mostrar error real (token expirado, fallo API…) en vez de tragarlo
+          toast.warning(`⚠️ ${result.error}`);
+        } else if (result.emails.length > 0) {
           const drafts = GmailDirectSync.toEmailDrafts(result.emails);
           const existing = JSON.parse(localStorage.getItem('arume_gmail_inbox') || '[]');
           const existingIds = new Set(existing.map((e: any) => e.id));
@@ -673,14 +687,20 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
             toast.warning('⚠️ No se pudo conectar Gmail. Verifica que tengas un Client ID de Google configurado en la pestaña Agente.');
           }
         } catch (err: any) {
-          if (err?.message === 'NO_CLIENT_ID') {
+          const code = err?.message;
+          if (code === 'NO_CLIENT_ID') {
             toast.warning('🔑 Necesitas configurar un Google Client ID en la pestaña Agente para conectar Gmail directamente.');
+          } else if (code === 'GIS_LOAD_FAIL' || code === 'GIS_UNAVAILABLE') {
+            toast.error('❌ No se pudo cargar Google Identity Services. Comprueba tu conexión.');
           } else {
-            toast.error('❌ Error al conectar con Gmail.');
+            toast.error(`❌ Error al conectar con Gmail: ${code || 'desconocido'}`);
           }
         }
       }
-    } catch (err) { toast.error('❌ Error al sincronizar.'); }
+    } catch (err: any) {
+      // Mostrar error real (no un mensaje genérico) para poder diagnosticarlo
+      toast.error(`❌ Error al sincronizar: ${err?.message || 'desconocido'}`);
+    }
     finally { setIsProcessing(false); }
   };
 
@@ -1925,6 +1945,9 @@ Usa punto como separador decimal.`;
                     <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2">{mail.date}</p>
                     <p className="text-sm font-black text-white truncate">{mail.from}</p>
                     <p className="text-[10px] text-slate-400 font-bold truncate mt-1">{mail.subject}</p>
+                    {mail.fileName && (
+                      <p className="text-[10px] text-indigo-300 font-semibold truncate mt-1" title={mail.fileName}>📎 {mail.fileName}</p>
+                    )}
                   </div>
                   <button onClick={() => processEmailAudit(mail)} disabled={isProcessing} className="w-full mt-4 bg-slate-700 hover:bg-blue-600 text-white py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition flex items-center justify-center gap-2">
                     <ShieldCheck className="w-4 h-4" /> Comprobar Cuadre
