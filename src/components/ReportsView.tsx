@@ -609,7 +609,7 @@ Escribe 3 párrafos muy cortos: evalúa la salud, el mayor problema y un consejo
               </button>
             </div>
             <div className="h-56">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minHeight={200}>
                 <BarChart data={comparativaChartData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
                   <XAxis dataKey="name" tick={{ fontSize: 9, fontWeight: 800, fill: '#94a3b8' }} tickLine={false} axisLine={false}/>
                   <Tooltip content={<CustomTooltip/>}/>

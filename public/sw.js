@@ -3,13 +3,15 @@
 // Push Notifications + Offline Cache
 // ==========================================
 
-const CACHE_NAME = 'arume-pro-v1';
-const OFFLINE_URL = '/';
+const CACHE_NAME = 'arume-pro-v2';
+// Derivar la base del scope del propio SW (p.ej. /arumepro/ en GitHub Pages, / en dev)
+const BASE = new URL(self.registration?.scope || self.location.href).pathname;
+const OFFLINE_URL = BASE;
 
 // Assets to cache for offline
 const PRECACHE_URLS = [
-  '/',
-  '/manifest.json',
+  BASE,
+  `${BASE}manifest.json`,
 ];
 
 // ── Install: cache core assets ──
@@ -101,7 +103,7 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const urlToOpen = event.notification.data?.url || '/';
+  const urlToOpen = event.notification.data?.url || BASE;
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {

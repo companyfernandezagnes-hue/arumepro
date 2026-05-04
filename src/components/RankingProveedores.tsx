@@ -310,7 +310,7 @@ export const RankingProveedores: React.FC<Props> = ({ data }) => {
         <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Top 8 proveedores por gasto</p>
           <div className="h-44">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minHeight={80}>
               <BarChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
                 <XAxis dataKey="name" tick={{ fontSize: 8, fontWeight: 800, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
                 <Tooltip
@@ -460,7 +460,7 @@ export const RankingProveedores: React.FC<Props> = ({ data }) => {
                             <div>
                               <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Evolución mensual</p>
                               <div className="h-24">
-                                <ResponsiveContainer width="100%" height="100%">
+                                <ResponsiveContainer width="100%" height="100%" minHeight={80}>
                                   <BarChart data={Object.entries(r.gastoMensual).sort(([a], [b]) => a.localeCompare(b)).map(([m, v]) => ({
                                     name: m.slice(5), gasto: v
                                   }))}>

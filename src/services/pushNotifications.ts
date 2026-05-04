@@ -109,7 +109,11 @@ export class PushService {
   static async registerSW(): Promise<ServiceWorkerRegistration | null> {
     if (!('serviceWorker' in navigator)) return null;
     try {
-      const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+      // En GitHub Pages la app vive en /arumepro/. BASE_URL refleja la base de Vite
+      // (/arumepro/ en prod, / en dev) y debe usarse tanto para el script como para el scope,
+      // si no el SW se busca en la raíz del dominio y devuelve 404.
+      const base = (import.meta as any).env?.BASE_URL || '/';
+      const reg = await navigator.serviceWorker.register(`${base}sw.js`, { scope: base });
       console.log('✅ Service Worker registrado:', reg.scope);
       return reg;
     } catch (err) {

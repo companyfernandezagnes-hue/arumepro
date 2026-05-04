@@ -547,7 +547,7 @@ const ProveedorCard: React.FC<{
         {/* Mini gráfico trend */}
         {stats.count > 0 && (
           <div className="h-12 mb-4">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minHeight={48}>
               <AreaChart data={stats.trend} margin={{top:2,right:2,left:-40,bottom:0}}>
                 <Area type="monotone" dataKey="total" stroke="#6366f1" strokeWidth={2} fill="#ede9fe" fillOpacity={0.6}/>
               </AreaChart>
@@ -695,7 +695,7 @@ const ProveedorModal: React.FC<{
                 <div>
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Evolución de compras (6 meses)</p>
                   <div className="h-40">
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="100%" height="100%" minHeight={48}>
                       <AreaChart data={stats.trend} margin={{top:5,right:5,left:-20,bottom:0}}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
                         <XAxis dataKey="name" tick={{fontSize:10,fill:'#94a3b8'}} axisLine={false} tickLine={false}/>
@@ -794,7 +794,7 @@ const ProveedorModal: React.FC<{
                         })()}
                       </div>
                       <div className="h-48">
-                        <ResponsiveContainer width="100%" height="100%">
+                        <ResponsiveContainer width="100%" height="100%" minHeight={48}>
                           <LineChart data={seriePrecios} margin={{top:5,right:5,left:-20,bottom:0}}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
                             <XAxis dataKey="date" tick={{fontSize:9,fill:'#94a3b8'}} axisLine={false} tickLine={false}
