@@ -178,8 +178,8 @@ export class GmailDirectSync {
   }
 
   /**
-   * Inicia el flujo OAuth2 con Google.
-   * Abre un popup para que el usuario autorice acceso a Gmail.
+   * Inicia el flujo OAuth2 con Google usando Google Identity Services (GIS).
+   * GIS gestiona el popup internamente y es compatible con Cross-Origin-Opener-Policy.
    * Requiere un Google Cloud Client ID configurado.
    */
   static async authorize(): Promise<GmailToken | null> {
@@ -188,80 +188,56 @@ export class GmailDirectSync {
       throw new Error('NO_CLIENT_ID');
     }
 
-    return new Promise((resolve, reject) => {
-      // Construir URL de autorización
-      const redirectUri = window.location.origin;
-      const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-      authUrl.searchParams.set('client_id', clientId);
-      authUrl.searchParams.set('redirect_uri', redirectUri);
-      authUrl.searchParams.set('response_type', 'token');
-      authUrl.searchParams.set('scope', SCOPES);
-      authUrl.searchParams.set('prompt', 'consent');
-      authUrl.searchParams.set('include_granted_scopes', 'true');
+    try {
+      await GmailDirectSync._loadGis();
+    } catch {
+      throw new Error('GIS_LOAD_FAIL');
+    }
 
-      // Abrir popup
-      const popup = window.open(
-        authUrl.toString(),
-        'gmail_auth',
-        'width=500,height=700,left=200,top=100'
-      );
+    const w = window as any;
+    if (!w.google?.accounts?.oauth2) {
+      throw new Error('GIS_UNAVAILABLE');
+    }
 
-      if (!popup) {
-        reject(new Error('POPUP_BLOCKED'));
-        return;
-      }
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (tok: GmailToken | null) => {
+        if (settled) return;
+        settled = true;
+        resolve(tok);
+      };
 
-      // Polling para detectar cuando el popup vuelve con el token
-      const interval = setInterval(() => {
-        try {
-          if (popup.closed) {
-            clearInterval(interval);
-            const token = GmailDirectSync.getToken();
-            resolve(token);
-            return;
-          }
-
-          const popupUrl = popup.location.href;
-          if (popupUrl.startsWith(redirectUri)) {
-            clearInterval(interval);
-
-            // Extraer token del hash
-            const hash = popup.location.hash.substring(1);
-            const params = new URLSearchParams(hash);
-            const accessToken = params.get('access_token');
-            const expiresIn = parseInt(params.get('expires_in') || '3600');
-
-            popup.close();
-
-            if (accessToken) {
-              const token: GmailToken = {
-                access_token: accessToken,
-                expires_at: Date.now() + expiresIn * 1000,
-              };
-              GmailDirectSync.saveToken(token);
-              // Fetch user email
-              GmailDirectSync._fetchProfile(accessToken).then(email => {
-                if (email) {
-                  token.email = email;
-                  GmailDirectSync.saveToken(token);
-                }
-              });
-              resolve(token);
-            } else {
-              resolve(null);
+      try {
+        const client = w.google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: SCOPES,
+          prompt: 'consent',
+          callback: async (response: any) => {
+            if (!response?.access_token) {
+              finish(null);
+              return;
             }
-          }
-        } catch {
-          // Cross-origin — ignorar hasta que vuelva a nuestro dominio
-        }
-      }, 500);
-
-      // Timeout de 2 minutos
-      setTimeout(() => {
-        clearInterval(interval);
-        if (!popup.closed) popup.close();
-        resolve(null);
-      }, 120_000);
+            const token: GmailToken = {
+              access_token: response.access_token,
+              expires_at: Date.now() + (parseInt(response.expires_in) || 3600) * 1000,
+            };
+            GmailDirectSync.saveToken(token);
+            // Recuperar el email del usuario y persistirlo
+            try {
+              const email = await GmailDirectSync._fetchProfile(response.access_token);
+              if (email) {
+                token.email = email;
+                GmailDirectSync.saveToken(token);
+              }
+            } catch { /* no bloquea la conexión */ }
+            finish(token);
+          },
+          error_callback: () => finish(null),
+        });
+        client.requestAccessToken({ prompt: 'consent' });
+      } catch {
+        finish(null);
+      }
     });
   }
 
