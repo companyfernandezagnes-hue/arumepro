@@ -1,12 +1,13 @@
 import React, { useState, useMemo, useEffect, useRef, useDeferredValue } from 'react';
-import { 
-  Search, Plus, Download, Package, AlertTriangle, Check, 
-  Building2, ShoppingBag, ListPlus, Users, Hotel, Layers, 
+import {
+  Search, Plus, Download, Package, AlertTriangle, Check,
+  Building2, ShoppingBag, ListPlus, Users, Hotel, Layers,
   XCircle, LineChart as LineChartIcon,
   FileText,
   Mic, Square, Camera, Loader2, Smartphone,
   Calculator, Sparkles,
-  ChevronLeft, ChevronRight, RefreshCw, Gift, Percent
+  ChevronLeft, ChevronRight, RefreshCw, Gift, Percent,
+  Upload
 } from 'lucide-react';
 
 // ✅ FIX: FileSpreadsheet no existe en lucide-react → alias seguro
@@ -25,6 +26,7 @@ import { basicNorm, TOLERANCIA as CENTRAL_TOLERANCIA, linkAlbaranesToFactura, un
 
 import { AlbaranesList } from './AlbaranesList';
 import { AlbaranEditModal } from './AlbaranEditModal';
+import { BulkAlbaranesUpload } from './BulkAlbaranesUpload';
 import { toast } from '../hooks/useToast';
 import { confirm } from '../hooks/useConfirm'; import { useVoiceInput } from '../hooks/useVoiceInput';
 
@@ -454,6 +456,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const fileInputRef     = useRef<HTMLInputElement>(null);
   const [isSyncingTelegram, setIsSyncingTelegram] = useState(false);
   const [isSaving,       setIsSaving]       = useState(false);
+  const [isBulkOpen,     setIsBulkOpen]     = useState(false);
 
   useEffect(() => {
     const handle = (e:any) => { const {cmd,q}=e.detail||{}; if (cmd==='buscar'&&q) { setSearchQ(q); window.scrollTo({top:0,behavior:'smooth'}); } };
@@ -818,7 +821,8 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
                       {isRecording ? <Square className="w-3.5 h-3.5"/> : <Mic className="w-3.5 h-3.5"/>}
                     </button>
                     <input type="file" ref={fileInputRef} className="hidden" accept="application/pdf,image/*" onChange={e=>{if(e.target.files?.[0]){processLocalFile(e.target.files[0]);e.target.value='';}}}/>
-                    <button onClick={()=>fileInputRef.current?.click()} className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition"><Camera className="w-3.5 h-3.5"/></button>
+                    <button onClick={()=>fileInputRef.current?.click()} title="Subir un albarán" className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition"><Camera className="w-3.5 h-3.5"/></button>
+                    <button onClick={()=>setIsBulkOpen(true)} title="Subida masiva (varias imágenes a la vez)" className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition"><Upload className="w-3.5 h-3.5"/></button>
                   </div>
                 </div>
 
@@ -924,6 +928,13 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       {editForm && (
         <AlbaranEditModal editForm={editForm} sociosReales={sociosReales} setEditForm={setEditForm} onClose={()=>setEditForm(null)} onSave={handleSaveEdits} onDelete={handleDelete}/>
       )}
+      <BulkAlbaranesUpload
+        isOpen={isBulkOpen}
+        onClose={() => setIsBulkOpen(false)}
+        data={data}
+        onSave={onSave}
+        defaultUnitId={form.unitId}
+      />
     </div>
   );
 };

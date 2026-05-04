@@ -653,8 +653,14 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
             newData.facturas[fIndex].file_base64 = `data:${mime};base64,${base64}`;
             await onSave(newData);
             await markEmailAsParsed(email.id);
-            // Marcar como leído en Gmail sólo ahora, tras procesar con éxito
-            if (email.messageId) {
+            // Marcar el email como leído en Gmail sólo cuando este era el último
+            // adjunto pendiente del mismo messageId. Si quedan otros PDFs del
+            // mismo correo en el buzón, lo dejamos no leído para no perderlo
+            // si la usuaria limpia el caché.
+            const restantesMismoMsg = emailAuditInbox.filter(
+              e => e.id !== email.id && e.messageId && email.messageId && e.messageId === email.messageId
+            );
+            if (email.messageId && restantesMismoMsg.length === 0) {
               try { await GmailDirectSync.markAsRead(email.messageId); } catch { /* no bloquea */ }
             }
             setEmailAuditInbox(prev => prev.filter(e => e.id !== email.id));

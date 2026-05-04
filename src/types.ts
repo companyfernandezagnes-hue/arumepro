@@ -62,6 +62,10 @@ export interface Albaran {
   prov?: string;
   socio?: string;
   num: string;
+  // SHA-256 hex del fichero original (cuando se sube por imagen). Sirve para
+  // deduplicar subidas masivas sin gastar IA en imágenes idénticas a una ya
+  // existente.
+  file_hash?: string;
   total: NumericValue;
   base?: NumericValue;
   taxes?: NumericValue;
