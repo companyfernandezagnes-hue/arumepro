@@ -304,13 +304,23 @@ export const scanBase64 = async (
 
   const gemKey = keys.gemini();
   if (gemKey) {
-    try {
-      return await _scanBase64WithGemini(cleanB64, mimeType, prompt, gemKey);
-    } catch (e: any) {
-      const msg = e?.message || String(e);
-      console.warn('[aiProviders] Gemini falló en scanBase64:', msg);
-      errors.push(`Gemini: ${msg}`);
+    // Reintentar con backoff cuando Gemini devuelve "high demand" / 503 / 429.
+    // Son fallos transitorios del lado de Google, no de la app.
+    const isTransient = (msg: string) =>
+      /high demand|overloaded|temporarily|UNAVAILABLE|503|429|rate.?limit/i.test(msg);
+    const delays = [0, 2000, 5000]; // 3 intentos: inmediato, +2s, +5s
+    let lastErr = '';
+    for (let i = 0; i < delays.length; i++) {
+      if (delays[i] > 0) await new Promise(r => setTimeout(r, delays[i]));
+      try {
+        return await _scanBase64WithGemini(cleanB64, mimeType, prompt, gemKey);
+      } catch (e: any) {
+        lastErr = e?.message || String(e);
+        console.warn(`[aiProviders] Gemini intento ${i + 1}/${delays.length}:`, lastErr);
+        if (!isTransient(lastErr)) break; // error no transitorio → no reintentar
+      }
     }
+    errors.push(`Gemini: ${lastErr}`);
   } else {
     errors.push('Gemini: sin API key configurada');
   }

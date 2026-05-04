@@ -152,6 +152,11 @@ export interface EmailDraft {
   status: 'new' | 'parsed';
   fileBase64?: string;
   fileName?: string;
+  // Para descargar el attachment bajo demanda (Gmail directo) sin
+  // saturar localStorage con el base64.
+  messageId?: string;
+  attachmentId?: string;
+  mimeType?: string;
 }
 
 export interface Socio {

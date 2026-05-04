@@ -559,19 +559,22 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         for (const e of localInbox) if (e?.id) byId.set(e.id, e);
       } catch { /* ignore */ }
 
-      // 2. Gmail directo en tiempo real si hay sesión
+      // 2. Gmail directo en tiempo real si hay sesión.
+      // No descargamos attachments aquí (lazy): solo metadata + attachmentId.
+      // Descargar PDFs en base64 satura localStorage (cuota ~5MB).
       if (GmailDirectSync.isAuthenticated()) {
         try {
-          const result = await GmailDirectSync.fetchNewEmails(10);
+          const result = await GmailDirectSync.fetchNewEmails(10, false);
           if (result.error) gmailError = result.error;
           if (result.emails.length > 0) {
             const drafts = GmailDirectSync.toEmailDrafts(result.emails);
             for (const d of drafts) if (!byId.has(d.id)) byId.set(d.id, d as any);
-            // Persistimos el inbox para no perderlo al recargar
-            const merged = Array.from(byId.values()).slice(0, 100);
+            // Persistir sólo metadata (sin fileBase64) para no reventar la cuota
+            const merged = Array.from(byId.values())
+              .map(({ fileBase64, ...rest }: any) => rest)
+              .slice(0, 100);
             localStorage.setItem('arume_gmail_inbox', JSON.stringify(merged));
-            // Marcar como leídos sólo después de almacenarlos
-            for (const msg of result.emails) await GmailDirectSync.markAsRead(msg.id);
+            // No markAsRead aquí — se marca tras procesar con éxito en processEmailAudit
           }
         } catch (err: any) {
           gmailError = err?.message || 'Error de Gmail directo';
@@ -602,13 +605,27 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   };
 
   const processEmailAudit = async (email: EmailDraft) => {
-    if (!email.fileBase64) return;
     setIsProcessing(true);
     try {
+      // Si el draft no tiene base64 (lazy-loaded de Gmail), descargarlo ahora
+      let base64 = email.fileBase64;
+      if (!base64) {
+        if (!email.messageId || !email.attachmentId) {
+          toast.error('❌ Email sin referencia de adjunto. Vuelve a sincronizar Gmail.');
+          return;
+        }
+        base64 = await GmailDirectSync.fetchAttachmentBase64(email.messageId, email.attachmentId) || undefined;
+        if (!base64) {
+          toast.error('❌ No se pudo descargar el PDF desde Gmail. Re-autoriza Gmail.');
+          return;
+        }
+      }
+
+      const mime = email.mimeType || 'application/pdf';
       const prompt = `Actúa como un Auditor Contable. Analiza esta factura y devuelve SOLO un JSON estricto:
 {"proveedor": "Nombre del emisor", "total": 0.00, "fecha": "YYYY-MM-DD", "num_factura": "Número o S/N"}`;
 
-      const result = await scanBase64(email.fileBase64, 'application/pdf', prompt);
+      const result = await scanBase64(base64, mime, prompt);
 
       const rawJson       = result.raw as any;
       const provDetectado = rawJson.proveedor   || '';
@@ -633,9 +650,13 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           const newData = JSON.parse(JSON.stringify(safeData));
           const fIndex  = newData.facturas.findIndex((f: any) => f.id === match.id);
           if (fIndex > -1) {
-            newData.facturas[fIndex].file_base64 = `data:application/pdf;base64,${email.fileBase64}`;
+            newData.facturas[fIndex].file_base64 = `data:${mime};base64,${base64}`;
             await onSave(newData);
             await markEmailAsParsed(email.id);
+            // Marcar como leído en Gmail sólo ahora, tras procesar con éxito
+            if (email.messageId) {
+              try { await GmailDirectSync.markAsRead(email.messageId); } catch { /* no bloquea */ }
+            }
             setEmailAuditInbox(prev => prev.filter(e => e.id !== email.id));
             // También fuera del estado: limpiar el inbox persistido para que no
             // reaparezca al volver a "Escanear Buzón".
@@ -653,7 +674,16 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
           `No hay facturas pendientes con ese importe.`
         );
       }
-    } catch { toast.error('Error procesando el PDF. Comprueba la clave API.'); }
+    } catch (err: any) {
+      const msg = String(err?.message || err || '');
+      if (/high demand|overloaded|503|429|rate.?limit/i.test(msg)) {
+        toast.warning('⏳ El modelo de IA está saturado ahora mismo. Espera 30-60s y vuelve a intentar.');
+      } else if (/api.?key|invalid.?key|401|403/i.test(msg)) {
+        toast.error('🔑 Error con la clave API. Revísala en la pestaña Agente.');
+      } else {
+        toast.error(`❌ Error procesando el PDF: ${msg || 'desconocido'}`);
+      }
+    }
     finally { setIsProcessing(false); }
   };
 
@@ -661,18 +691,25 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     setIsProcessing(true);
     try {
       if (GmailDirectSync.isAuthenticated()) {
-        // Ya autenticado → sincronizar
-        const result = await GmailDirectSync.fetchNewEmails(20);
+        // Sin descargar attachments: localStorage tiene cuota ~5MB y los PDFs en
+        // base64 la revientan rápido. Sólo guardamos referencia y bajamos el
+        // contenido cuando la usuaria pulsa "Comprobar Cuadre".
+        const result = await GmailDirectSync.fetchNewEmails(20, false);
         if (result.error) {
-          // Mostrar error real (token expirado, fallo API…) en vez de tragarlo
           toast.warning(`⚠️ ${result.error}`);
         } else if (result.emails.length > 0) {
           const drafts = GmailDirectSync.toEmailDrafts(result.emails);
           const existing = JSON.parse(localStorage.getItem('arume_gmail_inbox') || '[]');
           const existingIds = new Set(existing.map((e: any) => e.id));
           const nuevos = drafts.filter(d => !existingIds.has(d.id));
-          localStorage.setItem('arume_gmail_inbox', JSON.stringify([...nuevos, ...existing].slice(0, 100)));
-          for (const msg of result.emails) await GmailDirectSync.markAsRead(msg.id);
+          // No persistir base64 — sólo referencia (messageId+attachmentId)
+          const merged = [...nuevos, ...existing]
+            .map(({ fileBase64, ...rest }: any) => rest)
+            .slice(0, 100);
+          localStorage.setItem('arume_gmail_inbox', JSON.stringify(merged));
+          // Importante: NO llamar markAsRead aquí. Se marca tras procesar con
+          // éxito en processEmailAudit, así el correo sigue disponible si la
+          // usuaria recarga antes de auditarlo.
           toast.success(`🤖 ${nuevos.length} PDFs nuevos sincronizados desde Gmail.`);
         } else {
           toast.success('📭 Gmail revisado — sin PDFs nuevos.');

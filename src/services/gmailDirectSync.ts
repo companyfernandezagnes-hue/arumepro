@@ -13,8 +13,9 @@ const SCOPES = 'https://www.googleapis.com/auth/gmail.readonly https://www.googl
 export interface GmailAttachment {
   filename: string;
   mimeType: string;
-  base64: string;   // contenido del archivo
+  base64: string;        // contenido del archivo (vacío si no se descargó aún)
   size: number;
+  attachmentId?: string; // referencia para descargar bajo demanda
 }
 
 export interface GmailMessage {
@@ -255,10 +256,31 @@ export class GmailDirectSync {
   // ── Fetch de emails ──
 
   /**
-   * Busca emails no leídos con adjuntos PDF en Gmail.
-   * Devuelve los mensajes con sus PDFs extraídos en base64.
+   * Descarga un adjunto bajo demanda. No persiste nada — el caller decide
+   * qué hacer con el base64 (procesarlo en memoria, mostrarlo, etc).
    */
-  static async fetchNewEmails(maxResults = 20): Promise<GmailSyncResult> {
+  static async fetchAttachmentBase64(messageId: string, attachmentId: string): Promise<string | null> {
+    const token = await GmailDirectSync.ensureValidToken();
+    if (!token) return null;
+    try {
+      const res = await fetch(
+        `${GMAIL_API}/messages/${messageId}/attachments/${attachmentId}`,
+        { headers: { Authorization: `Bearer ${token.access_token}` } }
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      // Gmail devuelve base64url, convertir a base64 estándar
+      return (data.data || '').replace(/-/g, '+').replace(/_/g, '/');
+    } catch { return null; }
+  }
+
+  /**
+   * Busca emails no leídos con adjuntos PDF en Gmail.
+   * Por defecto NO descarga el contenido del adjunto (sólo metadata) para
+   * mantener bajo el uso de memoria/localStorage. Pasar downloadAttachments=true
+   * para incluir el base64 (uso interno o casos puntuales).
+   */
+  static async fetchNewEmails(maxResults = 20, downloadAttachments = false): Promise<GmailSyncResult> {
     const token = await GmailDirectSync.ensureValidToken();
     if (!token) {
       return { emails: [], total: 0, pdfs: 0, error: 'Token expirado — re-autoriza Gmail' };
@@ -296,7 +318,7 @@ export class GmailDirectSync {
 
       for (const msgId of messageIds) {
         try {
-          const msg = await GmailDirectSync._fetchFullMessage(msgId, headers);
+          const msg = await GmailDirectSync._fetchFullMessage(msgId, headers, downloadAttachments);
           if (msg && msg.attachments.length > 0) {
             emails.push(msg);
             totalPdfs += msg.attachments.length;
@@ -314,11 +336,14 @@ export class GmailDirectSync {
   }
 
   /**
-   * Obtiene un mensaje completo con sus adjuntos PDF
+   * Obtiene un mensaje completo con sus adjuntos PDF.
+   * Si downloadAttachments es false, sólo añade metadata + attachmentId para
+   * descargarlo bajo demanda más tarde.
    */
   private static async _fetchFullMessage(
     messageId: string,
-    headers: Record<string, string>
+    headers: Record<string, string>,
+    downloadAttachments: boolean
   ): Promise<GmailMessage | null> {
     const res = await fetch(`${GMAIL_API}/messages/${messageId}?format=full`, { headers });
     if (!res.ok) return null;
@@ -331,7 +356,7 @@ export class GmailDirectSync {
 
     // Extraer adjuntos PDF
     const attachments: GmailAttachment[] = [];
-    await GmailDirectSync._extractPdfs(data.payload, messageId, headers, attachments);
+    await GmailDirectSync._extractPdfs(data.payload, messageId, headers, attachments, downloadAttachments);
 
     return {
       id: messageId,
@@ -344,49 +369,53 @@ export class GmailDirectSync {
   }
 
   /**
-   * Recorre recursivamente las partes del mensaje buscando PDFs
+   * Recorre recursivamente las partes del mensaje buscando PDFs.
+   * Si downloadAttachments=false sólo guarda referencia (attachmentId) — el
+   * base64 se baja después con fetchAttachmentBase64() bajo demanda.
    */
   private static async _extractPdfs(
     part: any,
     messageId: string,
     headers: Record<string, string>,
-    attachments: GmailAttachment[]
+    attachments: GmailAttachment[],
+    downloadAttachments: boolean
   ): Promise<void> {
     if (!part) return;
 
-    // Si esta parte es un PDF con attachmentId, descargarlo
     if (
       part.filename &&
       part.filename.toLowerCase().endsWith('.pdf') &&
       part.body?.attachmentId
     ) {
-      try {
-        const attRes = await fetch(
-          `${GMAIL_API}/messages/${messageId}/attachments/${part.body.attachmentId}`,
-          { headers }
-        );
-        if (attRes.ok) {
-          const attData = await attRes.json();
-          // Gmail devuelve base64url, convertir a base64 estándar
-          const base64 = (attData.data || '')
-            .replace(/-/g, '+')
-            .replace(/_/g, '/');
-          attachments.push({
-            filename: part.filename,
-            mimeType: part.mimeType || 'application/pdf',
-            base64,
-            size: attData.size || 0,
-          });
+      const attachmentId = part.body.attachmentId as string;
+      const meta = {
+        filename: part.filename as string,
+        mimeType: (part.mimeType || 'application/pdf') as string,
+        size: (part.body.size || 0) as number,
+        attachmentId,
+      };
+      if (!downloadAttachments) {
+        attachments.push({ ...meta, base64: '' });
+      } else {
+        try {
+          const attRes = await fetch(
+            `${GMAIL_API}/messages/${messageId}/attachments/${attachmentId}`,
+            { headers }
+          );
+          if (attRes.ok) {
+            const attData = await attRes.json();
+            const base64 = (attData.data || '').replace(/-/g, '+').replace(/_/g, '/');
+            attachments.push({ ...meta, base64, size: attData.size || meta.size });
+          }
+        } catch (err) {
+          console.warn(`[GmailSync] Error descargando adjunto ${part.filename}:`, err);
         }
-      } catch (err) {
-        console.warn(`[GmailSync] Error descargando adjunto ${part.filename}:`, err);
       }
     }
 
-    // Recorrer sub-partes
     if (part.parts) {
       for (const subPart of part.parts) {
-        await GmailDirectSync._extractPdfs(subPart, messageId, headers, attachments);
+        await GmailDirectSync._extractPdfs(subPart, messageId, headers, attachments, downloadAttachments);
       }
     }
   }
@@ -425,7 +454,10 @@ export class GmailDirectSync {
   }
 
   /**
-   * Convierte los emails de Gmail al formato EmailDraft que usa InvoicesView
+   * Convierte los emails de Gmail al formato EmailDraft que usa InvoicesView.
+   * Si los attachments vienen sin base64 (lazy), el draft sólo lleva la
+   * referencia messageId+attachmentId; el caller llama a fetchAttachmentBase64
+   * cuando necesite el contenido.
    */
   static toEmailDrafts(messages: GmailMessage[]): Array<{
     id: string;
@@ -434,21 +466,27 @@ export class GmailDirectSync {
     date: string;
     hasAttachment: boolean;
     status: 'new';
-    fileBase64: string;
+    fileBase64?: string;
     fileName: string;
+    messageId: string;
+    attachmentId?: string;
+    mimeType?: string;
   }> {
     const drafts: any[] = [];
     for (const msg of messages) {
       for (const att of msg.attachments) {
         drafts.push({
-          id: `gmail-${msg.id}-${att.filename}`,
+          id: `gmail-${msg.id}-${att.filename}-${att.attachmentId || ''}`,
           from: msg.from,
           subject: msg.subject,
           date: msg.date,
           hasAttachment: true,
           status: 'new' as const,
-          fileBase64: att.base64,
+          fileBase64: att.base64 || undefined,
           fileName: att.filename,
+          messageId: msg.id,
+          attachmentId: att.attachmentId,
+          mimeType: att.mimeType,
         });
       }
     }
