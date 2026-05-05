@@ -481,7 +481,11 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
       // Guardar preview de la imagen escaneada
       setImages({ img1: URL.createObjectURL(file) });
 
-      const prompt = 'Eres un asistente contable. Lee este ticket de caja y extrae los totales. Devuelve SOLO JSON: {"efectivo":0,"tpv1":0,"tpv2":0,"glovo":0,"uber":0,"tienda":0,"notas":""}';
+      // Importante: pedimos null (no 0) para campos que no se vean en el ticket.
+      // Así pickNum mantiene el valor previo del formulario en lugar de
+      // sobrescribirlo con un 0 inventado por la IA cuando una cifra está
+      // borrosa o no aparece.
+      const prompt = 'Eres un asistente contable. Lee este ticket de caja y extrae los totales. Devuelve SOLO JSON con esta forma exacta: {"efectivo":0,"tpv1":0,"tpv2":0,"glovo":0,"uber":0,"tienda":0,"notas":""}. Para CUALQUIER campo que no veas claramente en el ticket, usa null en vez de 0. Nunca inventes una cifra.';
       // Forzamos Gemini para tickets de caja: si falla, mejor un error que un
       // modelo de menor capacidad (Mistral/Groq) inventando un total. Para
       // facturas/albaranes el fallback sigue activo en su flujo propio.
