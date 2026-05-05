@@ -433,7 +433,7 @@ export const AlbaranEditModal = ({
                         <th className="p-3 w-20 text-center">Ud.</th>
                         <th className="p-3 min-w-[200px]">Concepto</th>
                         <th className="p-3 w-32 text-center">IVA %</th>
-                        <th className="p-3 w-32 text-right">Unitario s/IVA</th>
+                        <th className="p-3 w-32 text-right" title="Precio unitario SIN IVA (base imponible). El IVA se añade luego según el % de cada línea.">Unitario BASE (s/IVA)</th>
                         <th className="p-3 w-32 text-right">Total c/IVA</th>
                         <th className="p-3 w-12 text-center"></th>
                       </tr>

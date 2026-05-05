@@ -55,8 +55,14 @@ export const CierreContableView: React.FC<CierreContableViewProps> = ({ data, on
           ventas += Num.parse(c.totalVenta ?? c.totalVentas ?? c.total_calculado ?? c.total_real ?? c.total ?? c.amount ?? 0);
         }
       });
+      // ⚠️ Excluimos del P&L las facturas extraídas por IA que aún no han
+      // sido revisadas por la usuaria (needs_review && !reviewed). Aparecen
+      // en el Dashboard como "Mal procesadas" hasta que se aprueban; entonces
+      // entran al cálculo automáticamente.
+      const isAprobada = (f: any) => !(f?.needs_review === true && !f?.reviewed);
       (data?.facturas||[]).forEach(f => {
         if (f?.tipo !== 'venta') return;
+        if (!isAprobada(f)) return;
         const d = extractMonthYear(f.date || (f as any).fecha);
         if (d.year === year && d.month === targetMonth) {
           const base = Num.parse(f.base);
@@ -67,6 +73,7 @@ export const CierreContableView: React.FC<CierreContableViewProps> = ({ data, on
       const processedAlbaranes = new Set<string>();
       (data?.facturas||[]).forEach(f => {
         if (f?.tipo !== 'compra') return;
+        if (!isAprobada(f)) return;
         const d = extractMonthYear(f.date || (f as any).fecha);
         if (d.year === year && d.month === targetMonth) {
           const base = Num.parse(f.base);

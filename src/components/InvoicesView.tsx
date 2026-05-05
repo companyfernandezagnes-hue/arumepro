@@ -817,7 +817,13 @@ Usa punto como separador decimal.`;
             results.push({ name: fileName, status: 'ok', msg: `✅ → ${match.prov || provDetectado} · ${match.num || numDetectado} · ${Num.fmt(totalDetectado)}` });
           }
         } else {
-          // No hay match → crear factura nueva como borrador
+          // No hay match → crear factura PENDIENTE DE REVISIÓN.
+          // ⚠️ FIX CONTABLE: nunca contabilizamos en P&L datos extraídos por IA
+          // sin que la usuaria los apruebe. Marcamos needs_review: true para
+          // que el Dashboard la marque como "Mal procesada" y los cálculos de
+          // P&L/Food Cost la excluyan hasta que se revise. Cuando se abre en
+          // InvoiceDetailModal y se guarda, allí ya se setea reviewed: true y
+          // entra al P&L.
           const newId = `upload-${Date.now()}-${i}`;
           const nuevaFactura: any = {
             id: newId,
@@ -834,11 +840,13 @@ Usa punto como separador decimal.`;
             source: 'dropzone',
             file_base64: `data:${mimeType};base64,${b64}`,
             unidad_negocio: 'REST',
+            needs_review: true,
+            reviewed: false,
           };
           if (!newData.facturas) newData.facturas = [];
           newData.facturas.push(nuevaFactura);
           attached++;
-          results.push({ name: fileName, status: 'no-match', msg: `🆕 Nueva factura: ${provDetectado} · ${Num.fmt(totalDetectado)} — revísala en la Bóveda` });
+          results.push({ name: fileName, status: 'no-match', msg: `🆕 ${provDetectado} · ${Num.fmt(totalDetectado)} — pendiente de revisión (no entra en P&L hasta que la apruebes)` });
         }
       } catch (err: any) {
         results.push({ name: fileName, status: 'error', msg: `❌ Error: ${err.message || 'fallo al procesar'}` });

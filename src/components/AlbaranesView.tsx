@@ -539,10 +539,28 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
       const prompt = `Analiza este albarán. Devuelve SOLO JSON: { "proveedor":"Nombre","num":"Nº","fecha":"YYYY-MM-DD","total_factura":0,"lineas":[{"q":1,"n":"Producto","t":10.50,"rate":10,"u":"kg"}] }`;
       const result = await scanDocument(file, prompt);
       const raw: any = result.raw;
-      setForm(prev => ({ ...prev, prov:raw.proveedor||'', num:raw.num||'', date:raw.fecha||DateUtil.today(), expectedTotal:raw.total_factura||null, text:(raw.lineas||[]).map((l:any)=>`${l.q} ${l.u||'uds'} ${l.n} ${l.rate}% ${l.t}`).join('\n') }));
+      // Si la IA no extrajo líneas, prefiero dejarlo a la usuaria que rellenarle
+      // medio formulario y que pulse guardar pensando que está completo.
+      if (!Array.isArray(raw?.lineas) || raw.lineas.length === 0) {
+        toast.warning('La IA no pudo extraer las líneas del albarán. Rellénalo a mano para no perder datos.');
+        return;
+      }
+      setForm(prev => ({
+        ...prev,
+        prov: raw.proveedor || '',
+        num: raw.num || '',
+        date: raw.fecha || DateUtil.today(),
+        expectedTotal: raw.total_factura || null,
+        text: raw.lineas.map((l: any) => `${l.q} ${l.u || 'uds'} ${l.n} ${l.rate}% ${l.t}`).join('\n'),
+      }));
       toast.success('IA completada. Revisa los campos antes de guardar.');
-    } catch {
-      toast.error('Error en IA. Rellena el albarán a mano.');
+    } catch (err: any) {
+      const msg = err?.message || '';
+      if (/high demand|overloaded|503|429|rate.?limit/i.test(msg)) {
+        toast.warning('⏳ El modelo de IA está saturado. Espera 30-60s y vuelve a intentar.');
+      } else {
+        toast.error('Error en IA. Rellena el albarán a mano.');
+      }
     } finally { setIsScanning(false); }
   };
 
