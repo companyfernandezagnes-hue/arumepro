@@ -20,9 +20,11 @@ import { FixYearsModal } from './FixYearsModal';
 import { AppData, FacturaExtended, BusinessUnit, EmailDraft } from '../types';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
-import { basicNorm, linkAlbaranesToFactura, recomputeFacturaFromAlbaranes } from '../services/invoicing'; 
+import { basicNorm, linkAlbaranesToFactura, recomputeFacturaFromAlbaranes } from '../services/invoicing';
 import { fetchNewEmails, markEmailAsParsed } from '../services/supabase';
 import { GmailDirectSync } from '../services/gmailDirectSync';
+import { smartMatchInvoiceToAlbaranes, type SmartMatchResult } from '../services/invoiceMatcher';
+import { saveProvAlias } from '../services/provAlias';
 
 // 🧩 COMPONENTES HIJOS
 import { InvoicesList } from './InvoicesList';
@@ -213,6 +215,11 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [editingDraftIdx,  setEditingDraftIdx]  = useState<number>(-1);
 
   const [emailAuditInbox,  setEmailAuditInbox]  = useState<EmailDraft[]>([]);
+  // Resultados del Agente IA: cada email + su match calculado contra albaranes.
+  // Se llena al pulsar "Escanear Buzón" tras un análisis masivo en paralelo.
+  const [agentResults, setAgentResults] = useState<Array<{ email: EmailDraft; match: SmartMatchResult }>>([]);
+  const [agentScanning, setAgentScanning] = useState(false);
+  const [agentProgress, setAgentProgress] = useState({ done: 0, total: 0 });
 
   // 🆕 Estado para la pestaña de proveedores
   const [provMesFilter,    setProvMesFilter]    = useState<string>(() => {
@@ -592,7 +599,11 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       const allEmails = Array.from(byId.values());
       if (allEmails.length > 0) {
         setEmailAuditInbox(allEmails);
-        toast.success(`📬 ${allEmails.length} PDFs en el buzón.`);
+        toast.success(`📬 ${allEmails.length} PDFs en el buzón. Iniciando análisis IA…`);
+        // Lanzar el motor del Agente IA en segundo plano: escanea cada PDF,
+        // extrae proveedor+total+fecha, y cruza por subset-sum contra los
+        // albaranes pendientes (invoiced=false) del mismo proveedor.
+        runAgentMatching(allEmails);
       } else if (gmailError) {
         toast.warning(`⚠️ ${gmailError}`);
       } else {
@@ -602,6 +613,202 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       toast.error(`⚠️ Error conectando al buzón: ${err?.message || 'desconocido'}`);
     }
     setIsSyncing(false);
+  };
+
+  // ── 🤖 Motor del Agente IA: cruce factura ↔ albaranes ───────────────────
+  // Para cada email del buzón: descarga el PDF (lazy), escanea con Gemini,
+  // ejecuta smartMatchInvoiceToAlbaranes y guarda el resultado en agentResults.
+  // Concurrencia limitada a 3 para no saturar la API. Cada llamada a IA ya
+  // tiene retry contra "high demand" en scanBase64.
+  const runAgentMatching = async (emails: EmailDraft[]) => {
+    if (emails.length === 0) return;
+    setAgentScanning(true);
+    setAgentProgress({ done: 0, total: emails.length });
+
+    const PROMPT = `Actúa como un Auditor Contable. Analiza esta factura y devuelve SOLO un JSON estricto sin markdown:
+{"proveedor": "Nombre del emisor", "num_factura": "Número o S/N", "fecha": "YYYY-MM-DD", "total": 0.00}
+Usa punto como separador decimal.`;
+
+    // Pool de albaranes para el cruce: sin facturar y con total > 0
+    const pool = albaranesSeguros.filter(a => a && !(a as any).invoiced && Math.abs(Num.parse(a.total)) > 0);
+
+    const results: Array<{ email: EmailDraft; match: SmartMatchResult }> = [];
+    let done = 0;
+
+    const runOne = async (email: EmailDraft) => {
+      try {
+        let base64 = email.fileBase64;
+        if (!base64 && email.messageId && email.attachmentId) {
+          base64 = await GmailDirectSync.fetchAttachmentBase64(email.messageId, email.attachmentId) || undefined;
+        }
+        if (!base64) {
+          results.push({
+            email,
+            match: {
+              emailProveedor: email.from || '', emailTotal: 0, emailDate: email.date || '', emailNum: '',
+              matchedAlbaranIds: [], matchedTotal: 0, albaranesConsiderados: 0, diferencia: 0,
+              confidence: 'nula', errorMsg: 'No se pudo descargar el PDF', matchType: 'sin_match',
+            },
+          });
+          return;
+        }
+        const mime = email.mimeType || 'application/pdf';
+        const scan = await scanBase64(base64, mime, PROMPT);
+        const raw = scan.raw as any;
+        const total = Num.parse(raw.total);
+        if (!total || total <= 0) {
+          results.push({
+            email,
+            match: {
+              emailProveedor: String(raw.proveedor || email.from || ''), emailTotal: 0,
+              emailDate: String(raw.fecha || email.date || ''), emailNum: String(raw.num_factura || ''),
+              matchedAlbaranIds: [], matchedTotal: 0, albaranesConsiderados: 0, diferencia: 0,
+              confidence: 'nula', errorMsg: 'IA no detectó total en el PDF', matchType: 'sin_match',
+            },
+          });
+          return;
+        }
+        const match = smartMatchInvoiceToAlbaranes({
+          proveedor: String(raw.proveedor || ''),
+          total,
+          fecha: String(raw.fecha || ''),
+          num_factura: String(raw.num_factura || ''),
+        }, pool);
+        results.push({ email, match });
+      } catch (err: any) {
+        results.push({
+          email,
+          match: {
+            emailProveedor: email.from || '', emailTotal: 0, emailDate: email.date || '', emailNum: '',
+            matchedAlbaranIds: [], matchedTotal: 0, albaranesConsiderados: 0, diferencia: 0,
+            confidence: 'nula', errorMsg: err?.message || 'fallo IA', matchType: 'sin_match',
+          },
+        });
+      } finally {
+        done += 1;
+        setAgentProgress({ done, total: emails.length });
+      }
+    };
+
+    // Concurrencia limitada a 3 en paralelo
+    const queue = [...emails];
+    const workers = Array.from({ length: Math.min(3, queue.length) }, async () => {
+      while (queue.length > 0) {
+        const next = queue.shift();
+        if (next) await runOne(next);
+      }
+    });
+    await Promise.all(workers);
+
+    // Ordenar por confianza (alta primero) y dejar las "nula" al final
+    const order: Record<SmartMatchResult['confidence'], number> = { alta: 0, media: 1, baja: 2, sin_proveedor: 3, nula: 4 };
+    results.sort((a, b) => order[a.match.confidence] - order[b.match.confidence]);
+    setAgentResults(results);
+    setAgentScanning(false);
+
+    const altas = results.filter(r => r.match.confidence === 'alta').length;
+    if (altas > 0) toast.success(`🤖 Agente IA: ${altas} match(es) seguro(s) detectados.`);
+    else toast.info(`🤖 Agente IA terminó. Revisa los resultados — sin matches de alta confianza.`);
+  };
+
+  // ── Vincular factura del email a los albaranes detectados ───────────────
+  const handleAttachAgentResult = async ({ email, match }: { email: EmailDraft; match: SmartMatchResult }) => {
+    setIsProcessing(true);
+    try {
+      // Descargar el base64 del PDF si aún no lo tenemos
+      let base64 = email.fileBase64;
+      if (!base64 && email.messageId && email.attachmentId) {
+        base64 = await GmailDirectSync.fetchAttachmentBase64(email.messageId, email.attachmentId) || undefined;
+      }
+      if (!base64) {
+        toast.error('❌ No se pudo descargar el PDF para adjuntar.');
+        return;
+      }
+      const mime = email.mimeType || 'application/pdf';
+
+      const newData: any = JSON.parse(JSON.stringify(safeData));
+      if (!Array.isArray(newData.facturas))   newData.facturas   = [];
+      if (!Array.isArray(newData.albaranes))  newData.albaranes  = [];
+
+      // Si el match no es 100% (subset_sum dejó albaranes fuera o aproximado),
+      // dejamos el TOTAL DEL EMAIL como total de la factura. La diferencia
+      // contra la suma de albaranes vinculados queda visible y señala que
+      // falta un albarán o hay un descuadre.
+      const provFinal = match.emailProveedor || email.from || 'PROVEEDOR';
+      const newId = `email-link-${Date.now()}`;
+      const nuevaFactura: any = {
+        id: newId,
+        tipo: 'compra',
+        num: match.emailNum && match.emailNum !== 'S/N' ? match.emailNum : '',
+        date: match.emailDate || DateUtil.today(),
+        prov: provFinal,
+        total: String(Num.round2(match.emailTotal)),
+        paid: false,
+        reconciled: false,
+        status: 'parsed',
+        source: 'gmail-sync',
+        file_base64: `data:${mime};base64,${base64}`,
+        unidad_negocio: 'REST',
+        albaranIdsArr: [...match.matchedAlbaranIds],
+        // Confianza alta = sin marcar para revisión (la matemática cuadró).
+        // Confianza media/baja = se aprueba manualmente, marcar para revisión
+        // hasta que la usuaria entre y confirme el desfase contra albaranes.
+        needs_review: match.confidence !== 'alta',
+        reviewed: match.confidence === 'alta',
+      };
+      newData.facturas.push(nuevaFactura);
+
+      // Marcar los albaranes vinculados como facturados
+      const setMatched = new Set(match.matchedAlbaranIds.map(String));
+      for (const a of newData.albaranes) {
+        if (a && setMatched.has(String(a.id))) a.invoiced = true;
+      }
+
+      // Memoria de alias: si la IA leyó el proveedor distinto al de los albaranes,
+      // guardamos la equivalencia para la próxima vez. Usamos el nombre del primer
+      // albarán vinculado como canonical.
+      const firstAlb = newData.albaranes.find((a: any) => a && setMatched.has(String(a.id)));
+      const albProvName = firstAlb ? String(firstAlb.prov || '') : '';
+      if (albProvName && match.emailProveedor && albProvName.toLowerCase().trim() !== match.emailProveedor.toLowerCase().trim()) {
+        saveProvAlias(albProvName, match.emailProveedor);
+      }
+
+      await onSave(newData);
+      // Marcar el email como leído en Gmail
+      if (email.messageId) {
+        try { await GmailDirectSync.markAsRead(email.messageId); } catch { /* no bloquea */ }
+      }
+      // Quitar de los resultados del agente y del inbox local
+      setAgentResults(prev => prev.filter(r => r.email.id !== email.id));
+      setEmailAuditInbox(prev => prev.filter(e => e.id !== email.id));
+      try {
+        const stored = JSON.parse(localStorage.getItem('arume_gmail_inbox') || '[]');
+        localStorage.setItem('arume_gmail_inbox', JSON.stringify(stored.filter((e: any) => e?.id !== email.id)));
+      } catch { /* ignore */ }
+
+      const diffMsg = Math.abs(match.diferencia) > 0.01
+        ? ` (Δ ${Num.fmt(Math.abs(match.diferencia))}€ — revisar)`
+        : '';
+      toast.success(`✅ Factura creada y ${match.matchedAlbaranIds.length} albarán(es) vinculado(s)${diffMsg}.`);
+    } catch (err: any) {
+      toast.error(`❌ Error vinculando: ${err?.message || 'desconocido'}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // ── Ignorar resultado del agente (no era una factura, basura, etc) ──────
+  const handleIgnoreAgentResult = async ({ email }: { email: EmailDraft; match: SmartMatchResult }) => {
+    if (email.messageId) {
+      try { await GmailDirectSync.markAsRead(email.messageId); } catch { /* no bloquea */ }
+    }
+    setAgentResults(prev => prev.filter(r => r.email.id !== email.id));
+    setEmailAuditInbox(prev => prev.filter(e => e.id !== email.id));
+    try {
+      const stored = JSON.parse(localStorage.getItem('arume_gmail_inbox') || '[]');
+      localStorage.setItem('arume_gmail_inbox', JSON.stringify(stored.filter((e: any) => e?.id !== email.id)));
+    } catch { /* ignore */ }
+    toast.success('Email descartado del buzón.');
   };
 
   const processEmailAudit = async (email: EmailDraft) => {
@@ -1981,30 +2188,112 @@ Usa punto como separador decimal.`;
             </button>
           </div>
 
-          {emailAuditInbox.length === 0 && (
+          {emailAuditInbox.length === 0 && agentResults.length === 0 && !agentScanning && (
             <div className="border border-slate-700 rounded-2xl p-5 text-center">
               <MailCheck className="w-8 h-8 text-slate-600 mx-auto mb-2" />
-              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Pulsa "Escanear Buzón" para detectar PDFs de facturas en tu correo y cruzarlos automáticamente con la bóveda.</p>
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Pulsa "Escanear Buzón" para detectar PDFs de facturas en tu correo y cruzarlos automáticamente con tus albaranes.</p>
             </div>
           )}
 
-          {emailAuditInbox.length > 0 && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-slate-800 pt-6">
-              {emailAuditInbox.map(mail => (
-                <div key={mail.id} className="bg-slate-800 border border-slate-700 p-4 rounded-2xl flex flex-col justify-between">
-                  <div>
-                    <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2">{mail.date}</p>
-                    <p className="text-sm font-black text-white truncate">{mail.from}</p>
-                    <p className="text-[10px] text-slate-400 font-bold truncate mt-1">{mail.subject}</p>
-                    {mail.fileName && (
-                      <p className="text-[10px] text-indigo-300 font-semibold truncate mt-1" title={mail.fileName}>📎 {mail.fileName}</p>
+          {agentScanning && (
+            <div className="border border-indigo-500/30 bg-indigo-900/20 rounded-2xl p-5 text-center">
+              <Loader2 className="w-8 h-8 text-indigo-400 mx-auto mb-2 animate-spin" />
+              <p className="text-[11px] font-black text-indigo-300 uppercase tracking-widest">
+                🤖 Agente IA analizando · {agentProgress.done} / {agentProgress.total}
+              </p>
+              <div className="max-w-xs mx-auto mt-3 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-full bg-indigo-500 transition-all"
+                  style={{ width: `${agentProgress.total ? (agentProgress.done / agentProgress.total) * 100 : 0}%` }} />
+              </div>
+            </div>
+          )}
+
+          {!agentScanning && agentResults.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-slate-800 pt-6">
+              {agentResults.map((res, idx) => {
+                const { email, match } = res;
+                const conf = match.confidence;
+                const borderClass =
+                  conf === 'alta'  ? 'border-emerald-500/50' :
+                  conf === 'media' ? 'border-amber-500/50'  :
+                  conf === 'baja'  ? 'border-rose-500/50'   :
+                  'border-slate-600/40 opacity-70';
+                const badgeClass =
+                  conf === 'alta'  ? 'bg-emerald-900/50 text-emerald-300' :
+                  conf === 'media' ? 'bg-amber-900/50 text-amber-300'    :
+                  conf === 'baja'  ? 'bg-rose-900/50 text-rose-300'      :
+                  'bg-slate-700 text-slate-400';
+                const badgeLabel =
+                  conf === 'alta'          ? '✅ Match seguro' :
+                  conf === 'media'         ? '⚠️ Revisar'     :
+                  conf === 'baja'          ? '❌ No cuadra'    :
+                  conf === 'sin_proveedor' ? '🤔 Sin proveedor' :
+                  '— Sin datos';
+                return (
+                  <div key={`${email.id}-${idx}`} className={cn('bg-slate-800 border-2 p-4 rounded-2xl', borderClass)}>
+                    <div className="flex justify-between items-start mb-3 gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-black text-white truncate">{match.emailProveedor || email.from || 'Sin proveedor'}</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5 truncate">{match.emailDate || email.date} · {match.emailNum || 'S/N'}</p>
+                        {email.fileName && <p className="text-[10px] text-indigo-300 font-semibold truncate mt-0.5" title={email.fileName}>📎 {email.fileName}</p>}
+                      </div>
+                      <span className={cn('text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-md whitespace-nowrap shrink-0', badgeClass)}>{badgeLabel}</span>
+                    </div>
+
+                    {match.emailTotal > 0 && (
+                      <div className="grid grid-cols-3 gap-2 bg-black/30 rounded-xl p-3 mb-3">
+                        <div className="text-center">
+                          <p className="text-[8px] text-slate-400 uppercase font-black">PDF</p>
+                          <p className="text-sm font-black text-white">{Num.fmt(match.emailTotal)}</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-[8px] text-slate-400 uppercase font-black">Albaranes</p>
+                          <p className="text-sm font-black text-indigo-300">{Num.fmt(match.matchedTotal)}</p>
+                        </div>
+                        <div className="text-center">
+                          <p className="text-[8px] text-slate-400 uppercase font-black">Δ</p>
+                          <p className={cn('text-sm font-black', Math.abs(match.diferencia) < 1 ? 'text-emerald-400' : 'text-rose-400')}>
+                            {Num.fmt(Math.abs(match.diferencia))}€
+                          </p>
+                        </div>
+                      </div>
                     )}
+
+                    {match.errorMsg && conf !== 'alta' && (
+                      <div className="bg-black/40 rounded-lg p-2.5 mb-3">
+                        <p className="text-[10px] text-amber-300 font-bold leading-relaxed">{match.errorMsg}</p>
+                      </div>
+                    )}
+
+                    {conf === 'alta' && match.matchType !== 'num_factura' && match.matchedAlbaranIds.length > 1 && (
+                      <p className="text-[10px] text-emerald-300 font-bold mb-2">📦 La factura cuadra con {match.matchedAlbaranIds.length} albarán(es) (de {match.albaranesConsiderados} pendientes).</p>
+                    )}
+
+                    <div className="flex gap-2 mt-2">
+                      {(conf === 'alta' || conf === 'media') && match.matchedAlbaranIds.length > 0 && (
+                        <button
+                          onClick={() => handleAttachAgentResult(res)}
+                          disabled={isProcessing}
+                          className={cn(
+                            'flex-1 text-white py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 transition disabled:opacity-50',
+                            conf === 'alta' ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-amber-600 hover:bg-amber-500',
+                          )}
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          {conf === 'alta' ? 'Vincular factura' : 'Aceptar (revisión)'}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleIgnoreAgentResult(res)}
+                        disabled={isProcessing}
+                        className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-xl text-[10px] font-bold uppercase tracking-widest transition disabled:opacity-50"
+                      >
+                        Ignorar
+                      </button>
+                    </div>
                   </div>
-                  <button onClick={() => processEmailAudit(mail)} disabled={isProcessing} className="w-full mt-4 bg-slate-700 hover:bg-blue-600 text-white py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition flex items-center justify-center gap-2">
-                    <ShieldCheck className="w-4 h-4" /> Comprobar Cuadre
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
