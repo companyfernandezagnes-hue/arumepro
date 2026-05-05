@@ -748,6 +748,9 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
           <button onClick={()=>setShowInspector(!showInspector)} className={cn('px-3 py-1.5 rounded-lg font-black text-[10px] uppercase transition flex items-center gap-1.5', showInspector?'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)]':'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50')}>
             <LineChartIcon className="w-3 h-3"/> Precios
           </button>
+          <button onClick={()=>setIsBulkOpen(true)} className="px-3 py-1.5 rounded-lg font-black text-[10px] uppercase bg-indigo-600 text-white hover:bg-indigo-500 transition flex items-center gap-1.5 shadow-md" title="Subir varias imágenes de albaranes a la vez">
+            <Upload className="w-3 h-3"/> Subida masiva
+          </button>
           <button onClick={handleExportExcel} className="px-3 py-1.5 rounded-lg font-black text-[10px] uppercase bg-emerald-600 text-white hover:bg-emerald-700 transition flex items-center gap-1.5">
             <FileSpreadsheet className="w-3 h-3"/> Excel
           </button>

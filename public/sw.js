@@ -3,7 +3,7 @@
 // Push Notifications + Offline Cache
 // ==========================================
 
-const CACHE_NAME = 'arume-pro-v2';
+const CACHE_NAME = 'arume-pro-v3';
 // Derivar la base del scope del propio SW (p.ej. /arumepro/ en GitHub Pages, / en dev)
 const BASE = new URL(self.registration?.scope || self.location.href).pathname;
 const OFFLINE_URL = BASE;
