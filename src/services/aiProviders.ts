@@ -149,6 +149,7 @@ export const parseJSON = (text: string): Record<string, unknown> => {
 export const scanDocument = async (
   file: File,
   prompt: string,
+  forceProvider?: AIProvider,
 ): Promise<ScanResult> => {
 
   const isImage = file.type.startsWith('image/');
@@ -160,8 +161,16 @@ export const scanDocument = async (
   // final en vez de un mensaje genérico inútil (como hace scanBase64).
   const errors: string[] = [];
 
+  // Si se fuerza un proveedor concreto (p.ej. 'gemini' para tickets de caja),
+  // NO hacemos fallback a otros modelos: si el más capaz no lo lee, mejor que
+  // la usuaria meta los números a mano que confiar en un modelo más débil.
+  const onlyGemini  = forceProvider === 'gemini';
+  const onlyMistral = forceProvider === 'mistral';
+  const onlyGroq    = forceProvider === 'groq';
+  const tryAll      = !forceProvider;
+
   const gemKey = keys.gemini();
-  if (gemKey) {
+  if (gemKey && (onlyGemini || tryAll)) {
     try {
       return await _scanWithGemini(file, prompt, gemKey, isImage);
     } catch (e: any) {
@@ -169,12 +178,12 @@ export const scanDocument = async (
       console.warn('[aiProviders] Gemini falló en scanDocument:', msg);
       errors.push(`Gemini: ${msg}`);
     }
-  } else {
+  } else if (!gemKey && (onlyGemini || tryAll)) {
     errors.push('Gemini: sin API key configurada');
   }
 
   const misKey = keys.mistral();
-  if (misKey && isImage) {
+  if (misKey && isImage && (onlyMistral || tryAll)) {
     try {
       return await _scanWithMistral(file, prompt, misKey);
     } catch (e: any) {
@@ -182,14 +191,14 @@ export const scanDocument = async (
       console.warn('[aiProviders] Mistral falló en scanDocument:', msg);
       errors.push(`Mistral: ${msg}`);
     }
-  } else if (!misKey) {
+  } else if (!misKey && (onlyMistral || tryAll)) {
     errors.push('Mistral: sin API key configurada');
-  } else if (!isImage) {
+  } else if (!isImage && (onlyMistral || tryAll)) {
     errors.push('Mistral: solo soporta imágenes, no PDFs');
   }
 
   const groqKey = keys.groq();
-  if (groqKey && isImage) {
+  if (groqKey && isImage && (onlyGroq || tryAll)) {
     try {
       return await _scanWithGroqVision(file, prompt, groqKey);
     } catch (e: any) {
@@ -197,14 +206,16 @@ export const scanDocument = async (
       console.warn('[aiProviders] Groq Vision falló en scanDocument:', msg);
       errors.push(`Groq: ${msg}`);
     }
-  } else if (!groqKey) {
+  } else if (!groqKey && (onlyGroq || tryAll)) {
     errors.push('Groq: sin API key configurada');
-  } else if (!isImage) {
+  } else if (!isImage && (onlyGroq || tryAll)) {
     errors.push('Groq: solo soporta imágenes, no PDFs');
   }
 
   throw new Error(
-    `No se pudo escanear con ningún proveedor de visión.\n\n` +
+    (forceProvider
+      ? `No se pudo escanear con ${forceProvider} (forzado, sin fallback). Mete los números a mano.\n\n`
+      : `No se pudo escanear con ningún proveedor de visión.\n\n`) +
     errors.map(e => `• ${e}`).join('\n') +
     (isPDF && errors[0]?.startsWith('Gemini:')
       ? '\n\n⚠️ IMPORTANTE: Mistral y Groq NO soportan PDFs. Para PDFs solo sirve Gemini.'

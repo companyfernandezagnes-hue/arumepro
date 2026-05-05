@@ -482,17 +482,26 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
       setImages({ img1: URL.createObjectURL(file) });
 
       const prompt = 'Eres un asistente contable. Lee este ticket de caja y extrae los totales. Devuelve SOLO JSON: {"efectivo":0,"tpv1":0,"tpv2":0,"glovo":0,"uber":0,"tienda":0,"notas":""}';
-      const result = await scanDocument(file, prompt);
+      // Forzamos Gemini para tickets de caja: si falla, mejor un error que un
+      // modelo de menor capacidad (Mistral/Groq) inventando un total. Para
+      // facturas/albaranes el fallback sigue activo en su flujo propio.
+      const result = await scanDocument(file, prompt, 'gemini');
       const raw: any = result.raw;
+      // ⚠️ FIX: el `0` es falsy en JS. Usar `?` ignoraba un cero legítimo
+      // (un domingo sin efectivo) y dejaba el valor anterior del formulario.
+      // Aceptamos números (incluyendo 0) y strings no vacíos.
+      const pickNum = (v: any, fallback: string) =>
+        (v === undefined || v === null || v === '') ? fallback : String(v);
       setForm(f => ({
         ...f,
-        efectivo: raw.efectivo ? String(raw.efectivo) : f.efectivo,
-        tpv1:     raw.tpv1     ? String(raw.tpv1)     : f.tpv1,
-        tpv2:     raw.tpv2     ? String(raw.tpv2)     : f.tpv2,
-        glovo:    raw.glovo    ? String(raw.glovo)    : f.glovo,
-        uber:     raw.uber     ? String(raw.uber)     : f.uber,
-        tienda:   raw.tienda   ? String(raw.tienda)   : f.tienda,
-        notas:    raw.notas    ? raw.notas            : f.notas,
+        efectivo: pickNum(raw.efectivo, f.efectivo),
+        tpv1:     pickNum(raw.tpv1,     f.tpv1),
+        tpv2:     pickNum(raw.tpv2,     f.tpv2),
+        glovo:    pickNum(raw.glovo,    f.glovo),
+        uber:     pickNum(raw.uber,     f.uber),
+        tienda:   pickNum(raw.tienda,   f.tienda),
+        // notas vacías sí mantienen el valor previo (no queremos borrarlas)
+        notas:    raw.notas ? raw.notas : f.notas,
       }));
       setScanStatus('success');
     } catch {
@@ -905,6 +914,19 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
                   className="absolute top-2 right-2 bg-white/80 rounded-full p-1 hover:bg-white transition">
                   <XCircle className="w-4 h-4 text-slate-600"/>
                 </button>
+              </div>
+            )}
+
+            {/* Aviso de revisión post-escaneo: la IA puede leer mal cifras
+                borrosas. No bloqueamos el botón "Cerrar Caja" para no estorbar
+                cuando ya has revisado, sólo subrayamos que mires la foto. */}
+            {scanStatus === 'success' && (
+              <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-3 flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-[11px] font-black text-amber-800 uppercase tracking-wider">Revisa antes de cerrar</p>
+                  <p className="text-[10px] font-bold text-amber-700 mt-0.5">La IA pre-rellena los campos pero puede equivocarse con cifras borrosas. Compara los importes con la foto antes de pulsar "Cerrar Caja".</p>
+                </div>
               </div>
             )}
 
