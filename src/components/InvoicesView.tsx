@@ -713,6 +713,10 @@ Usa punto como separador decimal.`;
 
   // ── Vincular factura del email a los albaranes detectados ───────────────
   const handleAttachAgentResult = async ({ email, match }: { email: EmailDraft; match: SmartMatchResult }) => {
+    // Guard contra doble-click muy rápido: el botón visualmente se desactiva
+    // por isProcessing pero React re-renderiza tras un tick. Sin esta línea,
+    // dos clicks consecutivos crearían dos facturas duplicadas.
+    if (isProcessing) return;
     setIsProcessing(true);
     try {
       // Descargar el base64 del PDF si aún no lo tenemos
