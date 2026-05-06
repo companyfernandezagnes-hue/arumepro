@@ -109,6 +109,59 @@ const fileToBase64 = (file: File | Blob): Promise<string> =>
 
 // ─── Helper: comprimir imagen antes de enviar ────────────────────────────────
 
+// Realza el contraste de la imagen para OCR de tickets/albaranes.
+// Usa estiramiento de histograma adaptativo (auto-levels) en escala de grises
+// suavizada con la imagen original — recupera detalle de texto en fotos
+// subexpuestas o sobreexpuestas sin destruir colores. Aplicado SOLO si la
+// imagen tiene baja varianza (foto plana, ticket pálido).
+const enhanceForOCR = (ctx: CanvasRenderingContext2D, w: number, h: number): void => {
+  try {
+    const img = ctx.getImageData(0, 0, w, h);
+    const d = img.data;
+    const N = d.length / 4;
+
+    // 1. Calcular percentiles 1% y 99% del canal de luminancia
+    //    (descarta píxeles extremos que sesgan el rango).
+    const lumHist = new Uint32Array(256);
+    for (let i = 0; i < d.length; i += 4) {
+      const Y = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) | 0;
+      lumHist[Y]++;
+    }
+    const lowTarget  = Math.floor(N * 0.01);
+    const highTarget = Math.floor(N * 0.99);
+    let lo = 0, hi = 255, acc = 0;
+    for (let v = 0; v < 256; v++) {
+      acc += lumHist[v];
+      if (acc >= lowTarget) { lo = v; break; }
+    }
+    acc = 0;
+    for (let v = 255; v >= 0; v--) {
+      acc += lumHist[v];
+      if (acc >= N - highTarget) { hi = v; break; }
+    }
+    const range = Math.max(1, hi - lo);
+    // Si el contraste ya es bueno (range > 200) no tocamos.
+    if (range > 200) return;
+
+    // 2. Estiramos cada canal por separado al rango [0,255] usando lo/hi.
+    //    Aplicamos también un toque de gamma 0.95 que oscurece ligeramente
+    //    grises medios → texto sobre fondo blanco gana.
+    const scale = 255 / range;
+    for (let i = 0; i < d.length; i += 4) {
+      for (let c = 0; c < 3; c++) {
+        let v = (d[i + c] - lo) * scale;
+        if (v < 0) v = 0; else if (v > 255) v = 255;
+        // gamma 0.95 (≈ x^1.05)
+        v = Math.pow(v / 255, 1.05) * 255;
+        d[i + c] = v | 0;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  } catch {
+    // Si falla por CORS/seguridad, dejamos la imagen tal cual.
+  }
+};
+
 const compressImage = async (file: File | Blob): Promise<{ base64: string; mimeType: string }> => {
   // Compresión calibrada para OCR: el texto de tickets/albaranes ES PEQUEÑO,
   // si se comprime demasiado la IA lee mal "8,50€" como "8,90€" o pierde
@@ -132,6 +185,8 @@ const compressImage = async (file: File | Blob): Promise<{ base64: string; mimeT
     ctx.imageSmoothingEnabled = true;
     (ctx as any).imageSmoothingQuality = 'high';
     ctx.drawImage(bitmap, 0, 0, w, h);
+    // 🆕 Realce de contraste para fotos planas / tickets pálidos
+    enhanceForOCR(ctx, w, h);
   }
 
   let blob: Blob | null = null;

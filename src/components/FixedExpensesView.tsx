@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { EmptyState } from './EmptyState';
 import { AppData, GastoFijo } from '../types';
 import { scanDocument } from '../services/aiProviders';
+import { uploadBase64ToStorage } from '../services/storage';
 import { cn } from '../lib/utils';
 import { Num } from '../services/engine';
 import { toast } from '../hooks/useToast';
@@ -371,6 +372,23 @@ Instrucciones:
       const idBase    = `payroll-${anio}-${mesNum}`;
       const startDate = `${anio}-${mesNum}-01`;
 
+      // Subimos el PDF de nóminas a Supabase Storage UNA sola vez. Si Storage
+      // falla (red caída, bucket no creado), guardamos como base64 inline para
+      // que la app siga funcionando.
+      let storedPath: string | null = null;
+      let storedMime: string | null = null;
+      try {
+        const r = await uploadBase64ToStorage(pdfBase64, 'application/pdf', 'payrolls', startDate, idBase);
+        storedPath = r.path;
+        storedMime = 'application/pdf';
+      } catch (e: any) {
+        console.warn('[FixedExpensesView] Storage upload nóminas falló, guardando inline:', e?.message);
+      }
+
+      const fileFields = storedPath
+        ? { file_path: storedPath, file_mime: storedMime }
+        : { file_base64: pdfBase64 };
+
       const nuevasEntradas: any[] = [
         {
           id:        `${idBase}-nominas`,
@@ -383,7 +401,9 @@ Instrucciones:
           startDate,
           unitId:    'REST',
           active:    true,
-          file_base64: pdfBase64,
+          source:    'ia-auto',
+          created_at: new Date().toISOString(),
+          ...fileFields,
           notes: [
             `Resumen nóminas ${mesLabelCap}.`,
             `${nTrab} trabajadores.`,
@@ -407,7 +427,9 @@ Instrucciones:
           startDate,
           unitId:    'REST',
           active:    true,
-          file_base64: pdfBase64,
+          source:    'ia-auto',
+          created_at: new Date().toISOString(),
+          ...fileFields,
           notes:     `Cuotas SS empresa ${mesLabelCap}. Contingencias comunes + AT&EP + Desempleo + FP + FOGASA.`,
         },
       ];

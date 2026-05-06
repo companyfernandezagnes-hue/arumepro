@@ -37,7 +37,44 @@ interface ParsedAlbaran {
   fecha: string;
   total: number;
   lineas: Array<{ q?: number; n?: string; t?: number; rate?: number; u?: string }>;
+  // Confianza autoreportada por la IA. Si es 'low', el albarán se guarda con
+  // needs_review:true y no entra al P&L hasta que la usuaria lo revise.
+  confidence?: 'high' | 'medium' | 'low';
+  // Razones de revisión detectadas en validación post-IA (fecha rara, año fuera
+  // de rango, proveedor que parece "Arume" / receptor, etc.).
+  reviewReasons?: string[];
 }
+
+// Validación post-IA: detecta señales de que algo se leyó mal y devuelve
+// razones para marcar needs_review.
+const validateParsed = (p: ParsedAlbaran): string[] => {
+  const reasons: string[] = [];
+  // Fecha
+  if (!p.fecha || !/^\d{4}-\d{2}-\d{2}$/.test(p.fecha)) {
+    reasons.push('Fecha no leída');
+  } else {
+    const year = parseInt(p.fecha.slice(0, 4), 10);
+    if (year < 2023 || year > 2027) reasons.push(`Año fuera de rango (${year})`);
+    const t = Date.parse(p.fecha);
+    if (Number.isNaN(t)) reasons.push('Fecha mal formada');
+  }
+  // Proveedor — si la IA devolvió Arume/Agnès es porque confundió emisor con receptor
+  const provLower = (p.proveedor || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  if (!p.proveedor || p.proveedor.length < 3) {
+    reasons.push('Proveedor no leído');
+  } else if (/\b(arume|agnes|agnès|sake bar|company fernandez)\b/i.test(provLower)) {
+    reasons.push('Proveedor parece ser el receptor (Arume), no el emisor');
+  }
+  // Total
+  if (!p.total || p.total <= 0) {
+    reasons.push('Total no leído o cero');
+  } else if (p.total > 100000) {
+    reasons.push('Total sospechosamente alto');
+  }
+  // Confianza autoreportada
+  if (p.confidence === 'low') reasons.push('IA reportó baja confianza');
+  return reasons;
+};
 
 interface FileEntry {
   id: string;
@@ -85,9 +122,70 @@ const runWithLimit = async <T,>(items: T[], limit: number, worker: (item: T, i: 
   await Promise.all(runners);
 };
 
-const PROMPT = `Analiza este albarán o factura comercial y devuelve SOLO un JSON estricto con este formato:
-{"proveedor":"Nombre del proveedor","num":"Número del albarán o factura","fecha":"YYYY-MM-DD","total":0.00,"lineas":[{"q":1,"n":"Descripción del producto","t":10.50,"rate":10,"u":"kg"}]}
-Si algún campo no aparece en el documento, ponlo como cadena vacía o 0.`;
+const PROMPT = `Eres un OCR contable especializado en albaranes y facturas comerciales españoles para un restaurante japonés (Arume Sake Bar). Analiza este documento y devuelve SOLO JSON sin markdown ni texto antes/después.
+
+ESQUEMA EXACTO:
+{
+  "proveedor": "string|null",
+  "num": "string|null",
+  "fecha": "YYYY-MM-DD|null",
+  "total": number,
+  "lineas": [{"q": number, "n": "string", "t": number, "rate": 4|10|21, "u": "string"}],
+  "confidence": "high"|"medium"|"low"
+}
+
+REGLAS — léelas TODAS antes de responder:
+
+═══ PROVEEDOR ═══
+El EMISOR (quien VENDE y emite el documento). El receptor SIEMPRE es "Arume Sake Bar" / "Arume" / "Agnès Company" / "AGNES COMPANY FERNANDEZ" / un CIF tipo X4XXXXXXXX que termina en letra de Agnès — NUNCA es el proveedor, es la receptora.
+
+✅ Cómo encontrarlo: busca en la CABECERA (parte superior izquierda normalmente) el nombre + CIF del emisor. En tickets/albaranes térmicos el emisor suele estar arriba con dirección. Devuelve el nombre legal completo, incluyendo "SL", "SA", "SLU", "CB" si los pone.
+
+✅ Ejemplos:
+- Ticket de "MAKRO IBÉRICA SAU" enviado a Arume → proveedor: "MAKRO IBÉRICA SAU"
+- Factura de "Llorenç Cerdà Obrador SL" → proveedor: "Llorenç Cerdà Obrador SL"
+- Si en la cabecera ves "Pescaderías Chiringuito SL" y abajo "Cliente: Arume Sake Bar" → proveedor: "Pescaderías Chiringuito SL"
+
+❌ NUNCA devuelvas "Arume", "Agnès", "Sake Bar" como proveedor.
+
+═══ FECHA ═══
+Fecha de EMISIÓN del documento (NO fecha de pago, NI fecha de vencimiento, NI fecha de entrega).
+
+✅ Formato OBLIGATORIO: YYYY-MM-DD con año de 4 dígitos. Conversiones:
+- "06/05/2026" → "2026-05-06"
+- "06-05-26"   → "2026-05-06"  (asume 20XX si solo ves XX)
+- "6 de mayo de 2026" → "2026-05-06"
+
+✅ Año esperado: 2024, 2025 o 2026. Si ves "23" interpretalo como 2023 (no 1923).
+
+❌ Si ves DOS fechas (emisión + vencimiento), prefiere SIEMPRE la de emisión.
+❌ Si la fecha no es clara, está borrosa, o no aparece → devuelve null. NUNCA inventes una fecha.
+
+═══ NUM ═══
+Referencia única (etiquetas: "Nº Albarán", "Albarán Nº", "Factura nº", "Doc. nº", "Ref.", "F-", "A-"…). Tal cual aparece, con guiones/barras/letras.
+Si no hay → "S/N".
+
+═══ TOTAL ═══
+Importe TOTAL FINAL del documento con IVA incluido. Etiquetas habituales: "TOTAL", "Total Factura", "Importe Total", "Total a pagar".
+- Punto decimal: 1234.56
+- NO confundir con "Base imponible", "Subtotal" ni "IVA".
+- Si no se ve el total, suma t de todas las líneas.
+
+═══ LINEAS ═══
+Una entrada por cada producto facturado:
+- q = cantidad numérica (no string)
+- n = descripción del producto tal como aparece
+- t = importe TOTAL de la línea con IVA (= q × precio_unitario × (1 + rate/100))
+- rate = % IVA aplicado: 4, 10 o 21 (en España). 10 por defecto si no es claro.
+- u = unidad: "kg", "l", "ud", "uds", "caja", "botella"... "uds" por defecto.
+
+═══ CONFIDENCE ═══
+- "high"   = todos los campos legibles sin esfuerzo, foto nítida y limpia
+- "medium" = falta algún detalle o hay borrosidad parcial
+- "low"    = foto borrosa, texto parcial, o tienes dudas sobre algún número/fecha → la app marcará el albarán para revisión manual
+
+═══ POLÍTICA ANTI-INVENCIÓN ═══
+Es PREFERIBLE devolver null/0 que inventar. Si dudas, marca confidence="low" y deja vacío lo que no veas. Nunca digas que algo es "MAKRO" si no lo lees claramente.`;
 
 // ── Componente ─────────────────────────────────────────────────────────────
 
@@ -212,7 +310,12 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
           fecha: String(raw.fecha || '').trim(),
           total: Num.parse(raw.total),
           lineas: Array.isArray(raw.lineas) ? raw.lineas : [],
+          confidence: (raw.confidence === 'high' || raw.confidence === 'medium' || raw.confidence === 'low')
+            ? raw.confidence : undefined,
         };
+        // Validación post-IA — detecta señales de "se leyó mal" para marcar
+        // el albarán a revisar antes de meterlo al P&L.
+        parsed.reviewReasons = validateParsed(parsed);
         const k = dedupeKey(parsed.proveedor, parsed.num, parsed.fecha);
 
         // 1º contra la bóveda (existente)
@@ -274,8 +377,15 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
         }));
         const total = p.total || items.reduce((s, it) => s + (Number(it.t) || 0), 0);
         const fecha = p.fecha || new Date().toISOString().slice(0, 10);
-        const robustId = `alb-${fecha.replace(/-/g, '')}-${Date.now().toString().slice(-6)}-${defaultUnitId}-${e.hash.slice(0, 6)}`;
+        // Timestamp COMPLETO (13 dígitos) en vez de los últimos 6 — permite
+        // detectar cuándo se creó por el id si created_at no estuviera disponible.
+        const robustId = `alb-${fecha.replace(/-/g, '')}-${Date.now()}-${defaultUnitId}-${e.hash.slice(0, 6)}`;
 
+        // Si la validación detectó problemas (fecha rara, proveedor que parece
+        // el receptor, total cero…), marcamos el albarán para revisión. NO
+        // bloqueamos su guardado — la usuaria decide después.
+        const reasons = p.reviewReasons || [];
+        const needsReview = reasons.length > 0 || p.confidence === 'low';
         const newAlbaran: Albaran = {
           id: robustId,
           prov: (p.proveedor || 'DESCONOCIDO').toUpperCase(),
@@ -284,13 +394,26 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
           total: String(Num.round2(total)),
           items: items as any,
           unitId: defaultUnitId,
-          status: 'ok',
+          status: needsReview ? 'mismatch' : 'ok',
           invoiced: false,
           paid: false,
           reconciled: false,
           file_hash: e.hash,
           source: 'bulk-images',
-        };
+          // 🆕 Marca temporal de cuándo se subió a la app (NO la fecha del
+          // documento). Sirve para el botón "Borrar lo subido hoy por IA":
+          // si la IA leyó mal la fecha del albarán pero lo subimos hoy,
+          // este campo permite identificarlo y revertirlo.
+          created_at: new Date().toISOString(),
+          // Marcadores de revisión: si la IA dudó o detectamos algo raro,
+          // la usuaria los ve en el Dashboard "Mal procesados" y los corrige.
+          ...(needsReview ? {
+            needs_review: true,
+            reviewed: false,
+            review_reasons: reasons,
+            ai_confidence: p.confidence || 'unknown',
+          } : {}),
+        } as any;
         newData.albaranes.unshift(newAlbaran);
       }
       await onSave(newData);
@@ -422,18 +545,47 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
 
             {(phase === 'review' || phase === 'saving') && (
               <div className="space-y-5">
-                <Section
-                  title={`Nuevos (${newOnes.length})`}
-                  color="emerald"
-                  icon={<CheckCircle2 className="w-4 h-4" />}
-                  empty="No hay albaranes nuevos detectados."
-                  items={newOnes.map(e => ({
-                    key: e.id,
-                    title: (e.status as any).parsed.proveedor || 'Sin proveedor',
-                    sub: `Nº ${(e.status as any).parsed.num} · ${(e.status as any).parsed.fecha} · ${Num.fmt((e.status as any).parsed.total)}`,
-                    hint: e.file.name,
-                  }))}
-                />
+                {(() => {
+                  const fiables  = newOnes.filter(e => {
+                    const p = (e.status as any).parsed as ParsedAlbaran;
+                    return (p.reviewReasons || []).length === 0 && p.confidence !== 'low';
+                  });
+                  const dudosos  = newOnes.filter(e => !fiables.includes(e));
+                  return (
+                    <>
+                      <Section
+                        title={`Nuevos fiables (${fiables.length})`}
+                        color="emerald"
+                        icon={<CheckCircle2 className="w-4 h-4" />}
+                        empty={newOnes.length > 0 ? 'Ninguno fiable — revisa la lista de dudosos.' : 'No hay albaranes nuevos detectados.'}
+                        items={fiables.map(e => ({
+                          key: e.id,
+                          title: (e.status as any).parsed.proveedor || 'Sin proveedor',
+                          sub: `Nº ${(e.status as any).parsed.num} · ${(e.status as any).parsed.fecha} · ${Num.fmt((e.status as any).parsed.total)}`,
+                          hint: e.file.name,
+                        }))}
+                      />
+                      {dudosos.length > 0 && (
+                        <Section
+                          title={`Nuevos a revisar (${dudosos.length})`}
+                          color="amber"
+                          icon={<AlertTriangle className="w-4 h-4" />}
+                          empty="—"
+                          items={dudosos.map(e => {
+                            const p = (e.status as any).parsed as ParsedAlbaran;
+                            const reasons = p.reviewReasons || [];
+                            return {
+                              key: e.id,
+                              title: p.proveedor || 'Sin proveedor',
+                              sub: `Nº ${p.num} · ${p.fecha || '—'} · ${Num.fmt(p.total)}`,
+                              hint: `⚠️ ${reasons.join(' · ') || 'IA dudó'} — ${e.file.name}`,
+                            };
+                          })}
+                        />
+                      )}
+                    </>
+                  );
+                })()}
                 <Section
                   title={`Repetidos por imagen idéntica (${dupHash.length})`}
                   color="slate"

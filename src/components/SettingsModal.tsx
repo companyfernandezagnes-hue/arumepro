@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { 
-  Save, Key, Eye, EyeOff, Bot, Link as LinkIcon, 
+import {
+  Save, Key, Eye, EyeOff, Bot, Link as LinkIcon,
   Building2, Users, Sparkles, CheckCircle2, X,
   Mail, MessageCircle, Send, ShieldAlert, DownloadCloud, Trash2,
-  Mic, Megaphone, Plug, Plus, Minus, Brain
+  Mic, Megaphone, Plug, Plus, Minus, Brain, UploadCloud
 } from 'lucide-react';
 import { AppData } from '../types';
 import { cn } from '../lib/utils';
@@ -265,9 +265,12 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
   };
 
   // ─── Limpiar TODO lo creado hoy por IA ─────────────────────────────────
-  // Provisional: cuando una sesión de subida masiva o del agente IA ha
-  // dejado basura, este botón borra todos los albaranes y facturas con
-  // source IA cuyo id contenga el timestamp de HOY. NO toca nada manual.
+  // Filtra por:
+  //   1. PREFERIDO: campo `created_at` ISO timestamp (lo añadimos en cada flujo IA)
+  //   2. FALLBACK para registros viejos: detectar timestamp en el id (ya sea
+  //      número de 13 dígitos completo o yyyymmdd de hoy en bulk-images).
+  // Solo borra registros con `source` de IA — nunca toca albaranes/facturas
+  // manuales.
   const handlePurgeIAToday = async () => {
     if (!db) return;
     const albaranesIASources = new Set(['bulk-images']);
@@ -277,30 +280,32 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
     const startMs = startOfDay.getTime();
     const endMs   = startMs + 24 * 60 * 60 * 1000;
 
-    // Los IDs generados por los flujos IA llevan Date.now() pegado tipo
-    // "alb-20260506-123456-REST-abc123" / "upload-1714998000000-3" /
-    // "email-link-1714998000000". Extraemos el timestamp de cualquier número
-    // de 13 dígitos en el id.
-    const idIsToday = (id: string): boolean => {
-      const matches = String(id).match(/\d{13}/g);
-      if (!matches) return false;
-      return matches.some(m => {
+    const isCreatedToday = (item: any): boolean => {
+      // 1. Preferido: created_at ISO timestamp
+      if (item?.created_at) {
+        const t = Date.parse(item.created_at);
+        if (!Number.isNaN(t)) return t >= startMs && t < endMs;
+      }
+      // 2. Fallback: timestamp de 13 dígitos en el id (upload-, email-link-, email-pending-)
+      const id = String(item?.id || '');
+      const matches = id.match(/\d{13}/g);
+      if (matches && matches.some(m => {
         const t = parseInt(m, 10);
         return t >= startMs && t < endMs;
-      });
-    };
-    // Para los albaranes de bulk-images, el id lleva yyyymmdd:
-    //   alb-20260506-123456-REST-abc123
-    const idMatchesYyyymmdd = (id: string): boolean => {
+      })) return true;
+      // 3. Fallback bulk-images: id lleva yyyymmdd al principio.
+      // OJO: este patrón usa la fecha del DOCUMENTO, no la de creación. Por
+      // eso preferimos created_at. Solo lo usamos si el documento dice ser
+      // de hoy y no tenemos created_at — útil si el albarán es realmente del día.
       const yyyymmdd = `${startOfDay.getFullYear()}${String(startOfDay.getMonth() + 1).padStart(2, '0')}${String(startOfDay.getDate()).padStart(2, '0')}`;
-      return String(id).includes(`-${yyyymmdd}-`);
+      return id.includes(`-${yyyymmdd}-`);
     };
 
     const albaranesABorrar = (db.albaranes || []).filter((a: any) =>
-      a && albaranesIASources.has(String(a.source || '')) && (idIsToday(String(a.id)) || idMatchesYyyymmdd(String(a.id)))
+      a && albaranesIASources.has(String(a.source || '')) && isCreatedToday(a)
     );
     const facturasABorrar = (db.facturas || []).filter((f: any) =>
-      f && facturasIASources.has(String(f.source || '')) && idIsToday(String(f.id))
+      f && facturasIASources.has(String(f.source || '')) && isCreatedToday(f)
     );
 
     if (albaranesABorrar.length === 0 && facturasABorrar.length === 0) {
@@ -338,6 +343,162 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
     setDb(newData);
     onSave(newData);
     toast.success(`🗑️ Borrados: ${albaranesABorrar.length} albaranes + ${facturasABorrar.length} facturas.`);
+  };
+
+  // ─── Migración de PDFs/imágenes a Supabase Storage ────────────────────
+  // Recorre TODAS las facturas y gastos fijos con file_base64 (legacy inline)
+  // y los sube al bucket arume-files. Después limpia file_base64 del registro
+  // para que la DB pierda el peso. La operación es idempotente — los registros
+  // que ya tienen file_path se saltan.
+  const [migrating, setMigrating] = useState(false);
+  const [migrationProgress, setMigrationProgress] = useState({ done: 0, total: 0 });
+  const handleMigrateToStorage = async () => {
+    if (!db) return;
+    if (migrating) return;
+
+    // Detectar candidatos
+    const facturasMig = (db.facturas || []).filter((f: any) =>
+      f && f.file_base64 && !f.file_path
+    );
+    const gastosMig = (db.gastos_fijos || []).filter((g: any) =>
+      g && g.file_base64 && !g.file_path
+    );
+    const total = facturasMig.length + gastosMig.length;
+
+    if (total === 0) {
+      toast.success('Nada que migrar — no hay archivos legacy con base64 inline.');
+      return;
+    }
+
+    const ok = await confirm({
+      title: `¿Migrar ${total} archivos a Supabase Storage?`,
+      message: `Se subirán ${facturasMig.length} factura(s) y ${gastosMig.length} gasto(s) al bucket arume-files. Después se limpiará file_base64 de la DB. Esto libera espacio en la base de datos. Puede tardar varios minutos. NO cierres la pestaña.`,
+      confirmLabel: 'Migrar ahora',
+    });
+    if (!ok) return;
+
+    setMigrating(true);
+    setMigrationProgress({ done: 0, total });
+
+    // Importamos dinámicamente para no inflar el bundle del SettingsModal
+    const { uploadBase64ToStorage } = await import('../services/storage');
+
+    const newData: AppData = JSON.parse(JSON.stringify(db));
+    let done = 0;
+    let errors = 0;
+
+    const stripDataPrefix = (b64: string) => b64.includes(',') ? b64.split(',')[1] : b64;
+    const detectMime = (b64: string): string => {
+      if (b64.startsWith('data:application/pdf')) return 'application/pdf';
+      if (b64.startsWith('data:image/png')) return 'image/png';
+      if (b64.startsWith('data:image/jpeg') || b64.startsWith('data:image/jpg')) return 'image/jpeg';
+      if (b64.startsWith('data:image/webp')) return 'image/webp';
+      // Sin prefijo data: por defecto PDF (es lo más común)
+      return 'application/pdf';
+    };
+
+    // Migrar facturas
+    for (const f of facturasMig) {
+      try {
+        const idx = newData.facturas!.findIndex((x: any) => x.id === f.id);
+        if (idx < 0) { done++; setMigrationProgress({ done, total }); continue; }
+        const mime = detectMime(f.file_base64!);
+        const cleanB64 = stripDataPrefix(f.file_base64!);
+        const r = await uploadBase64ToStorage(cleanB64, mime, 'invoices', f.date, String(f.id));
+        (newData.facturas as any)[idx].file_path = r.path;
+        (newData.facturas as any)[idx].file_mime = mime;
+        delete (newData.facturas as any)[idx].file_base64;
+      } catch (e: any) {
+        console.warn('[migrate] factura', f.id, e?.message);
+        errors++;
+      }
+      done++;
+      setMigrationProgress({ done, total });
+    }
+
+    // Migrar gastos fijos
+    for (const g of gastosMig) {
+      try {
+        const idx = newData.gastos_fijos!.findIndex((x: any) => x.id === g.id);
+        if (idx < 0) { done++; setMigrationProgress({ done, total }); continue; }
+        const mime = detectMime(g.file_base64!);
+        const cleanB64 = stripDataPrefix(g.file_base64!);
+        const r = await uploadBase64ToStorage(cleanB64, mime, 'payrolls', g.startDate, String(g.id));
+        (newData.gastos_fijos as any)[idx].file_path = r.path;
+        (newData.gastos_fijos as any)[idx].file_mime = mime;
+        delete (newData.gastos_fijos as any)[idx].file_base64;
+      } catch (e: any) {
+        console.warn('[migrate] gasto', g.id, e?.message);
+        errors++;
+      }
+      done++;
+      setMigrationProgress({ done, total });
+    }
+
+    // Persistir todo de golpe al final
+    try {
+      setDb(newData);
+      await onSave(newData);
+      const okCount = total - errors;
+      if (errors === 0) {
+        toast.success(`✅ Migración completa: ${okCount} archivos subidos a Storage. La DB queda mucho más ligera.`);
+      } else {
+        toast.warning(`⚠️ ${okCount} migrados, ${errors} fallaron. Revisa la consola y reintenta.`);
+      }
+    } catch (e: any) {
+      toast.error(`❌ Error guardando los cambios tras la migración: ${e?.message || 'desconocido'}`);
+    } finally {
+      setMigrating(false);
+    }
+  };
+
+  // ─── Limpieza de emergencia: TODOS los registros IA sin created_at ─────
+  // Para el caso real: la usuaria subió hoy un lote masivo donde la IA leyó
+  // mal las fechas (las puso de meses pasados). Como esos registros se crearon
+  // ANTES de añadir el campo created_at, no se pueden detectar por fecha de
+  // creación. Este botón borra todos los registros con source IA que NO tengan
+  // created_at — son por definición del "lote viejo pifiado". Los nuevos de
+  // este punto en adelante sí lo llevan, así que sólo limpia historial sucio.
+  const handlePurgeIANoCreatedAt = async () => {
+    if (!db) return;
+    const albaranesIASources = new Set(['bulk-images']);
+    const facturasIASources  = new Set(['dropzone', 'gmail-sync', 'email-ia', 'ia-auto']);
+
+    const albaranesABorrar = (db.albaranes || []).filter((a: any) =>
+      a && albaranesIASources.has(String(a.source || '')) && !a.created_at
+    );
+    const facturasABorrar = (db.facturas || []).filter((f: any) =>
+      f && facturasIASources.has(String(f.source || '')) && !f.created_at
+    );
+
+    if (albaranesABorrar.length === 0 && facturasABorrar.length === 0) {
+      toast.success('Nada que limpiar — todos los registros IA llevan ya created_at.');
+      return;
+    }
+
+    const ok = await confirm({
+      title: '⚠️ Limpieza de emergencia: registros IA sin marca temporal',
+      message: `Se eliminarán ${albaranesABorrar.length} albaranes y ${facturasABorrar.length} facturas con source IA (subida masiva, dropzone, agente correo) que NO tienen created_at — son del lote pifiado anterior al fix de hoy. NO se toca nada manual ni nada con created_at correcto. Recomendado SI todo lo subido por IA hoy lo quieres eliminar de golpe.`,
+      danger: true,
+      confirmLabel: `Borrar ${albaranesABorrar.length + facturasABorrar.length} registros sin marca`,
+    });
+    if (!ok) return;
+
+    const newData: AppData = JSON.parse(JSON.stringify(db));
+    const albIds = new Set(albaranesABorrar.map((a: any) => String(a.id)));
+    const facIds = new Set(facturasABorrar.map((f: any) => String(f.id)));
+
+    newData.facturas = (newData.facturas || []).filter((f: any) => !facIds.has(String(f.id)));
+    newData.albaranes = (newData.albaranes || []).filter((a: any) => !albIds.has(String(a.id)));
+    newData.facturas = (newData.facturas || []).map((f: any) => {
+      if (!Array.isArray(f.albaranIdsArr) || f.albaranIdsArr.length === 0) return f;
+      const filtered = f.albaranIdsArr.filter((x: any) => !albIds.has(String(x)));
+      return filtered.length === f.albaranIdsArr.length ? f : { ...f, albaranIdsArr: filtered };
+    });
+
+    setDb(newData);
+    onSave(newData);
+    toast.success(`🧹 Lote pifiado limpio: ${albaranesABorrar.length} albaranes + ${facturasABorrar.length} facturas eliminados.`);
   };
 
   const handleHardReset = async () => {
@@ -744,6 +905,40 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
                 <div className="flex flex-col justify-center h-full">
                   <ExportTools db={db} onSave={setDb} />
                 </div>
+                <button onClick={handleMigrateToStorage} disabled={migrating}
+                  className="flex flex-col items-start p-4 bg-indigo-50 border-2 border-indigo-300 hover:border-indigo-500 hover:shadow-md transition-all rounded-2xl text-left disabled:opacity-60 disabled:cursor-wait">
+                  <div className="flex items-center gap-2 mb-1">
+                    <UploadCloud className="w-4 h-4 text-indigo-600" />
+                    <span className="font-black text-sm text-indigo-900">Migrar archivos a Storage</span>
+                  </div>
+                  <p className="text-[10px] text-indigo-700/80 font-bold leading-tight">
+                    {(() => {
+                      if (migrating) return `Migrando ${migrationProgress.done}/${migrationProgress.total}…`;
+                      const f = (db?.facturas || []).filter((x: any) => x?.file_base64 && !x?.file_path).length;
+                      const g = (db?.gastos_fijos || []).filter((x: any) => x?.file_base64 && !x?.file_path).length;
+                      const tot = f + g;
+                      return tot === 0
+                        ? 'Todo está ya en Storage. La DB no carga base64 inline.'
+                        : `${tot} archivos legacy en la DB. Súbelos al bucket arume-files para liberar espacio.`;
+                    })()}
+                  </p>
+                </button>
+                <button onClick={handlePurgeIANoCreatedAt}
+                  className="flex flex-col items-start p-4 bg-orange-50 border-2 border-orange-300 hover:border-orange-500 hover:shadow-md transition-all rounded-2xl text-left">
+                  <div className="flex items-center gap-2 mb-1">
+                    <ShieldAlert className="w-4 h-4 text-orange-600" />
+                    <span className="font-black text-sm text-orange-900">Limpieza emergencia: lote pifiado</span>
+                  </div>
+                  <p className="text-[10px] text-orange-700/80 font-bold leading-tight">
+                    {(() => {
+                      const a = (db?.albaranes || []).filter((x: any) => x && ['bulk-images'].includes(String(x.source || '')) && !x.created_at).length;
+                      const f = (db?.facturas || []).filter((x: any) => x && ['dropzone', 'gmail-sync', 'email-ia', 'ia-auto'].includes(String(x.source || '')) && !x.created_at).length;
+                      return a + f === 0
+                        ? 'Sin lote pifiado. Limpio.'
+                        : `${a} albarán(es) + ${f} factura(s) IA SIN marca temporal — del lote anterior al fix. Borra todos de golpe.`;
+                    })()}
+                  </p>
+                </button>
                 <button onClick={handlePurgeIAToday}
                   className="flex flex-col items-start p-4 bg-rose-50 border-2 border-rose-300 hover:border-rose-500 hover:shadow-md transition-all rounded-2xl text-left">
                   <div className="flex items-center gap-2 mb-1">
@@ -753,15 +948,20 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
                   <p className="text-[10px] text-rose-700/80 font-bold leading-tight">
                     {(() => {
                       const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
-                      const yyyymmdd = `${startOfDay.getFullYear()}${String(startOfDay.getMonth() + 1).padStart(2, '0')}${String(startOfDay.getDate()).padStart(2, '0')}`;
                       const startMs = startOfDay.getTime();
                       const endMs = startMs + 24 * 60 * 60 * 1000;
-                      const isToday = (id: string) => {
-                        const m = String(id).match(/\d{13}/g);
-                        return (m && m.some(x => { const t = parseInt(x, 10); return t >= startMs && t < endMs; })) || String(id).includes(`-${yyyymmdd}-`);
+                      const yyyymmdd = `${startOfDay.getFullYear()}${String(startOfDay.getMonth() + 1).padStart(2, '0')}${String(startOfDay.getDate()).padStart(2, '0')}`;
+                      const isToday = (item: any) => {
+                        if (item?.created_at) {
+                          const t = Date.parse(item.created_at);
+                          if (!Number.isNaN(t)) return t >= startMs && t < endMs;
+                        }
+                        const id = String(item?.id || '');
+                        const m = id.match(/\d{13}/g);
+                        return (m && m.some(x => { const t = parseInt(x, 10); return t >= startMs && t < endMs; })) || id.includes(`-${yyyymmdd}-`);
                       };
-                      const a = (db?.albaranes || []).filter((x: any) => x && ['bulk-images'].includes(String(x.source || '')) && isToday(String(x.id))).length;
-                      const f = (db?.facturas || []).filter((x: any) => x && ['dropzone', 'gmail-sync', 'email-ia', 'ia-auto'].includes(String(x.source || '')) && isToday(String(x.id))).length;
+                      const a = (db?.albaranes || []).filter((x: any) => x && ['bulk-images'].includes(String(x.source || '')) && isToday(x)).length;
+                      const f = (db?.facturas || []).filter((x: any) => x && ['dropzone', 'gmail-sync', 'email-ia', 'ia-auto'].includes(String(x.source || '')) && isToday(x)).length;
                       return a + f === 0
                         ? 'Nada subido hoy por IA. Limpio.'
                         : `${a} albarán(es) + ${f} factura(s) creados hoy por subida masiva, dropzone o agente. Solo IA, no manual.`;

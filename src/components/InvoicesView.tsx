@@ -25,6 +25,26 @@ import { fetchNewEmails, markEmailAsParsed } from '../services/supabase';
 import { GmailDirectSync } from '../services/gmailDirectSync';
 import { smartMatchInvoiceToAlbaranes, type SmartMatchResult } from '../services/invoiceMatcher';
 import { saveProvAlias } from '../services/provAlias';
+import { uploadBase64ToStorage, getSignedUrl } from '../services/storage';
+
+// Helper: intenta subir el base64 a Storage. Si Storage falla (red, bucket
+// no creado todavía, etc.), devuelve null y el caller debe caer a guardar el
+// base64 inline. Así la app sigue funcionando aunque Storage esté caído.
+const tryUploadToStorage = async (
+  base64: string,
+  mime: string,
+  folder: 'invoices' | 'payrolls' | 'cierres' | 'fixed' | 'albaranes',
+  documentDate?: string,
+  explicitId?: string,
+): Promise<{ path: string; mime: string } | null> => {
+  try {
+    const r = await uploadBase64ToStorage(base64, mime, folder, documentDate, explicitId);
+    return { path: r.path, mime };
+  } catch (e: any) {
+    console.warn('[InvoicesView] Storage upload falló, guardando inline:', e?.message);
+    return null;
+  }
+};
 
 // 🧩 COMPONENTES HIJOS
 import { InvoicesList } from './InvoicesList';
@@ -230,6 +250,20 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
   // 📤 Estado para previsualización de PDF en la pestaña Gestoría
   const [previewFactura,   setPreviewFactura]   = useState<FacturaExtended | null>(null);
+  // URL firmada del fichero del preview cuando viene de Supabase Storage.
+  // Si la factura previsualizada tiene file_path, hacemos getSignedUrl tras
+  // abrir el modal y la inyectamos al iframe/img.
+  const [previewSignedUrl, setPreviewSignedUrl] = useState<string | null>(null);
+  useEffect(() => {
+    setPreviewSignedUrl(null);
+    const path = (previewFactura as any)?.file_path;
+    if (!path) return;
+    let cancelled = false;
+    getSignedUrl(path, 3600).then(url => {
+      if (!cancelled) setPreviewSignedUrl(url || null);
+    });
+    return () => { cancelled = true; };
+  }, [previewFactura]);
 
   // ── Teclado ───────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -541,8 +575,21 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     setIsExportModalOpen(false);
   };
 
-  const handleDownloadFile = (f: FacturaExtended) => {
-    if (!f || !f.file_base64) return toast.warning('El PDF original no está disponible.');
+  const handleDownloadFile = async (f: FacturaExtended) => {
+    if (!f) return;
+    // Prioridad: si la factura tiene file_path → bajamos de Storage (signed URL).
+    // Si no, fallback al file_base64 inline (legacy).
+    if (f.file_path) {
+      const url = await getSignedUrl(f.file_path, 3600);
+      if (!url) return void toast.error('No se pudo obtener URL del archivo en Storage.');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${basicNorm(f.prov || 'factura')}_${f.num || 'SN'}.${(f.file_mime || '').includes('pdf') ? 'pdf' : 'jpg'}`;
+      a.target = '_blank';
+      a.click();
+      return;
+    }
+    if (!f.file_base64) return void toast.warning('El PDF original no está disponible.');
     try {
       const a = document.createElement('a');
       a.href = f.file_base64.startsWith('data:') ? f.file_base64 : `data:application/pdf;base64,${f.file_base64}`;
@@ -625,9 +672,20 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     setAgentScanning(true);
     setAgentProgress({ done: 0, total: emails.length });
 
-    const PROMPT = `Actúa como un Auditor Contable. Analiza esta factura y devuelve SOLO un JSON estricto sin markdown:
-{"proveedor": "Nombre del emisor", "num_factura": "Número o S/N", "fecha": "YYYY-MM-DD", "total": 0.00}
-Usa punto como separador decimal.`;
+    const PROMPT = `Eres un OCR contable especializado en documentos comerciales españoles. Analiza esta factura y devuelve SOLO un JSON estricto, sin markdown ni texto antes/después:
+{"proveedor": "Nombre legal del emisor (NO del receptor)", "num_factura": "Número/referencia del documento", "fecha": "YYYY-MM-DD", "total": 0.00}
+
+REGLAS ESTRICTAS — leerlas todas antes de responder:
+
+1. PROVEEDOR = EMISOR del documento (la empresa que vende y factura). NUNCA es el receptor/cliente. El receptor de estas facturas SIEMPRE es "Arume Sake Bar" / "Arume" / "Sake Bar Arume" o un CIF de Agnès Company — si ves esto NO es el proveedor, es el receptor. Busca el nombre en la cabecera o pie del documento, junto al CIF/NIF del emisor. Devuelve el nombre tal como aparece en el documento (incluye "SL", "SA", etc. si los pone).
+
+2. FECHA = fecha de EMISIÓN del documento. Formato YYYY-MM-DD ESTRICTO con año de 4 dígitos. Convierte DD/MM/YYYY → YYYY-MM-DD. Si ves dos fechas (emisión + vencimiento), elige la de EMISIÓN. Si la fecha no es clara o no aparece, devuelve null. NUNCA inventes una fecha. El año razonable está entre 2024 y 2026.
+
+3. NUM_FACTURA = referencia única del documento (puede llamarse "Factura nº", "Nº Doc.", "Ref.", "Albarán nº", etc.). Mantén guiones, barras, letras tal cual aparecen. Si no hay número visible, devuelve "S/N".
+
+4. TOTAL = importe total final con IVA incluido (normalmente etiquetado "TOTAL", "Total factura", "Importe total", "Total a pagar"). NO confundir con base imponible ni subtotal. Devuelve solo el número (sin €). Si hay varias monedas, prefiere EUR. Punto decimal: 1234.56.
+
+5. Para CUALQUIER campo que no veas claramente, usa null. Es preferible null a un valor inventado.`;
 
     // Pool de albaranes para el cruce: sin facturar y con total > 0
     const pool = albaranesSeguros.filter(a => a && !(a as any).invoiced && Math.abs(Num.parse(a.total)) > 0);
@@ -740,25 +798,40 @@ Usa punto como separador decimal.`;
       // falta un albarán o hay un descuadre.
       const provFinal = match.emailProveedor || email.from || 'PROVEEDOR';
       const newId = `email-link-${Date.now()}`;
+      const fechaFactura = match.emailDate || DateUtil.today();
+      // Subimos el PDF a Supabase Storage. Si falla → fallback inline.
+      const stored = await tryUploadToStorage(base64, mime, 'invoices', fechaFactura, newId);
+      // Validación post-IA: además del match de subset-sum, comprobamos que la
+      // fecha sea plausible y el proveedor no sea "Arume" (típico cuando la IA
+      // confunde emisor y receptor). Si alguna falla, va a revisión.
+      const dateValid = match.emailDate && /^\d{4}-\d{2}-\d{2}$/.test(match.emailDate)
+        && !Number.isNaN(Date.parse(match.emailDate))
+        && parseInt(match.emailDate.slice(0, 4), 10) >= 2023
+        && parseInt(match.emailDate.slice(0, 4), 10) <= 2027;
+      const provValid = !!provFinal && provFinal.length >= 3
+        && !/arume|agnes|agnès|sake bar|company fernandez/i.test(provFinal);
+      const trustworthy = match.confidence === 'alta' && dateValid && provValid;
       const nuevaFactura: any = {
         id: newId,
         tipo: 'compra',
         num: match.emailNum && match.emailNum !== 'S/N' ? match.emailNum : '',
-        date: match.emailDate || DateUtil.today(),
+        date: fechaFactura,
         prov: provFinal,
         total: String(Num.round2(match.emailTotal)),
         paid: false,
         reconciled: false,
         status: 'parsed',
         source: 'gmail-sync',
-        file_base64: `data:${mime};base64,${base64}`,
+        created_at: new Date().toISOString(),
+        ...(stored
+          ? { file_path: stored.path, file_mime: stored.mime }
+          : { file_base64: `data:${mime};base64,${base64}` }),
         unidad_negocio: 'REST',
         albaranIdsArr: [...match.matchedAlbaranIds],
-        // Confianza alta = sin marcar para revisión (la matemática cuadró).
-        // Confianza media/baja = se aprueba manualmente, marcar para revisión
-        // hasta que la usuaria entre y confirme el desfase contra albaranes.
-        needs_review: match.confidence !== 'alta',
-        reviewed: match.confidence === 'alta',
+        // Si el match es alta Y los datos básicos son válidos → entra al P&L.
+        // Si no → needs_review hasta que la usuaria revise.
+        needs_review: !trustworthy,
+        reviewed: trustworthy,
       };
       newData.facturas.push(nuevaFactura);
 
@@ -822,18 +895,23 @@ Usa punto como separador decimal.`;
       if (!Array.isArray(newData.facturas)) newData.facturas = [];
       const newId = `email-pending-${Date.now()}`;
       const provFinal = match.emailProveedor || email.from || 'PROVEEDOR';
+      const fechaPending = match.emailDate || DateUtil.today();
+      const storedPending = await tryUploadToStorage(base64, mime, 'invoices', fechaPending, newId);
       newData.facturas.push({
         id: newId,
         tipo: 'compra',
         num: match.emailNum && match.emailNum !== 'S/N' ? match.emailNum : '',
-        date: match.emailDate || DateUtil.today(),
+        date: fechaPending,
         prov: provFinal,
         total: String(Num.round2(match.emailTotal || 0)),
         paid: false,
         reconciled: false,
         status: 'parsed',
         source: 'gmail-sync',
-        file_base64: `data:${mime};base64,${base64}`,
+        created_at: new Date().toISOString(),
+        ...(storedPending
+          ? { file_path: storedPending.path, file_mime: storedPending.mime }
+          : { file_base64: `data:${mime};base64,${base64}` }),
         unidad_negocio: 'REST',
         needs_review: true,
         reviewed: false,
@@ -888,8 +966,15 @@ Usa punto como separador decimal.`;
       }
 
       const mime = email.mimeType || 'application/pdf';
-      const prompt = `Actúa como un Auditor Contable. Analiza esta factura y devuelve SOLO un JSON estricto:
-{"proveedor": "Nombre del emisor", "total": 0.00, "fecha": "YYYY-MM-DD", "num_factura": "Número o S/N"}`;
+      const prompt = `Eres un OCR contable especializado en documentos comerciales españoles. Analiza esta factura y devuelve SOLO JSON, sin markdown:
+{"proveedor": "Nombre legal del EMISOR (NO Arume/receptor)", "total": 0.00, "fecha": "YYYY-MM-DD", "num_factura": "Número/ref"}
+
+REGLAS:
+- PROVEEDOR = quien vende y factura. NUNCA Arume Sake Bar (esa es la receptora). Busca el nombre del emisor en cabecera junto al CIF/NIF.
+- FECHA = emisión del documento (no vencimiento). YYYY-MM-DD con año 4 dígitos. Si no la ves clara → null. Año esperado: 2024-2026.
+- NUM_FACTURA = ref única tal cual aparece. Si no hay → "S/N".
+- TOTAL = importe final con IVA. Punto decimal. NO base imponible.
+- null si no estás segura. NUNCA inventes datos.`;
 
       const result = await scanBase64(base64, mime, prompt);
 
@@ -900,7 +985,7 @@ Usa punto como separador decimal.`;
 
       // Buscar coincidencia por total (tolerancia 1€) y/o número de factura
       const match = facturasBoveda.find(f =>
-        !f.file_base64 && (
+        !f.file_base64 && !f.file_path && (
           Math.abs(Num.parse(f.total) - totalDetectado) <= 1.00 ||
           (numDetectado && numDetectado !== 'S/N' && String(f.num || '').includes(numDetectado))
         )
@@ -916,7 +1001,15 @@ Usa punto como separador decimal.`;
           const newData = JSON.parse(JSON.stringify(safeData));
           const fIndex  = newData.facturas.findIndex((f: any) => f.id === match.id);
           if (fIndex > -1) {
-            newData.facturas[fIndex].file_base64 = `data:${mime};base64,${base64}`;
+            // Subimos a Storage o caemos al base64 inline si Storage falla.
+            const storedAttach = await tryUploadToStorage(base64, mime, 'invoices', newData.facturas[fIndex].date, String(match.id));
+            if (storedAttach) {
+              newData.facturas[fIndex].file_path = storedAttach.path;
+              newData.facturas[fIndex].file_mime = storedAttach.mime;
+              delete newData.facturas[fIndex].file_base64;
+            } else {
+              newData.facturas[fIndex].file_base64 = `data:${mime};base64,${base64}`;
+            }
             await onSave(newData);
             await markEmailAsParsed(email.id);
             // Marcar el email como leído en Gmail sólo cuando este era el último
@@ -1048,9 +1141,17 @@ Usa punto como separador decimal.`;
         const mimeType = file.type || 'application/pdf';
 
         // IA extrae datos del PDF
-        const prompt = `Actúa como un Auditor Contable. Analiza esta factura y devuelve SOLO un JSON estricto sin markdown:
-{"proveedor": "Nombre del emisor", "total": 0.00, "base": 0.00, "iva": 0.00, "fecha": "YYYY-MM-DD", "num_factura": "Número o S/N"}
-Usa punto como separador decimal.`;
+        const prompt = `Eres un OCR contable especializado en documentos comerciales españoles. Analiza esta factura y devuelve SOLO JSON, sin markdown ni texto antes/después:
+{"proveedor": "Nombre legal del EMISOR (NO Arume)", "total": 0.00, "base": 0.00, "iva": 0.00, "fecha": "YYYY-MM-DD", "num_factura": "Número/ref"}
+
+REGLAS:
+- PROVEEDOR = quien vende y factura. El receptor SIEMPRE es Arume Sake Bar / Agnès Company — NUNCA es eso. Busca el nombre del emisor en cabecera junto al CIF/NIF.
+- FECHA = emisión del documento. YYYY-MM-DD con año 4 dígitos. Convierte DD/MM/YYYY si lo ves así. Si no aparece clara → null. Año esperado: 2024-2026.
+- NUM_FACTURA = ref única tal cual aparece (con barras y letras). Si no hay → "S/N".
+- TOTAL = importe final con IVA incluido. Punto decimal.
+- BASE = importe sin IVA (base imponible). 0 si no aparece.
+- IVA = importe del IVA en euros. 0 si no aparece.
+- null para campos que no veas claros. NUNCA inventes datos.`;
 
         const result = await scanBase64(b64, mimeType, prompt);
         const rawJson       = result.raw as any;
@@ -1063,7 +1164,7 @@ Usa punto como separador decimal.`;
 
         // Buscar coincidencia en facturas sin PDF adjunto
         const match = newData.facturas.find((f: any) =>
-          f && !f.file_base64 && f.tipo !== 'caja' && (
+          f && !f.file_base64 && !f.file_path && f.tipo !== 'caja' && (
             // Match por total (tolerancia 1€)
             Math.abs(Num.parse(f.total) - totalDetectado) <= 1.00 ||
             // Match por número de factura
@@ -1076,7 +1177,14 @@ Usa punto como separador decimal.`;
         if (match) {
           const fIndex = newData.facturas.findIndex((f: any) => f.id === match.id);
           if (fIndex > -1) {
-            newData.facturas[fIndex].file_base64 = `data:${mimeType};base64,${b64}`;
+            const storedDrop = await tryUploadToStorage(b64, mimeType, 'invoices', newData.facturas[fIndex].date, String(match.id));
+            if (storedDrop) {
+              newData.facturas[fIndex].file_path = storedDrop.path;
+              newData.facturas[fIndex].file_mime = storedDrop.mime;
+              delete newData.facturas[fIndex].file_base64;
+            } else {
+              newData.facturas[fIndex].file_base64 = `data:${mimeType};base64,${b64}`;
+            }
             if (!newData.facturas[fIndex].base && baseDetectado) newData.facturas[fIndex].base = baseDetectado;
             if (!newData.facturas[fIndex].tax && ivaDetectado)   newData.facturas[fIndex].tax  = ivaDetectado;
             attached++;
@@ -1091,11 +1199,13 @@ Usa punto como separador decimal.`;
           // InvoiceDetailModal y se guarda, allí ya se setea reviewed: true y
           // entra al P&L.
           const newId = `upload-${Date.now()}-${i}`;
+          const fechaNueva = fechaDetectada || DateUtil.today();
+          const storedNueva = await tryUploadToStorage(b64, mimeType, 'invoices', fechaNueva, newId);
           const nuevaFactura: any = {
             id: newId,
             tipo: 'compra',
             num: numDetectado !== 'S/N' ? numDetectado : '',
-            date: fechaDetectada || DateUtil.today(),
+            date: fechaNueva,
             prov: provDetectado,
             total: totalDetectado,
             base: baseDetectado || undefined,
@@ -1104,7 +1214,10 @@ Usa punto como separador decimal.`;
             reconciled: false,
             status: 'parsed',
             source: 'dropzone',
-            file_base64: `data:${mimeType};base64,${b64}`,
+            created_at: new Date().toISOString(),
+            ...(storedNueva
+              ? { file_path: storedNueva.path, file_mime: storedNueva.mime }
+              : { file_base64: `data:${mimeType};base64,${b64}` }),
             unidad_negocio: 'REST',
             needs_review: true,
             reviewed: false,
@@ -1146,8 +1259,8 @@ Usa punto como separador decimal.`;
     const pagadas = facturasBoveda.filter(f =>
       f && (f.paid || f.reconciled) && f.tipo === 'compra'
     );
-    const conPdf     = pagadas.filter(f => !!f.file_base64);
-    const sinPdf     = pagadas.filter(f => !f.file_base64);
+    const conPdf     = pagadas.filter(f => !!f.file_base64 || !!(f as any).file_path);
+    const sinPdf     = pagadas.filter(f => !f.file_base64 && !(f as any).file_path);
     const yaSubidas  = conPdf.filter(f => (f as any).uploaded_gestoria === true);
     const pendientes = conPdf.filter(f => (f as any).uploaded_gestoria !== true);
 
@@ -1155,8 +1268,8 @@ Usa punto como separador decimal.`;
     const nominas = gastosFijos.filter((g: any) =>
       g && (g.type === 'payroll' || g.cat === 'personal') && (g.active !== false && g.activo !== false)
     );
-    const nominasConPdf     = nominas.filter((g: any) => !!g.file_base64);
-    const nominasSinPdf     = nominas.filter((g: any) => !g.file_base64);
+    const nominasConPdf     = nominas.filter((g: any) => !!g.file_base64 || !!g.file_path);
+    const nominasSinPdf     = nominas.filter((g: any) => !g.file_base64 && !g.file_path);
     const nominasSubidas    = nominasConPdf.filter((g: any) => g.uploaded_gestoria === true);
     const nominasPendientes = nominasConPdf.filter((g: any) => g.uploaded_gestoria !== true);
 
@@ -1193,8 +1306,19 @@ Usa punto como separador decimal.`;
     }
   };
 
-  const handleDownloadNomina = (g: any) => {
-    if (!g || !g.file_base64) return toast.warning('El PDF de la nómina no está disponible.');
+  const handleDownloadNomina = async (g: any) => {
+    if (!g) return;
+    if (g.file_path) {
+      const url = await getSignedUrl(g.file_path, 3600);
+      if (!url) return void toast.error('No se pudo obtener URL del archivo en Storage.');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${basicNorm(g.name || 'nomina')}.${(g.file_mime || '').includes('pdf') ? 'pdf' : 'jpg'}`;
+      a.target = '_blank';
+      a.click();
+      return;
+    }
+    if (!g.file_base64) return void toast.warning('El PDF de la nómina no está disponible.');
     try {
       const a = document.createElement('a');
       a.href = g.file_base64.startsWith('data:') ? g.file_base64 : `data:application/pdf;base64,${g.file_base64}`;
@@ -2554,9 +2678,37 @@ Usa punto como separador decimal.`;
                 </div>
               </div>
 
-              {/* Contenido: PDF embebido o imagen */}
+              {/* Contenido: PDF embebido o imagen — soporta Storage signed URL Y file_base64 legacy */}
               <div className="flex-1 overflow-auto bg-slate-50 p-4 min-h-[400px]">
                 {(() => {
+                  const filePath = (previewFactura as any).file_path;
+                  const fileMime = String((previewFactura as any).file_mime || '');
+                  // Storage path → usamos signed URL (asíncrona)
+                  if (filePath) {
+                    if (!previewSignedUrl) {
+                      return (
+                        <div className="flex flex-col items-center justify-center py-20 text-center">
+                          <Loader2 className="w-10 h-10 text-slate-300 mb-3 animate-spin" />
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Cargando archivo de Storage…</p>
+                        </div>
+                      );
+                    }
+                    if (fileMime.startsWith('image/')) {
+                      return (
+                        <div className="flex justify-center">
+                          <img src={previewSignedUrl} alt="Factura" className="max-w-full max-h-[70vh] rounded-2xl shadow-lg border border-slate-200" />
+                        </div>
+                      );
+                    }
+                    return (
+                      <iframe
+                        src={previewSignedUrl}
+                        className="w-full h-[70vh] rounded-2xl border border-slate-200 shadow-lg bg-white"
+                        title="Previsualización factura"
+                      />
+                    );
+                  }
+                  // Legacy: file_base64 inline
                   const b64 = previewFactura.file_base64 || '';
                   const isImage = b64.startsWith('data:image');
                   const isPdf = b64.startsWith('data:application/pdf');

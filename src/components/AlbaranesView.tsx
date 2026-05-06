@@ -536,7 +536,16 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const processLocalFile = async (file: File) => {
     setIsScanning(true);
     try {
-      const prompt = `Analiza este albarán. Devuelve SOLO JSON: { "proveedor":"Nombre","num":"Nº","fecha":"YYYY-MM-DD","total_factura":0,"lineas":[{"q":1,"n":"Producto","t":10.50,"rate":10,"u":"kg"}] }`;
+      const prompt = `Eres un OCR contable especializado en albaranes y facturas comerciales españoles. Analiza este documento y devuelve SOLO JSON, sin markdown:
+{"proveedor":"Nombre legal del EMISOR (NO Arume)","num":"Número del documento","fecha":"YYYY-MM-DD","total_factura":0,"lineas":[{"q":1,"n":"Producto","t":10.50,"rate":10,"u":"kg"}]}
+
+REGLAS:
+- PROVEEDOR = EMISOR del documento (quien vende). El receptor SIEMPRE es Arume / Agnès Company — NUNCA es eso, es la receptora. Busca el nombre legal del emisor en cabecera junto al CIF/NIF.
+- FECHA = emisión del documento (no entrega ni vencimiento). YYYY-MM-DD con año 4 dígitos. Convierte DD/MM/YYYY si lo ves así. Si no es clara → null. Año esperado: 2024-2026.
+- NUM = ref tal cual aparece. Si no hay → "S/N".
+- TOTAL_FACTURA = importe total con IVA. Punto decimal.
+- LINEAS: q=cantidad, n=producto, t=total línea con IVA, rate=% IVA (4/10/21), u=unidad (kg/l/ud).
+- null si no estás segura. NUNCA inventes datos.`;
       const result = await scanDocument(file, prompt);
       const raw: any = result.raw;
       // Si la IA no extrajo líneas, prefiero dejarlo a la usuaria que rellenarle

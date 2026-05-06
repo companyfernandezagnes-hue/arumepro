@@ -115,7 +115,9 @@ export interface Factura {
   unidad_negocio?: BusinessUnit;
   source?: 'manual' | 'email-ia' | 'manual-group' | 'banco' | 'gmail-sync' | 'dropzone' | 'ia-auto' | 'auto-agrupacion-banco';
   status?: 'ingested' | 'parsed' | 'draft' | 'approved' | 'paid' | 'reconciled' | 'mismatch';
-  file_base64?: string;
+  file_base64?: string;       // LEGACY: PDF/imagen inline. Sigue funcionando pero no se usa para nuevos uploads.
+  file_path?: string;         // NUEVO: ruta en Supabase Storage (bucket arume-files), p.ej. "invoices/2026-05/abc.pdf"
+  file_mime?: string;         // mime type del fichero subido a Storage (para abrir/descargar correctamente)
   albaranIdsArr?: string[];
   albaranIds?: string;
   fecha_pago?: string;
@@ -320,7 +322,9 @@ export interface GastoFijo {
   startDate?: string;
   endDate?: string;
   notes?: string;
-  file_base64?: string;             // PDF/imagen adjunto (nómina, recibo SS, etc.)
+  file_base64?: string;             // LEGACY: PDF/imagen inline.
+  file_path?: string;               // NUEVO: ruta en Supabase Storage (bucket arume-files).
+  file_mime?: string;               // mime type del fichero subido a Storage.
   uploaded_gestoria?: boolean;      // marcada como subida a Bilky/gestoría
   fecha_upload_gestoria?: string;   // fecha en que se marcó como subida
   [key: string]: unknown;
