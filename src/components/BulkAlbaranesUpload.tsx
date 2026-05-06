@@ -12,15 +12,16 @@
 //     el file_hash para deduplicar futuras subidas.
 // ==========================================
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Upload, Loader2, X, CheckCircle2, AlertTriangle, Copy, FileImage } from 'lucide-react';
+import { Upload, Loader2, X, CheckCircle2, AlertTriangle, Copy, FileImage, FolderOpen, Clipboard } from 'lucide-react';
 import { AppData, Albaran, BusinessUnit } from '../types';
 import { sha256OfFile } from '../services/hashFile';
 import { scanBase64 } from '../services/aiProviders';
 import { Num } from '../services/engine';
 import { basicNorm } from '../services/invoicing';
 import { toast } from '../hooks/useToast';
+import { cn } from '../lib/utils';
 
 type FileStatus =
   | { kind: 'pending' }
@@ -124,6 +125,42 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
     reset();
     onClose();
   };
+
+  // Estado UI de drag-and-drop sobre el área de subida
+  const [isDragOver, setIsDragOver] = useState(false);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+
+  // Pegar imágenes del portapapeles (Ctrl/Cmd+V) cuando el modal está abierto.
+  // Un screenshot pegado es un Blob image/png — lo convertimos a File con un
+  // nombre sintético para que el resto del flujo funcione igual que con un
+  // <input type="file">.
+  useEffect(() => {
+    if (!isOpen || phase !== 'idle') return;
+    const onPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const pasted: File[] = [];
+      for (const it of Array.from(items)) {
+        if (it.kind === 'file' && it.type.startsWith('image/')) {
+          const blob = it.getAsFile();
+          if (blob) {
+            const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+            const name = blob.name && blob.name !== 'image.png'
+              ? blob.name
+              : `pegado-${Date.now()}-${pasted.length}.${ext}`;
+            pasted.push(new File([blob], name, { type: blob.type, lastModified: Date.now() }));
+          }
+        }
+      }
+      if (pasted.length > 0) {
+        e.preventDefault();
+        toast.success(`📋 ${pasted.length} imagen(es) pegada(s) del portapapeles.`);
+        handleFiles(pasted);
+      }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [isOpen, phase]);
 
   const handleFiles = async (files: FileList | File[]) => {
     const list = Array.from(files).filter(f => f.type.startsWith('image/'));
@@ -300,15 +337,75 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
           {/* Body */}
           <div className="flex-1 overflow-y-auto px-6 py-5">
             {phase === 'idle' && (
-              <label className="block border-2 border-dashed border-slate-300 rounded-2xl p-10 text-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/30 transition">
-                <FileImage className="w-12 h-12 text-slate-400 mx-auto mb-3" />
-                <p className="text-sm font-black text-slate-700">Selecciona imágenes</p>
-                <p className="text-[11px] font-bold text-slate-500 mt-1">JPG, PNG, HEIC… (puedes elegir varias a la vez)</p>
-                <input
-                  type="file" multiple accept="image/*" className="hidden"
-                  onChange={e => e.target.files && handleFiles(e.target.files)}
-                />
-              </label>
+              <div className="space-y-3">
+                {/* Zona principal: drop + click para imágenes sueltas */}
+                <label
+                  onDragOver={e => { e.preventDefault(); setIsDragOver(true); }}
+                  onDragLeave={() => setIsDragOver(false)}
+                  onDrop={e => {
+                    e.preventDefault();
+                    setIsDragOver(false);
+                    if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
+                  }}
+                  className={cn(
+                    'block border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition',
+                    isDragOver
+                      ? 'border-indigo-500 bg-indigo-50/60 scale-[1.01]'
+                      : 'border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/30',
+                  )}
+                >
+                  <FileImage className="w-12 h-12 text-slate-400 mx-auto mb-3" />
+                  <p className="text-sm font-black text-slate-700">
+                    {isDragOver ? 'Suelta las imágenes aquí' : 'Arrastra imágenes o haz clic para elegirlas'}
+                  </p>
+                  <p className="text-[11px] font-bold text-slate-500 mt-1">JPG, PNG, HEIC… (puedes elegir varias a la vez)</p>
+                  <input
+                    type="file" multiple accept="image/*" className="hidden"
+                    onChange={e => { if (e.target.files) handleFiles(e.target.files); e.target.value = ''; }}
+                  />
+                </label>
+
+                {/* Atajos: carpeta entera + paste */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => folderInputRef.current?.click()}
+                    className="border border-slate-200 bg-white rounded-2xl p-4 text-left hover:border-indigo-400 hover:bg-indigo-50/30 transition flex items-start gap-3"
+                  >
+                    <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center shrink-0">
+                      <FolderOpen className="w-5 h-5 text-indigo-600" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-black text-slate-800">Subir carpeta entera</p>
+                      <p className="text-[10px] font-bold text-slate-500 mt-0.5">Selecciona la carpeta del mes — entran todas las imágenes que contiene</p>
+                    </div>
+                  </button>
+                  {/* Input oculto con webkitdirectory para que el navegador permita
+                      seleccionar UNA carpeta y devuelve todos los ficheros que contiene.
+                      Es no-estándar pero funciona en Chrome, Edge, Firefox y Safari. */}
+                  <input
+                    ref={folderInputRef}
+                    type="file"
+                    multiple
+                    accept="image/*"
+                    className="hidden"
+                    // @ts-expect-error webkitdirectory no está en los tipos de React
+                    webkitdirectory=""
+                    directory=""
+                    onChange={e => { if (e.target.files) handleFiles(e.target.files); e.target.value = ''; }}
+                  />
+
+                  <div className="border border-slate-200 bg-white rounded-2xl p-4 flex items-start gap-3">
+                    <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center shrink-0">
+                      <Clipboard className="w-5 h-5 text-emerald-600" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-black text-slate-800">Pegar imágenes</p>
+                      <p className="text-[10px] font-bold text-slate-500 mt-0.5">Copia las fotos en el explorador y pulsa <kbd className="px-1.5 py-0.5 rounded bg-slate-100 font-mono text-[10px]">Ctrl/Cmd + V</kbd> aquí</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
 
             {phase === 'processing' && (
