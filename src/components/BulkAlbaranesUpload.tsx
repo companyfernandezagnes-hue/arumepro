@@ -20,6 +20,7 @@ import { sha256OfFile } from '../services/hashFile';
 import { scanBase64 } from '../services/aiProviders';
 import { Num } from '../services/engine';
 import { basicNorm } from '../services/invoicing';
+import { advancedProvSimilarity } from '../services/invoiceMatcher';
 import { toast } from '../hooks/useToast';
 import { cn } from '../lib/utils';
 
@@ -107,8 +108,53 @@ const fileToBase64 = (file: File): Promise<string> =>
     reader.readAsDataURL(file);
   });
 
-const dedupeKey = (prov: string, num: string, fecha: string) =>
-  `${basicNorm(prov || '')}::${basicNorm(num || '')}::${(fecha || '').trim()}`;
+// Normaliza un nº de albarán/factura: quita espacios, guiones, barras y
+// ceros a la izquierda. "F-2024-0123" y "F20240123" deben deduplicarse igual.
+const normalizeNum = (num: string): string =>
+  String(num || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .replace(/^0+(?=\d)/, '')
+    .trim();
+
+// Clave para detectar duplicados intra-lote y contra registros previos
+// guardados con metadata (legacy). NO depende de fecha exacta — sólo del mes,
+// porque la IA puede leer fecha de emisión un día y vencimiento al día siguiente.
+const dedupeKey = (prov: string, num: string, fecha: string): string => {
+  const provNorm = basicNorm(prov || '');
+  const numNorm  = normalizeNum(num);
+  const ymNorm   = (fecha || '').slice(0, 7); // YYYY-MM
+  return `${provNorm}::${numNorm}::${ymNorm}`;
+};
+
+// Detector flexible para "este albarán YA está en la bóveda". Usa similitud
+// fuzzy del proveedor (acepta "MAKRO" vs "MAKRO IBÉRICA SAU"), normalización
+// del número, y tolerancia de mes en la fecha. Captura los 3 escenarios:
+//  - misma imagen subida 2 veces (lo pilla el hash, pero por si acaso)
+//  - misma factura con otra foto (proveedor fuzzy + num + mes coinciden)
+//  - misma factura con otra fecha exacta (off-by-one por vencimiento)
+const findExistingMatch = (parsed: ParsedAlbaran, albaranes: Albaran[]): Albaran | undefined => {
+  if (!parsed.proveedor) return undefined;
+  const numNorm = normalizeNum(parsed.num);
+  const ym = (parsed.fecha || '').slice(0, 7);
+  return albaranes.find(a => {
+    if (!a) return false;
+    const provSim = advancedProvSimilarity(a.prov || '', parsed.proveedor);
+    if (provSim < 60) return false;
+    const aNum = normalizeNum(a.num || '');
+    if (numNorm && aNum && (numNorm === aNum || numNorm.includes(aNum) || aNum.includes(numNorm))) {
+      return true;
+    }
+    // Si los números no coinciden, exige mismo mes + total parecido (±2€)
+    if (ym && a.date && a.date.startsWith(ym)) {
+      const aTotal = Math.abs((a as any).total ? parseFloat(String(a.total).replace(',', '.')) : 0);
+      if (parsed.total > 0 && aTotal > 0 && Math.abs(aTotal - parsed.total) <= 2) {
+        return true;
+      }
+    }
+    return false;
+  });
+};
 
 // Limita la concurrencia de promesas (evita saturar la API de Gemini)
 const runWithLimit = async <T,>(items: T[], limit: number, worker: (item: T, i: number) => Promise<void>) => {
@@ -203,14 +249,9 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
     return map;
   }, [albaranes]);
 
-  const metaIndex = useMemo(() => {
-    const map = new Map<string, Albaran>();
-    for (const a of albaranes) {
-      const k = dedupeKey(a.prov || '', a.num || '', a.date || '');
-      if (!map.has(k)) map.set(k, a);
-    }
-    return map;
-  }, [albaranes]);
+  // (Antes había un metaIndex Map, pero su clave era demasiado estricta
+  // — exigía coincidencia exacta de proveedor + num + fecha. Ahora usamos
+  // findExistingMatch con similitud fuzzy.)
 
   const reset = () => {
     setEntries([]);
@@ -316,18 +357,22 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
         // Validación post-IA — detecta señales de "se leyó mal" para marcar
         // el albarán a revisar antes de meterlo al P&L.
         parsed.reviewReasons = validateParsed(parsed);
-        const k = dedupeKey(parsed.proveedor, parsed.num, parsed.fecha);
 
-        // 1º contra la bóveda (existente)
-        const existingMeta = metaIndex.get(k);
+        // 1º contra la bóveda — uso el detector flexible que tolera variaciones
+        // del proveedor (fuzzy 60%+), formatos de número (con/sin guiones,
+        // ceros), y diferencias de fecha (mismo mes + total ±2€). Captura
+        // muchos más duplicados reales que la clave estricta del Map.
+        const existingMeta = findExistingMatch(parsed, albaranes);
         if (existingMeta) {
           setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: { kind: 'duplicate-meta', existing: existingMeta, parsed } } : e));
           return;
         }
-        // 2º contra otros del mismo lote (carpeta con repes)
+        // 2º contra otros del mismo lote (carpeta con repes) — uso clave
+        // tolerante (mes en vez de día) para que dos fotos de la misma factura
+        // con un día de diferencia leído por la IA se detecten como duplicado.
+        const k = dedupeKey(parsed.proveedor, parsed.num, parsed.fecha);
         const inBatch = batchSeen.get(k);
         if (inBatch) {
-          // Construir un Albaran "fake" para mostrar la referencia de la entrada hermana
           const fake: Albaran = {
             id: inBatch.id, date: inBatch.parsed.fecha, prov: inBatch.parsed.proveedor,
             num: inBatch.parsed.num, total: String(inBatch.parsed.total),
@@ -553,35 +598,32 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
                   const dudosos  = newOnes.filter(e => !fiables.includes(e));
                   return (
                     <>
-                      <Section
-                        title={`Nuevos fiables (${fiables.length})`}
-                        color="emerald"
-                        icon={<CheckCircle2 className="w-4 h-4" />}
-                        empty={newOnes.length > 0 ? 'Ninguno fiable — revisa la lista de dudosos.' : 'No hay albaranes nuevos detectados.'}
-                        items={fiables.map(e => ({
-                          key: e.id,
-                          title: (e.status as any).parsed.proveedor || 'Sin proveedor',
-                          sub: `Nº ${(e.status as any).parsed.num} · ${(e.status as any).parsed.fecha} · ${Num.fmt((e.status as any).parsed.total)}`,
-                          hint: e.file.name,
-                        }))}
-                      />
+                      {/* Nuevos FIABLES — grid con thumbnail + datos al lado */}
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                        <div className="flex items-center gap-2 mb-3 text-emerald-700">
+                          <CheckCircle2 className="w-4 h-4" />
+                          <h4 className="text-[11px] font-black uppercase tracking-widest">Nuevos fiables ({fiables.length})</h4>
+                        </div>
+                        {fiables.length === 0 ? (
+                          <p className="text-[11px] font-bold text-slate-400">{newOnes.length > 0 ? 'Ninguno fiable — revisa la lista de dudosos abajo.' : 'No hay albaranes nuevos detectados.'}</p>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {fiables.map(e => <ReviewCard key={e.id} entry={e} kind="fiable" />)}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Nuevos A REVISAR — mismo grid pero ámbar */}
                       {dudosos.length > 0 && (
-                        <Section
-                          title={`Nuevos a revisar (${dudosos.length})`}
-                          color="amber"
-                          icon={<AlertTriangle className="w-4 h-4" />}
-                          empty="—"
-                          items={dudosos.map(e => {
-                            const p = (e.status as any).parsed as ParsedAlbaran;
-                            const reasons = p.reviewReasons || [];
-                            return {
-                              key: e.id,
-                              title: p.proveedor || 'Sin proveedor',
-                              sub: `Nº ${p.num} · ${p.fecha || '—'} · ${Num.fmt(p.total)}`,
-                              hint: `⚠️ ${reasons.join(' · ') || 'IA dudó'} — ${e.file.name}`,
-                            };
-                          })}
-                        />
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                          <div className="flex items-center gap-2 mb-3 text-amber-700">
+                            <AlertTriangle className="w-4 h-4" />
+                            <h4 className="text-[11px] font-black uppercase tracking-widest">Nuevos a revisar ({dudosos.length})</h4>
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {dudosos.map(e => <ReviewCard key={e.id} entry={e} kind="dudoso" />)}
+                          </div>
+                        </div>
                       )}
                     </>
                   );
@@ -656,6 +698,147 @@ const COLOR_MAP: Record<string, { bg: string; border: string; text: string; chip
   amber:   { bg: 'bg-amber-50',   border: 'border-amber-200',   text: 'text-amber-700',   chip: 'bg-amber-100'   },
   rose:    { bg: 'bg-rose-50',    border: 'border-rose-200',    text: 'text-rose-700',    chip: 'bg-rose-100'    },
 };
+
+// ── ReviewCard: tarjeta con thumbnail + datos IA + botón de detalle ────────
+//
+// La usuaria necesita VER que la IA leyó bien antes de confirmar. Esta tarjeta
+// le muestra:
+//   - Miniatura de la foto subida (clickable → preview grande)
+//   - Datos extraídos por la IA (proveedor, num, fecha, total)
+//   - Si es "dudoso", las razones concretas de revisión
+//   - Botón "Ver lectura completa" → modal con la imagen GRANDE y el JSON crudo
+const ReviewCard: React.FC<{ entry: FileEntry; kind: 'fiable' | 'dudoso' }> = ({ entry, kind }) => {
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+  const [showDetail, setShowDetail] = useState(false);
+
+  useEffect(() => {
+    const url = URL.createObjectURL(entry.file);
+    setThumbUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [entry.file]);
+
+  const parsed = (entry.status as any).parsed as ParsedAlbaran;
+  const isDudoso = kind === 'dudoso';
+  const reasons = parsed?.reviewReasons || [];
+
+  return (
+    <>
+      <div className={cn(
+        'flex items-stretch gap-3 p-2.5 rounded-xl border bg-white',
+        isDudoso ? 'border-amber-200' : 'border-emerald-200',
+      )}>
+        {/* Thumbnail clickable */}
+        <button
+          type="button"
+          onClick={() => setShowDetail(true)}
+          className="w-20 h-20 rounded-lg overflow-hidden bg-slate-100 shrink-0 group relative"
+          title="Ver imagen completa y JSON extraído"
+        >
+          {thumbUrl ? (
+            <img src={thumbUrl} alt={entry.file.name} className="w-full h-full object-cover transition group-hover:scale-105" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center">
+              <FileImage className="w-6 h-6 text-slate-400" />
+            </div>
+          )}
+          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition flex items-center justify-center opacity-0 group-hover:opacity-100">
+            <span className="text-[8px] font-black text-white uppercase">VER</span>
+          </div>
+        </button>
+
+        {/* Datos extraídos por la IA */}
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-black text-slate-800 truncate">{parsed.proveedor || <span className="text-rose-500">— sin proveedor —</span>}</p>
+          <p className="text-[10px] font-bold text-slate-600 truncate">
+            {parsed.num || 'S/N'} · {parsed.fecha || <span className="text-rose-500">sin fecha</span>} · {Num.fmt(parsed.total)}
+          </p>
+          {parsed.lineas && parsed.lineas.length > 0 && (
+            <p className="text-[9px] font-bold text-slate-400 truncate">{parsed.lineas.length} línea(s)</p>
+          )}
+          {isDudoso && reasons.length > 0 && (
+            <p className="text-[9px] font-bold text-amber-700 mt-0.5 truncate" title={reasons.join(' · ')}>⚠️ {reasons.join(' · ')}</p>
+          )}
+          {parsed.confidence && (
+            <span className={cn(
+              'inline-block mt-1 text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded',
+              parsed.confidence === 'high'   ? 'bg-emerald-100 text-emerald-700' :
+              parsed.confidence === 'medium' ? 'bg-amber-100 text-amber-700'    :
+                                                'bg-rose-100 text-rose-700',
+            )}>
+              IA: {parsed.confidence}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Modal de detalle: imagen grande + JSON */}
+      {showDetail && thumbUrl && (
+        <div
+          className="fixed inset-0 z-[10005] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setShowDetail(false)}
+        >
+          <div
+            className="bg-white max-w-5xl w-full max-h-[90vh] rounded-2xl overflow-hidden flex flex-col md:flex-row"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="md:w-1/2 bg-slate-900 flex items-center justify-center p-3 max-h-[40vh] md:max-h-none">
+              <img src={thumbUrl} alt={entry.file.name} className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" />
+            </div>
+            <div className="md:w-1/2 flex flex-col">
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Lectura de la IA</p>
+                  <p className="text-sm font-black text-slate-800 truncate">{entry.file.name}</p>
+                </div>
+                <button onClick={() => setShowDetail(false)} className="p-2 rounded-lg hover:bg-slate-200 transition"><X className="w-4 h-4 text-slate-500" /></button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-5 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Proveedor" value={parsed.proveedor || '—'} highlight={!parsed.proveedor} />
+                  <Field label="Nº documento" value={parsed.num || 'S/N'} />
+                  <Field label="Fecha" value={parsed.fecha || '—'} highlight={!parsed.fecha} />
+                  <Field label="Total" value={Num.fmt(parsed.total)} highlight={!parsed.total} />
+                </div>
+                {parsed.lineas && parsed.lineas.length > 0 && (
+                  <div>
+                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">Líneas extraídas ({parsed.lineas.length})</p>
+                    <div className="space-y-1 max-h-48 overflow-y-auto">
+                      {parsed.lineas.map((l, i) => (
+                        <div key={i} className="text-[10px] bg-slate-50 rounded px-2 py-1 flex justify-between gap-2">
+                          <span className="font-bold text-slate-700 truncate">{l.q || 1}× {l.n || '—'} <span className="text-slate-400">({l.u || 'uds'})</span></span>
+                          <span className="font-mono font-black text-slate-800 shrink-0">{Num.fmt(l.t || 0)} <span className="text-slate-400">({l.rate || 0}%)</span></span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {reasons.length > 0 && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                    <p className="text-[10px] font-black uppercase text-amber-800 mb-1">⚠️ Razones de revisión</p>
+                    <ul className="text-[10px] font-bold text-amber-700 list-disc list-inside space-y-0.5">
+                      {reasons.map((r, i) => <li key={i}>{r}</li>)}
+                    </ul>
+                  </div>
+                )}
+                <details className="bg-slate-50 rounded-xl border border-slate-200">
+                  <summary className="cursor-pointer text-[10px] font-black uppercase tracking-widest text-slate-500 p-3 hover:bg-slate-100 transition">JSON crudo de la IA</summary>
+                  <pre className="text-[9px] font-mono text-slate-700 p-3 pt-0 overflow-x-auto whitespace-pre-wrap break-words">{JSON.stringify(parsed, null, 2)}</pre>
+                </details>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+const Field: React.FC<{ label: string; value: string; highlight?: boolean }> = ({ label, value, highlight }) => (
+  <div className={cn('rounded-lg p-2 border', highlight ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-100')}>
+    <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">{label}</p>
+    <p className={cn('text-xs font-black truncate', highlight ? 'text-rose-700' : 'text-slate-800')} title={value}>{value}</p>
+  </div>
+);
 
 interface SectionItem { key: string; title: string; sub: string; hint: string }
 
