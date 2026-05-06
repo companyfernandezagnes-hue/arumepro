@@ -139,6 +139,12 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
 
   // ── UI ─────────────────────────────────────────────────────────────────────
   const [isSaved, setIsSaved] = useState(false);
+  // Estado de la migración a Storage. Definido AQUÍ (antes del early return
+  // `if (!isOpen) return null;`) porque los hooks deben llamarse siempre en
+  // el mismo orden — moverlos abajo provoca el React error #310 cuando el
+  // modal se abre/cierra.
+  const [migrating, setMigrating] = useState(false);
+  const [migrationProgress, setMigrationProgress] = useState({ done: 0, total: 0 });
 
   useEffect(() => {
     if (!isOpen) return;
@@ -350,8 +356,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
   // y los sube al bucket arume-files. Después limpia file_base64 del registro
   // para que la DB pierda el peso. La operación es idempotente — los registros
   // que ya tienen file_path se saltan.
-  const [migrating, setMigrating] = useState(false);
-  const [migrationProgress, setMigrationProgress] = useState({ done: 0, total: 0 });
+  // (state migrating/migrationProgress declarados arriba, antes del early return)
   const handleMigrateToStorage = async () => {
     if (!db) return;
     if (migrating) return;
