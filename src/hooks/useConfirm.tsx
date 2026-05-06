@@ -109,7 +109,7 @@ export function ConfirmProvider() {
     <AnimatePresence>
       {state && (
         <div
-          className="fixed inset-0 z-[9998] flex items-center justify-center p-4 bg-[color:var(--arume-ink)]/70 backdrop-blur-sm"
+          className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-[color:var(--arume-ink)]/70 backdrop-blur-sm"
           onClick={() => handleResolve(false)}
         >
           <motion.div

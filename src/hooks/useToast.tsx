@@ -81,7 +81,7 @@ export function ToastRenderer() {
   }, []);
 
   return (
-    <div className="fixed top-4 right-4 z-[9999] flex flex-col gap-2 pointer-events-none">
+    <div className="fixed top-4 right-4 z-[10001] flex flex-col gap-2 pointer-events-none">
       <AnimatePresence>
         {toasts.map(t => (
           <ToastItem key={t.id} toast={t} onDismiss={dismiss} />
