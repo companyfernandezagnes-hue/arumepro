@@ -264,6 +264,82 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
     toast.success(`✅ ${sinSocio.length} albaranes reparados. Revisa el librito familiar.`);
   };
 
+  // ─── Limpiar TODO lo creado hoy por IA ─────────────────────────────────
+  // Provisional: cuando una sesión de subida masiva o del agente IA ha
+  // dejado basura, este botón borra todos los albaranes y facturas con
+  // source IA cuyo id contenga el timestamp de HOY. NO toca nada manual.
+  const handlePurgeIAToday = async () => {
+    if (!db) return;
+    const albaranesIASources = new Set(['bulk-images']);
+    const facturasIASources  = new Set(['dropzone', 'gmail-sync', 'email-ia', 'ia-auto']);
+
+    const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+    const startMs = startOfDay.getTime();
+    const endMs   = startMs + 24 * 60 * 60 * 1000;
+
+    // Los IDs generados por los flujos IA llevan Date.now() pegado tipo
+    // "alb-20260506-123456-REST-abc123" / "upload-1714998000000-3" /
+    // "email-link-1714998000000". Extraemos el timestamp de cualquier número
+    // de 13 dígitos en el id.
+    const idIsToday = (id: string): boolean => {
+      const matches = String(id).match(/\d{13}/g);
+      if (!matches) return false;
+      return matches.some(m => {
+        const t = parseInt(m, 10);
+        return t >= startMs && t < endMs;
+      });
+    };
+    // Para los albaranes de bulk-images, el id lleva yyyymmdd:
+    //   alb-20260506-123456-REST-abc123
+    const idMatchesYyyymmdd = (id: string): boolean => {
+      const yyyymmdd = `${startOfDay.getFullYear()}${String(startOfDay.getMonth() + 1).padStart(2, '0')}${String(startOfDay.getDate()).padStart(2, '0')}`;
+      return String(id).includes(`-${yyyymmdd}-`);
+    };
+
+    const albaranesABorrar = (db.albaranes || []).filter((a: any) =>
+      a && albaranesIASources.has(String(a.source || '')) && (idIsToday(String(a.id)) || idMatchesYyyymmdd(String(a.id)))
+    );
+    const facturasABorrar = (db.facturas || []).filter((f: any) =>
+      f && facturasIASources.has(String(f.source || '')) && idIsToday(String(f.id))
+    );
+
+    if (albaranesABorrar.length === 0 && facturasABorrar.length === 0) {
+      toast.success('Nada que limpiar. No hay albaranes ni facturas creadas hoy por IA.');
+      return;
+    }
+
+    const preview = [
+      albaranesABorrar.length > 0 ? `• ${albaranesABorrar.length} albarán(es) (subida masiva/imagen)` : '',
+      facturasABorrar.length > 0 ? `• ${facturasABorrar.length} factura(s) (dropzone/agente correo)` : '',
+    ].filter(Boolean).join('\n');
+
+    const ok = await confirm({
+      title: '¿Borrar lo creado hoy por IA?',
+      message: `Se eliminarán SOLO los registros creados HOY por flujos automáticos:\n\n${preview}\n\nNo se toca nada manual ni nada de días anteriores. Los albaranes vinculados a facturas se desvinculan antes.`,
+      danger: true,
+      confirmLabel: `Sí, borrar ${albaranesABorrar.length + facturasABorrar.length} registros`,
+    });
+    if (!ok) return;
+
+    const newData: AppData = JSON.parse(JSON.stringify(db));
+    const albIds = new Set(albaranesABorrar.map((a: any) => String(a.id)));
+    const facIds = new Set(facturasABorrar.map((f: any) => String(f.id)));
+
+    // Quitar facturas
+    newData.facturas = (newData.facturas || []).filter((f: any) => !facIds.has(String(f.id)));
+    // Quitar albaranes y desvincular IDs de las facturas restantes
+    newData.albaranes = (newData.albaranes || []).filter((a: any) => !albIds.has(String(a.id)));
+    newData.facturas = (newData.facturas || []).map((f: any) => {
+      if (!Array.isArray(f.albaranIdsArr) || f.albaranIdsArr.length === 0) return f;
+      const filtered = f.albaranIdsArr.filter((x: any) => !albIds.has(String(x)));
+      return filtered.length === f.albaranIdsArr.length ? f : { ...f, albaranIdsArr: filtered };
+    });
+
+    setDb(newData);
+    onSave(newData);
+    toast.success(`🗑️ Borrados: ${albaranesABorrar.length} albaranes + ${facturasABorrar.length} facturas.`);
+  };
+
   const handleHardReset = async () => {
     const ok = await confirm({
       title: '¿Limpiar caché local?',
@@ -668,6 +744,30 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
                 <div className="flex flex-col justify-center h-full">
                   <ExportTools db={db} onSave={setDb} />
                 </div>
+                <button onClick={handlePurgeIAToday}
+                  className="flex flex-col items-start p-4 bg-rose-50 border-2 border-rose-300 hover:border-rose-500 hover:shadow-md transition-all rounded-2xl text-left">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Trash2 className="w-4 h-4 text-rose-600" />
+                    <span className="font-black text-sm text-rose-900">Borrar lo subido hoy por IA</span>
+                  </div>
+                  <p className="text-[10px] text-rose-700/80 font-bold leading-tight">
+                    {(() => {
+                      const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+                      const yyyymmdd = `${startOfDay.getFullYear()}${String(startOfDay.getMonth() + 1).padStart(2, '0')}${String(startOfDay.getDate()).padStart(2, '0')}`;
+                      const startMs = startOfDay.getTime();
+                      const endMs = startMs + 24 * 60 * 60 * 1000;
+                      const isToday = (id: string) => {
+                        const m = String(id).match(/\d{13}/g);
+                        return (m && m.some(x => { const t = parseInt(x, 10); return t >= startMs && t < endMs; })) || String(id).includes(`-${yyyymmdd}-`);
+                      };
+                      const a = (db?.albaranes || []).filter((x: any) => x && ['bulk-images'].includes(String(x.source || '')) && isToday(String(x.id))).length;
+                      const f = (db?.facturas || []).filter((x: any) => x && ['dropzone', 'gmail-sync', 'email-ia', 'ia-auto'].includes(String(x.source || '')) && isToday(String(x.id))).length;
+                      return a + f === 0
+                        ? 'Nada subido hoy por IA. Limpio.'
+                        : `${a} albarán(es) + ${f} factura(s) creados hoy por subida masiva, dropzone o agente. Solo IA, no manual.`;
+                    })()}
+                  </p>
+                </button>
                 <button onClick={handleRepairAlbaranesSinSocio}
                   className="flex flex-col items-start p-4 bg-amber-50 border border-amber-200 hover:border-amber-400 hover:shadow-md transition-all rounded-2xl text-left">
                   <div className="flex items-center gap-2 mb-1">

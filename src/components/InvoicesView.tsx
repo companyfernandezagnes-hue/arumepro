@@ -801,6 +801,61 @@ Usa punto como separador decimal.`;
     }
   };
 
+  // ── Guardar la factura del email como PENDIENTE sin albaranes ───────────
+  // Usado cuando no hay match (sin albaranes pendientes del proveedor) pero
+  // sí queremos guardar la factura para revisarla luego desde la bóveda.
+  // Marcada needs_review:true → no entra al P&L hasta que se apruebe.
+  const handleSavePendingFromAgent = async ({ email, match }: { email: EmailDraft; match: SmartMatchResult }) => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    try {
+      let base64 = email.fileBase64;
+      if (!base64 && email.messageId && email.attachmentId) {
+        base64 = await GmailDirectSync.fetchAttachmentBase64(email.messageId, email.attachmentId) || undefined;
+      }
+      if (!base64) {
+        toast.error('❌ No se pudo descargar el PDF.');
+        return;
+      }
+      const mime = email.mimeType || 'application/pdf';
+      const newData: any = JSON.parse(JSON.stringify(safeData));
+      if (!Array.isArray(newData.facturas)) newData.facturas = [];
+      const newId = `email-pending-${Date.now()}`;
+      const provFinal = match.emailProveedor || email.from || 'PROVEEDOR';
+      newData.facturas.push({
+        id: newId,
+        tipo: 'compra',
+        num: match.emailNum && match.emailNum !== 'S/N' ? match.emailNum : '',
+        date: match.emailDate || DateUtil.today(),
+        prov: provFinal,
+        total: String(Num.round2(match.emailTotal || 0)),
+        paid: false,
+        reconciled: false,
+        status: 'parsed',
+        source: 'gmail-sync',
+        file_base64: `data:${mime};base64,${base64}`,
+        unidad_negocio: 'REST',
+        needs_review: true,
+        reviewed: false,
+      });
+      await onSave(newData);
+      if (email.messageId) {
+        try { await GmailDirectSync.markAsRead(email.messageId); } catch { /* no bloquea */ }
+      }
+      setAgentResults(prev => prev.filter(r => r.email.id !== email.id));
+      setEmailAuditInbox(prev => prev.filter(e => e.id !== email.id));
+      try {
+        const stored = JSON.parse(localStorage.getItem('arume_gmail_inbox') || '[]');
+        localStorage.setItem('arume_gmail_inbox', JSON.stringify(stored.filter((e: any) => e?.id !== email.id)));
+      } catch { /* ignore */ }
+      toast.success('📝 Factura guardada como pendiente. No entra al P&L hasta que la revises desde la bóveda.');
+    } catch (err: any) {
+      toast.error(`❌ Error: ${err?.message || 'desconocido'}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // ── Ignorar resultado del agente (no era una factura, basura, etc) ──────
   const handleIgnoreAgentResult = async ({ email }: { email: EmailDraft; match: SmartMatchResult }) => {
     if (email.messageId) {
@@ -2285,6 +2340,21 @@ Usa punto como separador decimal.`;
                         >
                           <Check className="w-3.5 h-3.5" />
                           {conf === 'alta' ? 'Vincular factura' : 'Aceptar (revisión)'}
+                        </button>
+                      )}
+                      {/* Cuando no hay match (sin proveedor / sin albaranes pendientes /
+                          confianza baja) ofrecemos guardar la factura como pendiente
+                          en vez de obligar a ignorarla. needs_review:true → no entra
+                          al P&L hasta que la usuaria la apruebe desde la bóveda. */}
+                      {(conf === 'sin_proveedor' || conf === 'baja' || (conf === 'media' && match.matchedAlbaranIds.length === 0)) && match.emailTotal > 0 && (
+                        <button
+                          onClick={() => handleSavePendingFromAgent(res)}
+                          disabled={isProcessing}
+                          className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-1.5 transition disabled:opacity-50"
+                          title="Guarda la factura sin vincular albaranes. Quedará marcada para revisar desde la bóveda."
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          Guardar pendiente
                         </button>
                       )}
                       <button

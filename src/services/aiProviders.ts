@@ -110,12 +110,14 @@ const fileToBase64 = (file: File | Blob): Promise<string> =>
 // ─── Helper: comprimir imagen antes de enviar ────────────────────────────────
 
 const compressImage = async (file: File | Blob): Promise<{ base64: string; mimeType: string }> => {
-  // Parámetros más agresivos — las fotos de WhatsApp suelen venir a 1920x1080+
-  // y provocan timeouts al subir a Gemini. 1200px + calidad 0.7 mantiene
-  // legibilidad para OCR pero divide el tamaño por 3-4.
-  const QUALITY_LEVELS = [0.8, 0.6, 0.4, 0.3];
-  const MAX_BYTES = 1.5 * 1024 * 1024; // 1.5MB límite (antes 3MB)
-  const MAX_W = 1200, MAX_H = 1200;     // antes 1600
+  // Compresión calibrada para OCR: el texto de tickets/albaranes ES PEQUEÑO,
+  // si se comprime demasiado la IA lee mal "8,50€" como "8,90€" o pierde
+  // dígitos. Subimos el techo a 1800px + calidad alta. Si el resultado pasa
+  // de 4MB (límite cómodo para subir a Claude/Gemini), bajamos calidad
+  // progresivamente pero mantenemos resolución alta.
+  const QUALITY_LEVELS = [0.92, 0.85, 0.75, 0.6, 0.45];
+  const MAX_BYTES = 4 * 1024 * 1024;     // 4MB
+  const MAX_W = 1800, MAX_H = 1800;      // antes 1200 — pequeño para OCR fino
 
   const bitmap = await createImageBitmap(file);
   const ratio  = Math.min(MAX_W / bitmap.width, MAX_H / bitmap.height, 1);
@@ -124,7 +126,13 @@ const compressImage = async (file: File | Blob): Promise<{ base64: string; mimeT
 
   const canvas = document.createElement('canvas');
   canvas.width = w; canvas.height = h;
-  canvas.getContext('2d', { alpha: false })?.drawImage(bitmap, 0, 0, w, h);
+  const ctx = canvas.getContext('2d', { alpha: false });
+  if (ctx) {
+    // Suavizado de alta calidad — preserva mejor el contraste del texto
+    ctx.imageSmoothingEnabled = true;
+    (ctx as any).imageSmoothingQuality = 'high';
+    ctx.drawImage(bitmap, 0, 0, w, h);
+  }
 
   let blob: Blob | null = null;
   for (const quality of QUALITY_LEVELS) {
