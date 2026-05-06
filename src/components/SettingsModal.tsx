@@ -117,6 +117,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
   const [config, setConfig] = useState(db?.config || {});
 
   // ── IAs ────────────────────────────────────────────────────────────────────
+  const [claudeKey,   setClaudeKey]   = useState('');
   const [geminiKey,   setGeminiKey]   = useState('');
   const [groqKey,     setGroqKey]     = useState('');
   const [cerebrasKey, setCerebrasKey] = useState('');
@@ -142,6 +143,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
   useEffect(() => {
     if (!isOpen) return;
     setConfig(db?.config || {});
+    setClaudeKey(localStorage.getItem('claude_api_key') || '');
     setGeminiKey(localStorage.getItem('gemini_api_key') || '');
     setGroqKey(localStorage.getItem('groq_api_key') || '');
     setCerebrasKey(localStorage.getItem('cerebras_api_key') || '');
@@ -167,6 +169,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
     if (!db) return;
 
     // IAs
+    if (claudeKey.trim())   localStorage.setItem('claude_api_key',   claudeKey.trim());   else localStorage.removeItem('claude_api_key');
     if (geminiKey.trim())   localStorage.setItem('gemini_api_key',   geminiKey.trim());   else localStorage.removeItem('gemini_api_key');
     if (groqKey.trim())     localStorage.setItem('groq_api_key',     groqKey.trim());     else localStorage.removeItem('groq_api_key');
     if (cerebrasKey.trim()) localStorage.setItem('cerebras_api_key', cerebrasKey.trim()); else localStorage.removeItem('cerebras_api_key');
@@ -334,17 +337,28 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-violet-500 to-cyan-400 rounded-t-[2.5rem]" />
               <SectionTitle icon={Brain} title="Cerebros IA" color="indigo" />
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3">
+
+                {/* Claude (Anthropic) — PRINCIPAL */}
+                <div className="bg-pink-50 p-3 rounded-2xl border-2 border-pink-200 space-y-2 ring-2 ring-pink-100">
+                  <div className="flex items-center justify-between flex-wrap gap-1">
+                    <span className="text-[10px] font-black text-pink-800 uppercase tracking-widest">🟣 Claude</span>
+                    <span className="text-[8px] text-pink-500 font-bold">⭐ PRINCIPAL · imágenes + PDF</span>
+                  </div>
+                  <SecretInput value={claudeKey} onChange={setClaudeKey} placeholder="sk-ant-..." colorClass="pink"
+                    linkHref="https://console.anthropic.com/settings/keys" linkLabel="Crear clave en Anthropic →" />
+                  <p className="text-[8px] text-pink-500 font-bold leading-tight">Sonnet 4.5 — primera opción para leer facturas, tickets y albaranes. Si falla, cae a Gemini.</p>
+                </div>
 
                 {/* Gemini */}
                 <div className="bg-indigo-50 p-3 rounded-2xl border border-indigo-100 space-y-2">
                   <div className="flex items-center justify-between flex-wrap gap-1">
                     <span className="text-[10px] font-black text-indigo-800 uppercase tracking-widest">🔵 Gemini</span>
-                    <span className="text-[8px] text-indigo-400 font-bold">imágenes + PDF</span>
+                    <span className="text-[8px] text-indigo-400 font-bold">fallback · imágenes + PDF</span>
                   </div>
                   <SecretInput value={geminiKey} onChange={setGeminiKey} placeholder="AIzaSy..." colorClass="indigo"
                     linkHref="https://aistudio.google.com/apikey" linkLabel="Gratis en AI Studio →" />
-                  <p className="text-[8px] text-indigo-400 font-bold leading-tight">Principal para fotos de albaranes y PDFs de nóminas de la gestoría</p>
+                  <p className="text-[8px] text-indigo-400 font-bold leading-tight">Respaldo si Claude está saturado o sin clave. También necesario para escaneo multipágina.</p>
                 </div>
 
                 {/* Groq */}

@@ -7,9 +7,10 @@
  * ║  proveedores de IA directamente.                                 ║
  * ║                                                                  ║
  * ║  Proveedores soportados:                                         ║
- * ║   🔵 Gemini   — imágenes + PDFs (principal)                      ║
+ * ║   🟣 Claude   — imágenes + PDFs (PRINCIPAL — Anthropic)          ║
+ * ║   🔵 Gemini   — imágenes + PDFs (fallback)                       ║
  * ║   🟢 Groq     — velocidad + Whisper (voz)                        ║
- * ║   🟣 Cerebras — texto ultrarrápido (~0.10$/M tokens)             ║
+ * ║   🟪 Cerebras — texto ultrarrápido (~0.10$/M tokens)             ║
  * ║   🔷 DeepSeek — análisis largo (5M tokens gratis al registrarse) ║
  * ║   🇪🇺 Mistral  — backup europeo visión (1B tokens/mes gratis)    ║
  * ╚══════════════════════════════════════════════════════════════════╝
@@ -17,7 +18,7 @@
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
-export type AIProvider = 'gemini' | 'groq' | 'cerebras' | 'deepseek' | 'mistral';
+export type AIProvider = 'claude' | 'gemini' | 'groq' | 'cerebras' | 'deepseek' | 'mistral';
 
 export type VoiceProvider = 'browser' | 'groq';
 
@@ -44,6 +45,7 @@ const getKey = (name: string): string =>
   (sessionStorage.getItem(name) || localStorage.getItem(name) || '').trim();
 
 export const keys = {
+  claude:   () => getKey('claude_api_key'),
   gemini:   () => getKey('gemini_api_key'),
   groq:     () => getKey('groq_api_key'),
   cerebras: () => getKey('cerebras_api_key'),
@@ -57,6 +59,7 @@ export const voiceProvider = (): VoiceProvider =>
 // ─── Modelos preferidos por proveedor ─────────────────────────────────────────
 
 const MODELS: Record<AIProvider, string> = {
+  claude:   'claude-sonnet-4-5',
   gemini:   'gemini-2.5-flash',
   groq:     'llama-3.3-70b-versatile',
   cerebras: 'llama3.1-8b',
@@ -65,6 +68,9 @@ const MODELS: Record<AIProvider, string> = {
 };
 
 const VISION_MODELS: Partial<Record<AIProvider, string>> = {
+  // Claude Sonnet 4.5 — visión + PDFs nativos. Preferido como primer proveedor
+  // por precisión OCR superior en facturas/tickets.
+  claude:  'claude-sonnet-4-5',
   gemini:  'gemini-2.5-flash',
   mistral: 'pixtral-12b-2409',
   // llama-3.2-11b-vision-preview fue deprecado en dic 2025. Reemplazado por
@@ -164,10 +170,34 @@ export const scanDocument = async (
   // Si se fuerza un proveedor concreto (p.ej. 'gemini' para tickets de caja),
   // NO hacemos fallback a otros modelos: si el más capaz no lo lee, mejor que
   // la usuaria meta los números a mano que confiar en un modelo más débil.
+  const onlyClaude  = forceProvider === 'claude';
   const onlyGemini  = forceProvider === 'gemini';
   const onlyMistral = forceProvider === 'mistral';
   const onlyGroq    = forceProvider === 'groq';
   const tryAll      = !forceProvider;
+
+  // 🟣 Claude PRIMERO — preferido por la usuaria (suscripción Anthropic propia).
+  // Soporta imágenes + PDFs nativos. Mismo retry contra 429/529/overloaded.
+  const claudeKey = keys.claude();
+  if (claudeKey && (onlyClaude || tryAll)) {
+    const isTransient = (m: string) =>
+      /overloaded|temporarily|529|503|429|rate.?limit/i.test(m);
+    const delays = [0, 2000, 5000];
+    let lastErr = '';
+    for (let i = 0; i < delays.length; i++) {
+      if (delays[i] > 0) await new Promise(r => setTimeout(r, delays[i]));
+      try {
+        return await _scanWithClaude(file, prompt, claudeKey, isImage);
+      } catch (e: any) {
+        lastErr = e?.message || String(e);
+        console.warn(`[aiProviders] Claude scanDocument intento ${i + 1}/${delays.length}:`, lastErr);
+        if (!isTransient(lastErr)) break;
+      }
+    }
+    errors.push(`Claude: ${lastErr}`);
+  } else if (!claudeKey && (onlyClaude || tryAll)) {
+    errors.push('Claude: sin API key configurada');
+  }
 
   const gemKey = keys.gemini();
   if (gemKey && (onlyGemini || tryAll)) {
@@ -228,8 +258,8 @@ export const scanDocument = async (
       ? `No se pudo escanear con ${forceProvider} (forzado, sin fallback). Mete los números a mano.\n\n`
       : `No se pudo escanear con ningún proveedor de visión.\n\n`) +
     errors.map(e => `• ${e}`).join('\n') +
-    (isPDF && errors[0]?.startsWith('Gemini:')
-      ? '\n\n⚠️ IMPORTANTE: Mistral y Groq NO soportan PDFs. Para PDFs solo sirve Gemini.'
+    (isPDF
+      ? '\n\n⚠️ Para PDFs sólo sirven Claude y Gemini. Mistral y Groq NO los soportan.'
       : '')
   );
 };
@@ -324,6 +354,28 @@ export const scanBase64 = async (
   // genérico inútil.
   const errors: string[] = [];
 
+  // 🟣 Claude PRIMERO — preferido por la usuaria. Visión + PDFs nativos.
+  const claudeKey = keys.claude();
+  if (claudeKey) {
+    const isTransientClaude = (msg: string) =>
+      /overloaded|temporarily|529|503|429|rate.?limit/i.test(msg);
+    const delays = [0, 2000, 5000];
+    let lastErr = '';
+    for (let i = 0; i < delays.length; i++) {
+      if (delays[i] > 0) await new Promise(r => setTimeout(r, delays[i]));
+      try {
+        return await _scanBase64WithClaude(cleanB64, mimeType, prompt, claudeKey);
+      } catch (e: any) {
+        lastErr = e?.message || String(e);
+        console.warn(`[aiProviders] Claude intento ${i + 1}/${delays.length}:`, lastErr);
+        if (!isTransientClaude(lastErr)) break;
+      }
+    }
+    errors.push(`Claude: ${lastErr}`);
+  } else {
+    errors.push('Claude: sin API key configurada');
+  }
+
   const gemKey = keys.gemini();
   if (gemKey) {
     // Reintentar con backoff cuando Gemini devuelve "high demand" / 503 / 429.
@@ -381,10 +433,124 @@ export const scanBase64 = async (
   throw new Error(
     `No se pudo escanear con ningún proveedor de visión.\n\n` +
     errors.map(e => `• ${e}`).join('\n') +
-    (mimeType === 'application/pdf' && (!gemKey || errors[0]?.startsWith('Gemini:'))
-      ? '\n\n⚠️ IMPORTANTE: Mistral y Groq NO soportan PDFs. Para PDFs solo sirve Gemini.'
+    (mimeType === 'application/pdf'
+      ? '\n\n⚠️ Para PDFs sólo sirven Claude y Gemini. Mistral y Groq NO los soportan.'
       : '')
   );
+};
+
+// ─── Claude (Anthropic) ──────────────────────────────────────────────────────
+//
+// API directa al endpoint /v1/messages desde el navegador. Necesita el header
+// `anthropic-dangerous-direct-browser-access: true` — Anthropic lo exige para
+// llamadas desde el navegador (la cabecera por sí sola no expone más nada que
+// la API key, que ya tenemos en localStorage).
+//
+// Claude soporta:
+//   - imágenes (image/jpeg, image/png, image/gif, image/webp) vía base64
+//   - PDFs nativos (application/pdf) vía content block "document"
+// Ambos tipos en el mismo formato. Pedimos JSON crudo en el prompt y
+// extraemos el primer bloque de texto de la respuesta.
+
+const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
+const CLAUDE_HEADERS = (apiKey: string) => ({
+  'Content-Type': 'application/json',
+  'x-api-key': apiKey,
+  'anthropic-version': '2023-06-01',
+  'anthropic-dangerous-direct-browser-access': 'true',
+});
+
+const _claudeContentBlock = (mimeType: string, base64: string) => {
+  if (mimeType === 'application/pdf') {
+    return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } };
+  }
+  // Normalizar tipos de imagen aceptados
+  const m = mimeType.startsWith('image/') ? mimeType : 'image/jpeg';
+  return { type: 'image', source: { type: 'base64', media_type: m, data: base64 } };
+};
+
+const _scanWithClaude = async (
+  file: File, prompt: string, apiKey: string, isImage: boolean
+): Promise<ScanResult> => {
+  const model = VISION_MODELS.claude!;
+  const base64 = isImage
+    ? (await compressImage(file)).base64
+    : await fileToBase64(file);
+  const mimeType = isImage ? 'image/jpeg' : 'application/pdf';
+
+  const body = {
+    model,
+    max_tokens: 2048,
+    temperature: 0.1,
+    messages: [{
+      role: 'user',
+      content: [
+        _claudeContentBlock(mimeType, base64),
+        // Reforzamos "SOLO JSON" porque Claude tiende a envolver la respuesta
+        // en explicación a menos que se le diga claramente. parseJSON aguanta
+        // markdown ```json``` por si acaso.
+        { type: 'text', text: `${prompt}\n\nResponde ÚNICAMENTE con el JSON pedido, sin explicaciones, sin markdown, sin texto antes ni después.` },
+      ],
+    }],
+  };
+
+  const res = await fetchWithTimeout(CLAUDE_API_URL, {
+    method: 'POST',
+    headers: CLAUDE_HEADERS(apiKey),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errJson = await res.json().catch(() => ({} as any));
+    const msg = errJson?.error?.message || `HTTP ${res.status}`;
+    throw new Error(`Claude Vision: ${msg}`);
+  }
+  const data = await res.json();
+  if (data?.stop_reason && data.stop_reason !== 'end_turn' && data.stop_reason !== 'stop_sequence') {
+    if (data.stop_reason === 'max_tokens') {
+      throw new Error('Claude se cortó (max_tokens). Documento demasiado complejo para 2048 tokens.');
+    }
+    throw new Error(`Claude paró con stop_reason=${data.stop_reason}.`);
+  }
+  const block = (data?.content || []).find((c: any) => c?.type === 'text');
+  const text = block?.text || '';
+  if (!text.trim()) throw new Error('Claude devolvió respuesta vacía.');
+  return { raw: parseJSON(text), provider: 'claude', model };
+};
+
+const _scanBase64WithClaude = async (
+  base64: string, mimeType: string, prompt: string, apiKey: string
+): Promise<ScanResult> => {
+  const model = VISION_MODELS.claude!;
+  const body = {
+    model,
+    max_tokens: 2048,
+    temperature: 0.1,
+    messages: [{
+      role: 'user',
+      content: [
+        _claudeContentBlock(mimeType, base64),
+        { type: 'text', text: `${prompt}\n\nResponde ÚNICAMENTE con el JSON pedido, sin explicaciones, sin markdown, sin texto antes ni después.` },
+      ],
+    }],
+  };
+  const res = await fetchWithTimeout(CLAUDE_API_URL, {
+    method: 'POST',
+    headers: CLAUDE_HEADERS(apiKey),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errJson = await res.json().catch(() => ({} as any));
+    const msg = errJson?.error?.message || `HTTP ${res.status}`;
+    throw new Error(`Claude Vision: ${msg}`);
+  }
+  const data = await res.json();
+  if (data?.stop_reason === 'max_tokens') {
+    throw new Error('Claude se cortó (max_tokens).');
+  }
+  const block = (data?.content || []).find((c: any) => c?.type === 'text');
+  const text = block?.text || '';
+  if (!text.trim()) throw new Error('Claude devolvió respuesta vacía.');
+  return { raw: parseJSON(text), provider: 'claude', model };
 };
 
 const _scanWithGemini = async (
@@ -807,6 +973,7 @@ const _chatGemini = async (
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export const getProvidersStatus = (): Record<AIProvider, boolean> => ({
+  claude:   !!keys.claude(),
   gemini:   !!keys.gemini(),
   groq:     !!keys.groq(),
   cerebras: !!keys.cerebras(),
