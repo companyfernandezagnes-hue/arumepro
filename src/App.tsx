@@ -1,10 +1,10 @@
 import AuthScreen from './components/AuthScreen';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { 
+import {
   LayoutDashboard, Package, Wallet, ChefHat, Users, Settings, Search,
-  TrendingUp, X, RefreshCw, FileText, Truck, Scale, Zap, Building2, 
+  TrendingUp, X, RefreshCw, FileText, Truck, Scale, Zap, Building2,
   PieChart, Lock, Import, Sparkles, WifiOff, AlertTriangle, Camera, Loader2,
-  Receipt, Megaphone, Maximize, ShoppingBag, BookOpen, Bell, Bot, ShieldCheck
+  Receipt, Megaphone, Maximize, ShoppingBag, BookOpen, Bell, Bot, ShieldCheck, Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -461,7 +461,7 @@ function DesktopTabButton<T extends string>({ item, active, onClick }: { item: D
  * 4. COMPONENTE APP PRINCIPAL
  * ======================================================= */
 export default function App() {
-  const { data: db, loading, saveData, setData, reloadData } = useArumeData();
+  const { data: db, loading, saveData, setData, reloadData, isDirty, lastSaved } = useArumeData();
   const dbRef = useRef<typeof db>(db);
   const [dataVersion, setDataVersion] = useState(0);
   useEffect(() => {
@@ -589,13 +589,23 @@ export default function App() {
     try {
       while (lastPayloadRef.current) {
         const payload = lastPayloadRef.current; lastPayloadRef.current = null;
-        setData(payload); 
-        localStorage.setItem('arume_backup_last', JSON.stringify(payload)); 
-        if (!isOffline) await saveData(payload); 
+        setData(payload);
+        localStorage.setItem('arume_backup_last', JSON.stringify(payload));
+        // 🔒 SIEMPRE llamar a saveData. Internamente detecta el fallo de red y
+        // pone el cambio en la cola offline (offlineQueue) para flushear al
+        // reconectar. ANTES saltábamos esto en isOffline → el cambio quedaba
+        // sólo en arume_backup_last (que nunca se auto-restaura) y se perdía
+        // cuando loadData recargaba del servidor.
+        const result = await saveData(payload);
+        if (result.offline) {
+          toast.warning('📵 Sin conexión. Tu cambio está guardado en local y se subirá automáticamente cuando vuelva la red.');
+        } else if (result.conflict) {
+          toast.warning('⚠️ Otro dispositivo guardó cambios primero — recargando los más recientes.');
+        }
       }
-    } catch (error) { console.error("Error crítico al guardar:", error); } 
+    } catch (error) { console.error("Error crítico al guardar:", error); }
     finally { isSyncingRef.current = false; setIsSyncing(false); }
-  }, [saveData, setData, isOffline]);
+  }, [saveData, setData]);
 
   // ── Captura de foto / ticket con cámara ──────────────────────────────────
   const handlePhotoCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -821,7 +831,7 @@ export default function App() {
               <Search className="w-3 h-3" /> Acciones (⌘K)
             </button>
             {isOffline && (
-              <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-200 px-2 py-1.5 rounded">
+              <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-200 px-2 py-1.5 rounded" title="Sin conexión a Internet. Los cambios se guardan en local y se subirán solos cuando vuelva la red.">
                 <WifiOff className="w-3 h-3 text-rose-500" />
                 <span className="text-[9px] text-rose-600 font-bold uppercase">Offline</span>
               </div>
@@ -830,6 +840,18 @@ export default function App() {
               <div className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-100 px-2 py-1.5 rounded">
                 <RefreshCw className="w-3 h-3 text-indigo-500 animate-spin" />
                 <span className="text-[9px] text-indigo-600 font-bold uppercase">Guardando</span>
+              </div>
+            )}
+            {!isSyncing && !isOffline && isDirty && (
+              <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 px-2 py-1.5 rounded" title="Hay cambios en cola pendientes de subir. Se subirán automáticamente.">
+                <RefreshCw className="w-3 h-3 text-amber-500" />
+                <span className="text-[9px] text-amber-600 font-bold uppercase">Pendiente</span>
+              </div>
+            )}
+            {!isSyncing && !isOffline && !isDirty && lastSaved && (
+              <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-100 px-2 py-1.5 rounded" title={`Guardado: ${lastSaved.toLocaleString('es-ES')}`}>
+                <Check className="w-3 h-3 text-emerald-500" />
+                <span className="text-[9px] text-emerald-700 font-bold uppercase">Guardado</span>
               </div>
             )}
             <button onClick={toggleFullScreen} aria-label="Pantalla Completa" className="hidden sm:flex w-8 h-8 items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-indigo-600 rounded transition">
