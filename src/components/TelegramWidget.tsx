@@ -7,7 +7,41 @@ import { useVoiceInput } from '../hooks/useVoiceInput';
 interface TelegramWidgetProps {
   currentModule: string;
   chatId?: string;
+  // 🆕 Token del bot leído de db.config.telegramToken. Pasarlo aquí permite
+  // llamar a la API de Telegram directamente desde el navegador, sin pasar
+  // por la Edge Function "telegram-send" de Supabase. Telegram permite CORS
+  // para sendMessage, así que la llamada funciona y no consume cuota Supabase.
+  botToken?: string;
 }
+
+// Llamada DIRECTA a la API de Telegram desde el navegador.
+// Antes esto pasaba por una Edge Function de Supabase ("telegram-send") que
+// añadía el token de bot. Telegram permite CORS para sendMessage, así que no
+// hace falta intermediario — y nos ahorramos miles de invocaciones de Edge.
+const sendDirectToTelegram = async (
+  botToken: string,
+  chatId: string,
+  text: string,
+  parseMode: 'MarkdownV2' | 'Markdown' | 'HTML' = 'MarkdownV2',
+  timeoutMs = 6000,
+): Promise<boolean> => {
+  if (!botToken || !chatId) return false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: parseMode }),
+      signal: controller.signal,
+    });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 type ChatMessage = {
   id: string;
@@ -56,7 +90,7 @@ const fetchWithTimeout = async (resource: string, options: RequestInit & { timeo
   }
 };
 
-export const TelegramWidget = ({ currentModule, chatId }: TelegramWidgetProps) => {
+export const TelegramWidget = ({ currentModule, chatId, botToken }: TelegramWidgetProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const [message, setMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -100,29 +134,16 @@ export const TelegramWidget = ({ currentModule, chatId }: TelegramWidgetProps) =
   useEffect(() => {
     const handleAppAlert = async (e: any) => {
       const alerta = e.detail;
-      if (alerta && chatId) {
-        try {
-          addSystemMessage(`🔔 Alerta de sistema enviada a Telegram`, 'system');
-          
-          const safeText = escapeMarkdownV2(`🚨 ALERTA ARUME\n\n${alerta}`);
-          await fetchWithTimeout(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/telegram-send`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
-            },
-            body: JSON.stringify({ chat_id: chatId, text: safeText, parse_mode: 'MarkdownV2' }),
-            timeout: 5000
-          });
-        } catch (err) {
-          console.warn("No se pudo enviar la alerta automática a Telegram.");
-        }
-      }
+      if (!alerta || !chatId || !botToken) return;
+      // Llamada directa a Telegram, sin pasar por Supabase Edge Functions.
+      const safeText = escapeMarkdownV2(`🚨 ALERTA ARUME\n\n${alerta}`);
+      const ok = await sendDirectToTelegram(botToken, chatId, safeText, 'MarkdownV2', 5000);
+      if (ok) addSystemMessage('🔔 Alerta enviada a Telegram', 'system');
     };
 
     window.addEventListener('arume-bot-alert', handleAppAlert);
     return () => window.removeEventListener('arume-bot-alert', handleAppAlert);
-  }, [chatId]);
+  }, [chatId, botToken]);
 
   // Reconexión y drenaje de cola offline
   useEffect(() => {
@@ -201,28 +222,11 @@ export const TelegramWidget = ({ currentModule, chatId }: TelegramWidgetProps) =
       return;
     }
 
-    // 🚀 2. GESTIÓN DE VIDA PERSONAL (VA A TELEGRAM)
+    // 🚀 2. GESTIÓN DE VIDA PERSONAL (VA A TELEGRAM, DIRECTO SIN SUPABASE)
     let telegramSuccess = false;
-    if (chatId) {
-      try {
-        const safeText = escapeMarkdownV2(`[Nota desde Arume]\n\n${texto}`);
-        await fetchWithTimeout(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/telegram-send`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
-          },
-          body: JSON.stringify({
-            chat_id: chatId,
-            text: safeText,
-            parse_mode: 'MarkdownV2'
-          }),
-          timeout: 6000
-        });
-        telegramSuccess = true;
-      } catch (error) {
-        console.warn("Fallo silencioso al conectar con Telegram.");
-      }
+    if (chatId && botToken) {
+      const safeText = escapeMarkdownV2(`[Nota desde Arume]\n\n${texto}`);
+      telegramSuccess = await sendDirectToTelegram(botToken, chatId, safeText, 'MarkdownV2', 6000);
     }
 
     // 🚀 3. RESPUESTA CORTÉS DE GROQ (Para que no quede en blanco)

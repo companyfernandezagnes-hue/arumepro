@@ -916,7 +916,7 @@ export default function App() {
         </AnimatePresence>
 
         <React.Suspense fallback={null}>
-          <TelegramWidget currentModule={TAB_LABELS[activeTab]} chatId={db?.config?.telegramChatId} />
+          <TelegramWidget currentModule={TAB_LABELS[activeTab]} chatId={db?.config?.telegramChatId} botToken={db?.config?.telegramToken} />
         </React.Suspense>
 
         <MobileTabBar items={navItems} activeKey={activeTab} onChange={(k) => handleTabChange(k)} />
