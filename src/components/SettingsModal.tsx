@@ -565,6 +565,76 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
 
         {/* ── CUERPO ───────────────────────────────────────────────────────── */}
         <div className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar">
+          {/* 🚨 BANNER GIGANTE DE LIMPIEZA: visible siempre que haya basura IA
+              sin marca temporal. Imposible de pasar por alto. */}
+          {(() => {
+            const albasSucios   = (db?.albaranes || []).filter((a: any) => a && ['bulk-images'].includes(String(a.source || '')) && !a.created_at);
+            const facsSucias    = (db?.facturas || []).filter((f: any) => f && ['dropzone', 'gmail-sync', 'email-ia', 'ia-auto'].includes(String(f.source || '')) && !f.created_at);
+            const totalSucios   = albasSucios.length + facsSucias.length;
+            if (totalSucios === 0) return null;
+            return (
+              <div className="mb-6 bg-gradient-to-r from-rose-600 to-rose-500 text-white rounded-2xl shadow-xl border-2 border-rose-400 p-5"
+                   style={{ boxShadow: '0 0 0 0 rgba(244,63,94,0.6)', animation: 'arume-pulse-glow 2s ease-in-out infinite' }}>
+                <style>{`
+                  @keyframes arume-pulse-glow {
+                    0%, 100% { box-shadow: 0 0 0 0 rgba(244,63,94,0.7), 0 8px 24px rgba(244,63,94,0.3); }
+                    50%      { box-shadow: 0 0 0 12px rgba(244,63,94,0), 0 8px 24px rgba(244,63,94,0.5); }
+                  }
+                `}</style>
+                <div className="flex items-start gap-4">
+                  <div className="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center shrink-0 animate-bounce">
+                    <ShieldAlert className="w-7 h-7 text-white" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-black text-rose-100 uppercase tracking-widest">⚠️ Lote pifiado detectado</p>
+                    <h3 className="text-xl font-black tracking-tight mt-1">
+                      {totalSucios} registros IA sin marca temporal
+                    </h3>
+                    <p className="text-xs font-bold text-rose-50 mt-1">
+                      {albasSucios.length} albaranes + {facsSucias.length} facturas creados antes del fix de hoy. La IA pudo leer fechas/proveedores incorrectos. Bórralos de un click y vuelve a subir.
+                    </p>
+                    <button
+                      onClick={handlePurgeIANoCreatedAt}
+                      className="mt-4 bg-white text-rose-700 hover:bg-rose-50 font-black text-sm uppercase tracking-widest px-6 py-3 rounded-xl shadow-lg transition active:scale-95 flex items-center gap-2"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                      🗑️ Borrar los {totalSucios} registros pifiados
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Banner secundario para "lo subido HOY por IA" — solo si hay registros con created_at de hoy */}
+          {(() => {
+            const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+            const startMs = startOfDay.getTime();
+            const endMs = startMs + 24 * 60 * 60 * 1000;
+            const isToday = (item: any) => {
+              if (!item?.created_at) return false;
+              const t = Date.parse(item.created_at);
+              return !Number.isNaN(t) && t >= startMs && t < endMs;
+            };
+            const a = (db?.albaranes || []).filter((x: any) => x && ['bulk-images'].includes(String(x.source || '')) && isToday(x)).length;
+            const f = (db?.facturas || []).filter((x: any) => x && ['dropzone', 'gmail-sync', 'email-ia', 'ia-auto'].includes(String(x.source || '')) && isToday(x)).length;
+            const total = a + f;
+            if (total === 0) return null;
+            return (
+              <div className="mb-6 bg-amber-50 border-2 border-amber-400 rounded-2xl p-4 flex items-center gap-3">
+                <Trash2 className="w-6 h-6 text-amber-600 shrink-0" />
+                <div className="flex-1">
+                  <p className="text-sm font-black text-amber-900">{total} registros IA subidos HOY</p>
+                  <p className="text-[11px] font-bold text-amber-700">{a} albaranes + {f} facturas. Pulsa para borrarlos solo si la IA leyó mal.</p>
+                </div>
+                <button onClick={handlePurgeIAToday}
+                  className="bg-amber-600 hover:bg-amber-500 text-white font-black text-xs uppercase tracking-widest px-4 py-2.5 rounded-xl shadow flex items-center gap-2 active:scale-95">
+                  <Trash2 className="w-4 h-4" /> Borrar
+                </button>
+              </div>
+            );
+          })()}
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
             {/* ══════════════════════════════════════════════════════════════
