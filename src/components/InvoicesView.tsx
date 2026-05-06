@@ -2183,8 +2183,8 @@ Usa punto como separador decimal.`;
                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Cruza PDFs del correo con facturas de tu bóveda automáticamente.</p>
               </div>
             </div>
-            <button onClick={fetchPendingAudits} disabled={isSyncing} className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition shadow-lg flex items-center gap-2 disabled:opacity-50 whitespace-nowrap">
-              {isSyncing ? <Loader2 className="w-4 h-4 animate-spin"/> : <Search className="w-4 h-4" />} Escanear Buzón
+            <button onClick={fetchPendingAudits} disabled={isSyncing || agentScanning} className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition shadow-lg flex items-center gap-2 disabled:opacity-50 whitespace-nowrap">
+              {(isSyncing || agentScanning) ? <Loader2 className="w-4 h-4 animate-spin"/> : <Search className="w-4 h-4" />} Escanear Buzón
             </button>
           </div>
 

@@ -158,6 +158,12 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
     let done = initial.length - pendientes.length;
     setProgress({ done, total: initial.length });
 
+    // Dedupe intra-lote: si la usuaria sube 3 fotos del mismo albarán (distintos
+    // ángulos → distintos hashes pero mismos prov+num+fecha), sólo la primera
+    // se marca como "new". Las siguientes se marcan duplicate-meta apuntando
+    // a la primera del lote.
+    const batchSeen = new Map<string, { id: string; parsed: ParsedAlbaran }>();
+
     await runWithLimit(pendientes, 3, async (entry) => {
       setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: { kind: 'scanning' } } : e));
       try {
@@ -171,11 +177,27 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
           lineas: Array.isArray(raw.lineas) ? raw.lineas : [],
         };
         const k = dedupeKey(parsed.proveedor, parsed.num, parsed.fecha);
+
+        // 1º contra la bóveda (existente)
         const existingMeta = metaIndex.get(k);
-        const newStatus: FileStatus = existingMeta
-          ? { kind: 'duplicate-meta', existing: existingMeta, parsed }
-          : { kind: 'new', parsed };
-        setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: newStatus } : e));
+        if (existingMeta) {
+          setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: { kind: 'duplicate-meta', existing: existingMeta, parsed } } : e));
+          return;
+        }
+        // 2º contra otros del mismo lote (carpeta con repes)
+        const inBatch = batchSeen.get(k);
+        if (inBatch) {
+          // Construir un Albaran "fake" para mostrar la referencia de la entrada hermana
+          const fake: Albaran = {
+            id: inBatch.id, date: inBatch.parsed.fecha, prov: inBatch.parsed.proveedor,
+            num: inBatch.parsed.num, total: String(inBatch.parsed.total),
+          };
+          setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: { kind: 'duplicate-meta', existing: fake, parsed } } : e));
+          return;
+        }
+        // 3º nuevo — registrar para que las siguientes hermanas lo detecten
+        batchSeen.set(k, { id: entry.id, parsed });
+        setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: { kind: 'new', parsed } } : e));
       } catch (err: any) {
         const msg = err?.message || 'IA falló';
         setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: { kind: 'failed', reason: msg } } : e));

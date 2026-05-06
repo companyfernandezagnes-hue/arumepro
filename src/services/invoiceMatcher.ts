@@ -201,13 +201,18 @@ export const smartMatchInvoiceToAlbaranes = (
     emailNum: input.num_factura || '',
   };
 
-  // FASE 1: match por número de factura (raro pero posible)
+  // FASE 1: match por número de factura (raro pero posible).
+  // Exigimos 6+ chars y que la diferencia de longitud no sea > 3, para evitar
+  // falsos positivos del estilo "F2024" ⊂ "F2024-001-MK" (números cortos como
+  // prefijo de otros).
   if (input.num_factura && input.num_factura !== 'S/N') {
     const numNorm = String(input.num_factura).replace(/[^a-z0-9]/gi, '').toLowerCase();
-    if (numNorm.length >= 4) {
+    if (numNorm.length >= 6) {
       const direct = albaranesPool.find(a => {
         const albNum = String(a.num || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
-        return albNum.length >= 4 && (albNum.includes(numNorm) || numNorm.includes(albNum));
+        if (albNum.length < 6) return false;
+        if (Math.abs(albNum.length - numNorm.length) > 3) return false;
+        return albNum.includes(numNorm) || numNorm.includes(albNum);
       });
       if (direct) {
         const total = Math.abs(albaranSafeTotal(direct));

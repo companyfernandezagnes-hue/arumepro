@@ -171,13 +171,24 @@ export const scanDocument = async (
 
   const gemKey = keys.gemini();
   if (gemKey && (onlyGemini || tryAll)) {
-    try {
-      return await _scanWithGemini(file, prompt, gemKey, isImage);
-    } catch (e: any) {
-      const msg = e?.message || String(e);
-      console.warn('[aiProviders] Gemini falló en scanDocument:', msg);
-      errors.push(`Gemini: ${msg}`);
+    // Reintentar con backoff cuando Gemini devuelve "high demand"/503/429.
+    // Sin esto, un ticket de caja (forzado a gemini, sin fallback) falla
+    // inmediatamente con un pico transitorio del lado de Google.
+    const isTransient = (m: string) =>
+      /high demand|overloaded|temporarily|UNAVAILABLE|503|429|rate.?limit/i.test(m);
+    const delays = [0, 2000, 5000];
+    let lastErr = '';
+    for (let i = 0; i < delays.length; i++) {
+      if (delays[i] > 0) await new Promise(r => setTimeout(r, delays[i]));
+      try {
+        return await _scanWithGemini(file, prompt, gemKey, isImage);
+      } catch (e: any) {
+        lastErr = e?.message || String(e);
+        console.warn(`[aiProviders] Gemini scanDocument intento ${i + 1}/${delays.length}:`, lastErr);
+        if (!isTransient(lastErr)) break;
+      }
     }
+    errors.push(`Gemini: ${lastErr}`);
   } else if (!gemKey && (onlyGemini || tryAll)) {
     errors.push('Gemini: sin API key configurada');
   }
