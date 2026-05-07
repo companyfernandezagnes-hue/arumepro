@@ -17,7 +17,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Upload, Loader2, X, CheckCircle2, AlertTriangle, Copy, FileImage, FolderOpen, Clipboard } from 'lucide-react';
 import { AppData, Albaran, BusinessUnit } from '../types';
 import { sha256OfFile } from '../services/hashFile';
-import { scanBase64 } from '../services/aiProviders';
+import { scanBase64, preprocessImageForOCR } from '../services/aiProviders';
 import { Num } from '../services/engine';
 import { basicNorm } from '../services/invoicing';
 import { advancedProvSimilarity } from '../services/invoiceMatcher';
@@ -79,6 +79,13 @@ const validateParsed = (p: ParsedAlbaran): string[] => {
 
 interface FileEntry {
   id: string;
+  // ¿Está seleccionado para guardar? Por defecto los fiables van marcados,
+  // los dudosos no — la usuaria decide cuáles entrar al P&L. Los duplicados
+  // no se pueden seleccionar (ignorados implícitamente).
+  selected?: boolean;
+  // Si la usuaria edita los datos de la IA antes de guardar, aquí va el
+  // override. El guardado prioriza editedParsed sobre status.parsed.
+  editedParsed?: ParsedAlbaran;
   file: File;
   hash: string;
   base64: string;
@@ -310,11 +317,24 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
     setPhase('processing');
     setProgress({ done: 0, total: list.length });
 
-    // 1. Hash en paralelo (rápido, en CPU)
+    // 1. Hash en paralelo (rápido, en CPU). El hash se calcula sobre el File
+    // ORIGINAL para que dos fotos idénticas se detecten aunque luego se
+    // procesen distinto. La imagen que va a la IA pasa por preprocessImageForOCR
+    // que: (a) respeta orientación EXIF (fotos del móvil), (b) realza
+    // contraste, (c) reduce a 1800px. Sin esto, las fotos del móvil llegaban
+    // rotadas 90° y la IA leía todo mal.
     const initial: FileEntry[] = await Promise.all(
       list.map(async (file, idx) => {
         const hash = await sha256OfFile(file);
-        const base64 = await fileToBase64(file);
+        let base64: string;
+        try {
+          // Preprocesado: rota EXIF, mejora contraste, reduce tamaño
+          const r = await preprocessImageForOCR(file);
+          base64 = r.base64;
+        } catch {
+          // Fallback al base64 directo si el preprocesado falla
+          base64 = await fileToBase64(file);
+        }
         const dup = hashIndex.get(hash);
         return {
           id: `bulk-${Date.now()}-${idx}`,
@@ -340,10 +360,16 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
     // a la primera del lote.
     const batchSeen = new Map<string, { id: string; parsed: ParsedAlbaran }>();
 
-    await runWithLimit(pendientes, 3, async (entry) => {
+    // Concurrencia 5 (subido de 3): Claude/Gemini aguantan bien picos cortos
+    // y la subida masiva pasa de tardar 50s a tardar 30s con 30 albaranes.
+    // Si la API se satura, el retry interno de scanBase64 (3 intentos con
+    // backoff) absorbe el pico.
+    await runWithLimit(pendientes, 5, async (entry) => {
       setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: { kind: 'scanning' } } : e));
       try {
-        const result = await scanBase64(entry.base64, entry.file.type, PROMPT);
+        // mimeType siempre image/jpeg porque preprocessImageForOCR lo convierte
+        // (el original puede ser HEIC/PNG/WebP — la IA recibe siempre JPEG normalizado).
+        const result = await scanBase64(entry.base64, 'image/jpeg', PROMPT);
         const raw = result.raw as any;
         const parsed: ParsedAlbaran = {
           proveedor: String(raw.proveedor || '').trim(),
@@ -380,9 +406,18 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
           setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: { kind: 'duplicate-meta', existing: fake, parsed } } : e));
           return;
         }
-        // 3º nuevo — registrar para que las siguientes hermanas lo detecten
+        // 3º nuevo — registrar para que las siguientes hermanas lo detecten.
+        // Auto-selección: los fiables (sin reasons + confidence != low) van
+        // marcados por defecto. Los dudosos quedan deseleccionados, la usuaria
+        // los marca uno a uno tras revisar.
+        const reasons = parsed.reviewReasons || [];
+        const isReliable = reasons.length === 0 && parsed.confidence !== 'low';
         batchSeen.set(k, { id: entry.id, parsed });
-        setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: { kind: 'new', parsed } } : e));
+        setEntries(prev => prev.map(e =>
+          e.id === entry.id
+            ? { ...e, status: { kind: 'new', parsed }, selected: isReliable }
+            : e
+        ));
       } catch (err: any) {
         const msg = err?.message || 'IA falló';
         setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: { kind: 'failed', reason: msg } } : e));
@@ -400,9 +435,14 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
   const dupMeta = entries.filter(e => e.status.kind === 'duplicate-meta');
   const failed = entries.filter(e => e.status.kind === 'failed');
 
+  // Sólo guardamos los que están marcados con check (selected). La usuaria
+  // controla qué entra al P&L. Los dudosos quedan deseleccionados por defecto;
+  // si no los marca, no se guardan (puede volver a subirlos otro día).
+  const seleccionados = newOnes.filter(e => e.selected);
+
   const handleSave = async () => {
-    if (newOnes.length === 0) {
-      toast.warning('No hay albaranes nuevos para guardar.');
+    if (seleccionados.length === 0) {
+      toast.warning('No hay albaranes seleccionados para guardar. Marca el check en los que quieras incluir.');
       return;
     }
     setPhase('saving');
@@ -410,9 +450,11 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
       const newData: AppData = JSON.parse(JSON.stringify(data));
       if (!newData.albaranes) newData.albaranes = [];
 
-      for (const e of newOnes) {
+      for (const e of seleccionados) {
         if (e.status.kind !== 'new') continue;
-        const p = e.status.parsed;
+        // Si la usuaria editó los campos en la pantalla de revisión, esos
+        // valores tienen prioridad sobre los originales de la IA.
+        const p = (e.editedParsed || e.status.parsed) as ParsedAlbaran;
         const items = (p.lineas || []).map(l => ({
           q: Number(l.q) || 1,
           n: String(l.n || '').trim(),
@@ -608,7 +650,17 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
                           <p className="text-[11px] font-bold text-slate-400">{newOnes.length > 0 ? 'Ninguno fiable — revisa la lista de dudosos abajo.' : 'No hay albaranes nuevos detectados.'}</p>
                         ) : (
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                            {fiables.map(e => <ReviewCard key={e.id} entry={e} kind="fiable" />)}
+                            {fiables.map(e => (
+                              <ReviewCard key={e.id} entry={e} kind="fiable"
+                                onToggleSelected={() => setEntries(prev => prev.map(x => x.id === e.id ? { ...x, selected: !x.selected } : x))}
+                                onEdit={(field, value) => setEntries(prev => prev.map(x => {
+                                  if (x.id !== e.id) return x;
+                                  const base = (x.editedParsed || (x.status as any).parsed) as ParsedAlbaran;
+                                  return { ...x, editedParsed: { ...base, [field]: value } };
+                                }))}
+                                onDiscard={() => setEntries(prev => prev.filter(x => x.id !== e.id))}
+                              />
+                            ))}
                           </div>
                         )}
                       </div>
@@ -621,7 +673,17 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
                             <h4 className="text-[11px] font-black uppercase tracking-widest">Nuevos a revisar ({dudosos.length})</h4>
                           </div>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                            {dudosos.map(e => <ReviewCard key={e.id} entry={e} kind="dudoso" />)}
+                            {dudosos.map(e => (
+                              <ReviewCard key={e.id} entry={e} kind="dudoso"
+                                onToggleSelected={() => setEntries(prev => prev.map(x => x.id === e.id ? { ...x, selected: !x.selected } : x))}
+                                onEdit={(field, value) => setEntries(prev => prev.map(x => {
+                                  if (x.id !== e.id) return x;
+                                  const base = (x.editedParsed || (x.status as any).parsed) as ParsedAlbaran;
+                                  return { ...x, editedParsed: { ...base, [field]: value } };
+                                }))}
+                                onDiscard={() => setEntries(prev => prev.filter(x => x.id !== e.id))}
+                              />
+                            ))}
                           </div>
                         </div>
                       )}
@@ -670,18 +732,56 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
             )}
           </div>
 
-          {/* Footer */}
+          {/* Footer con resumen agregado del lote seleccionado */}
           {(phase === 'review' || phase === 'saving') && (
-            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-              <button onClick={handleClose} disabled={phase === 'saving'}
-                className="text-xs font-black text-slate-500 hover:text-slate-700 uppercase tracking-widest disabled:opacity-50">
-                Cancelar
-              </button>
-              <button onClick={handleSave} disabled={phase === 'saving' || newOnes.length === 0}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl font-black text-[11px] uppercase tracking-widest transition shadow-lg flex items-center gap-2 disabled:opacity-50">
-                {phase === 'saving' ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                Guardar {newOnes.length} nuevos
-              </button>
+            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              {(() => {
+                const totalSel = seleccionados.reduce((s, e) => {
+                  const p = (e.editedParsed || (e.status as any).parsed) as ParsedAlbaran;
+                  return s + (Number(p?.total) || 0);
+                }, 0);
+                const totalDeseleccionados = newOnes.length - seleccionados.length;
+                return (
+                  <div className="flex items-center gap-4 text-[10px] font-bold text-slate-500">
+                    <button onClick={handleClose} disabled={phase === 'saving'}
+                      className="font-black text-slate-500 hover:text-slate-700 uppercase tracking-widest disabled:opacity-50">
+                      Cancelar
+                    </button>
+                    {seleccionados.length > 0 && (
+                      <span className="text-slate-700">
+                        <strong className="font-black text-slate-900">{seleccionados.length}</strong> seleccionados ·
+                        <strong className="font-black text-slate-900 tabular-nums ml-1">{Num.fmt(totalSel)}</strong>
+                      </span>
+                    )}
+                    {totalDeseleccionados > 0 && (
+                      <span className="text-slate-400">
+                        ({totalDeseleccionados} sin marcar)
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+              <div className="flex items-center gap-2">
+                {newOnes.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const allSelected = seleccionados.length === newOnes.length;
+                      setEntries(prev => prev.map(e =>
+                        e.status.kind === 'new' ? { ...e, selected: !allSelected } : e
+                      ));
+                    }}
+                    className="text-[10px] font-black text-slate-600 hover:text-slate-900 uppercase tracking-widest px-3 py-1.5 border border-slate-200 rounded-lg bg-white hover:bg-slate-100 transition"
+                  >
+                    {seleccionados.length === newOnes.length ? 'Desmarcar todos' : 'Marcar todos'}
+                  </button>
+                )}
+                <button onClick={handleSave} disabled={phase === 'saving' || seleccionados.length === 0}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2.5 rounded-xl font-black text-[11px] uppercase tracking-widest transition shadow-lg flex items-center gap-2 disabled:opacity-50">
+                  {phase === 'saving' ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  Guardar {seleccionados.length} seleccionados
+                </button>
+              </div>
             </div>
           )}
         </motion.div>
@@ -707,7 +807,15 @@ const COLOR_MAP: Record<string, { bg: string; border: string; text: string; chip
 //   - Datos extraídos por la IA (proveedor, num, fecha, total)
 //   - Si es "dudoso", las razones concretas de revisión
 //   - Botón "Ver lectura completa" → modal con la imagen GRANDE y el JSON crudo
-const ReviewCard: React.FC<{ entry: FileEntry; kind: 'fiable' | 'dudoso' }> = ({ entry, kind }) => {
+interface ReviewCardProps {
+  entry: FileEntry;
+  kind: 'fiable' | 'dudoso';
+  onToggleSelected: () => void;
+  onEdit: (field: keyof ParsedAlbaran, value: any) => void;
+  onDiscard: () => void;
+}
+
+const ReviewCard: React.FC<ReviewCardProps> = ({ entry, kind, onToggleSelected, onEdit, onDiscard }) => {
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [showDetail, setShowDetail] = useState(false);
 
@@ -717,21 +825,51 @@ const ReviewCard: React.FC<{ entry: FileEntry; kind: 'fiable' | 'dudoso' }> = ({
     return () => URL.revokeObjectURL(url);
   }, [entry.file]);
 
-  const parsed = (entry.status as any).parsed as ParsedAlbaran;
+  // Si la usuaria editó algún campo, esos overridean los de la IA.
+  const original = (entry.status as any).parsed as ParsedAlbaran;
+  const parsed = (entry.editedParsed || original) as ParsedAlbaran;
   const isDudoso = kind === 'dudoso';
   const reasons = parsed?.reviewReasons || [];
+  const wasEdited = !!entry.editedParsed;
+  const isSelected = !!entry.selected;
 
   return (
     <>
       <div className={cn(
-        'flex items-stretch gap-3 p-2.5 rounded-xl border bg-white',
-        isDudoso ? 'border-amber-200' : 'border-emerald-200',
+        'flex items-stretch gap-3 p-2.5 rounded-xl border bg-white relative',
+        isSelected ? (isDudoso ? 'border-amber-400 ring-2 ring-amber-100' : 'border-emerald-400 ring-2 ring-emerald-100')
+                   : 'border-slate-200 opacity-60',
       )}>
+        {/* Checkbox de selección */}
+        <button
+          type="button"
+          onClick={onToggleSelected}
+          className={cn(
+            'absolute top-2 left-2 w-5 h-5 rounded border-2 flex items-center justify-center transition z-10',
+            isSelected
+              ? (isDudoso ? 'bg-amber-500 border-amber-500' : 'bg-emerald-500 border-emerald-500')
+              : 'bg-white border-slate-300 hover:border-slate-400',
+          )}
+          title={isSelected ? 'Marcado para guardar' : 'Click para incluir'}
+        >
+          {isSelected && <CheckCircle2 className="w-4 h-4 text-white" />}
+        </button>
+
+        {/* Botón descartar (esquina superior derecha) */}
+        <button
+          type="button"
+          onClick={onDiscard}
+          className="absolute top-2 right-2 w-5 h-5 rounded-full bg-white border border-slate-300 flex items-center justify-center hover:bg-rose-50 hover:border-rose-300 transition z-10"
+          title="Descartar de este lote"
+        >
+          <X className="w-3 h-3 text-slate-500" />
+        </button>
+
         {/* Thumbnail clickable */}
         <button
           type="button"
           onClick={() => setShowDetail(true)}
-          className="w-20 h-20 rounded-lg overflow-hidden bg-slate-100 shrink-0 group relative"
+          className="w-24 h-24 rounded-lg overflow-hidden bg-slate-100 shrink-0 group relative ml-6 mt-1"
           title="Ver imagen completa y JSON extraído"
         >
           {thumbUrl ? (
@@ -746,27 +884,70 @@ const ReviewCard: React.FC<{ entry: FileEntry; kind: 'fiable' | 'dudoso' }> = ({
           </div>
         </button>
 
-        {/* Datos extraídos por la IA */}
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-black text-slate-800 truncate">{parsed.proveedor || <span className="text-rose-500">— sin proveedor —</span>}</p>
-          <p className="text-[10px] font-bold text-slate-600 truncate">
-            {parsed.num || 'S/N'} · {parsed.fecha || <span className="text-rose-500">sin fecha</span>} · {Num.fmt(parsed.total)}
-          </p>
-          {parsed.lineas && parsed.lineas.length > 0 && (
-            <p className="text-[9px] font-bold text-slate-400 truncate">{parsed.lineas.length} línea(s)</p>
-          )}
+        {/* Datos extraídos por la IA — EDITABLES inline */}
+        <div className="flex-1 min-w-0 mr-6 space-y-1">
+          <input
+            value={parsed.proveedor || ''}
+            onChange={e => onEdit('proveedor', e.target.value)}
+            placeholder="— sin proveedor —"
+            className={cn(
+              'w-full text-xs font-black bg-transparent outline-none border-b border-transparent focus:border-indigo-300 focus:bg-indigo-50/50 px-1 py-0.5 rounded transition',
+              !parsed.proveedor && 'text-rose-500 placeholder-rose-400',
+            )}
+          />
+          <div className="flex items-center gap-1">
+            <input
+              value={parsed.num || ''}
+              onChange={e => onEdit('num', e.target.value)}
+              placeholder="S/N"
+              className="w-24 text-[10px] font-bold bg-transparent outline-none border-b border-transparent focus:border-indigo-300 focus:bg-indigo-50/50 px-1 py-0.5 rounded transition truncate"
+            />
+            <span className="text-slate-300 text-[10px]">·</span>
+            <input
+              type="date"
+              value={parsed.fecha || ''}
+              onChange={e => onEdit('fecha', e.target.value)}
+              className={cn(
+                'text-[10px] font-bold bg-transparent outline-none border-b border-transparent focus:border-indigo-300 focus:bg-indigo-50/50 px-1 py-0.5 rounded transition',
+                !parsed.fecha && 'text-rose-500',
+              )}
+            />
+            <span className="text-slate-300 text-[10px]">·</span>
+            <input
+              type="number"
+              step="0.01"
+              value={parsed.total || ''}
+              onChange={e => onEdit('total', parseFloat(e.target.value) || 0)}
+              placeholder="0.00"
+              className={cn(
+                'w-20 text-[10px] font-mono font-bold text-right bg-transparent outline-none border-b border-transparent focus:border-indigo-300 focus:bg-indigo-50/50 px-1 py-0.5 rounded transition',
+                !parsed.total && 'text-rose-500',
+              )}
+            />
+            <span className="text-[10px] font-bold text-slate-400">€</span>
+          </div>
+          <div className="flex items-center gap-2 text-[9px] font-bold">
+            {parsed.lineas && parsed.lineas.length > 0 && (
+              <span className="text-slate-400">{parsed.lineas.length} línea(s)</span>
+            )}
+            {parsed.confidence && (
+              <span className={cn(
+                'text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded',
+                parsed.confidence === 'high'   ? 'bg-emerald-100 text-emerald-700' :
+                parsed.confidence === 'medium' ? 'bg-amber-100 text-amber-700'    :
+                                                  'bg-rose-100 text-rose-700',
+              )}>
+                IA: {parsed.confidence}
+              </span>
+            )}
+            {wasEdited && (
+              <span className="text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">
+                ✎ editado
+              </span>
+            )}
+          </div>
           {isDudoso && reasons.length > 0 && (
-            <p className="text-[9px] font-bold text-amber-700 mt-0.5 truncate" title={reasons.join(' · ')}>⚠️ {reasons.join(' · ')}</p>
-          )}
-          {parsed.confidence && (
-            <span className={cn(
-              'inline-block mt-1 text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded',
-              parsed.confidence === 'high'   ? 'bg-emerald-100 text-emerald-700' :
-              parsed.confidence === 'medium' ? 'bg-amber-100 text-amber-700'    :
-                                                'bg-rose-100 text-rose-700',
-            )}>
-              IA: {parsed.confidence}
-            </span>
+            <p className="text-[9px] font-bold text-amber-700 truncate" title={reasons.join(' · ')}>⚠️ {reasons.join(' · ')}</p>
           )}
         </div>
       </div>

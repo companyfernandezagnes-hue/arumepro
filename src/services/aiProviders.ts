@@ -162,6 +162,11 @@ const enhanceForOCR = (ctx: CanvasRenderingContext2D, w: number, h: number): voi
   }
 };
 
+// Versión pública del preprocesado, reutilizable desde otros componentes
+// (BulkAlbaranesUpload usa esto antes de enviar a scanBase64 para que las
+// fotos del móvil con orientación EXIF se roten ANTES de llegar a la IA).
+export const preprocessImageForOCR = (file: File | Blob) => compressImage(file);
+
 const compressImage = async (file: File | Blob): Promise<{ base64: string; mimeType: string }> => {
   // Compresión calibrada para OCR: el texto de tickets/albaranes ES PEQUEÑO,
   // si se comprime demasiado la IA lee mal "8,50€" como "8,90€" o pierde
@@ -172,7 +177,17 @@ const compressImage = async (file: File | Blob): Promise<{ base64: string; mimeT
   const MAX_BYTES = 4 * 1024 * 1024;     // 4MB
   const MAX_W = 1800, MAX_H = 1800;      // antes 1200 — pequeño para OCR fino
 
-  const bitmap = await createImageBitmap(file);
+  // Respetamos la orientación EXIF: las fotos del móvil suelen guardarse en
+  // landscape pero con un flag EXIF que indica que deben mostrarse en portrait.
+  // Sin esto, la IA recibe la imagen rotada 90° y lee TODO mal (fechas, totales,
+  // proveedor). Chrome/Edge/Firefox modernos soportan imageOrientation:'from-image'.
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' as any });
+  } catch {
+    // Fallback para navegadores antiguos: ignora EXIF, mejor algo que nada.
+    bitmap = await createImageBitmap(file);
+  }
   const ratio  = Math.min(MAX_W / bitmap.width, MAX_H / bitmap.height, 1);
   const w = Math.max(1, Math.round(bitmap.width  * ratio));
   const h = Math.max(1, Math.round(bitmap.height * ratio));
