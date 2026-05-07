@@ -14,7 +14,7 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Upload, Loader2, X, CheckCircle2, AlertTriangle, Copy, FileImage, FolderOpen, Clipboard } from 'lucide-react';
+import { Upload, Loader2, X, CheckCircle2, AlertTriangle, Copy, FileImage, FolderOpen, Clipboard, ChevronDown } from 'lucide-react';
 import { AppData, Albaran, BusinessUnit } from '../types';
 import { sha256OfFile } from '../services/hashFile';
 import { scanBase64, preprocessImageForOCR } from '../services/aiProviders';
@@ -460,6 +460,26 @@ Si no lo ves claramente, devuelve null. NO inventes.`;
     });
 
     setPhase('review');
+
+    // Resumen rápido al terminar el escaneo: cuántos nuevos vs cuántos
+    // duplicados omitidos. Útil para que la usuaria vea de un vistazo si la
+    // dedupe está cazando lo que tenía que cazar.
+    setEntries(prev => {
+      const all = prev;
+      const nuevos = all.filter(x => x.status.kind === 'new').length;
+      const dupHashCount = all.filter(x => x.status.kind === 'duplicate-hash').length;
+      const dupMetaCount = all.filter(x => x.status.kind === 'duplicate-meta').length;
+      const fails = all.filter(x => x.status.kind === 'failed').length;
+      const totalDups = dupHashCount + dupMetaCount;
+      if (totalDups > 0 || fails > 0) {
+        const partes: string[] = [];
+        if (nuevos > 0)  partes.push(`✅ ${nuevos} nuevos`);
+        if (totalDups > 0) partes.push(`🚫 ${totalDups} duplicados omitidos`);
+        if (fails > 0)   partes.push(`⚠️ ${fails} fallaron`);
+        toast.success(partes.join(' · '));
+      }
+      return all;
+    });
   };
 
   const newOnes = entries.filter(e => e.status.kind === 'new');
@@ -722,30 +742,53 @@ Si no lo ves claramente, devuelve null. NO inventes.`;
                     </>
                   );
                 })()}
-                <Section
-                  title={`Repetidos por imagen idéntica (${dupHash.length})`}
-                  color="slate"
-                  icon={<Copy className="w-4 h-4" />}
-                  empty="—"
-                  items={dupHash.map(e => ({
-                    key: e.id,
-                    title: e.file.name,
-                    sub: `Ya existe como ${(e.status as any).existing.num} · ${(e.status as any).existing.date}`,
-                    hint: 'Misma imagen ya subida',
-                  }))}
-                />
-                <Section
-                  title={`Repetidos por nº+fecha+proveedor (${dupMeta.length})`}
-                  color="amber"
-                  icon={<AlertTriangle className="w-4 h-4" />}
-                  empty="—"
-                  items={dupMeta.map(e => ({
-                    key: e.id,
-                    title: (e.status as any).parsed.proveedor || 'Sin proveedor',
-                    sub: `Nº ${(e.status as any).parsed.num} · ${(e.status as any).parsed.fecha}`,
-                    hint: `Coincide con ${(e.status as any).existing.num} · ${(e.status as any).existing.date}`,
-                  }))}
-                />
+
+                {/* Resumen compacto de duplicados detectados — NO se guardan,
+                    solo se enseñan colapsados por si la usuaria quiere
+                    auditarlos. Por defecto la pantalla solo muestra lo
+                    accionable (nuevos fiables + nuevos a revisar). */}
+                {(dupHash.length > 0 || dupMeta.length > 0) && (
+                  <details className="rounded-2xl border border-slate-200 bg-slate-50 group">
+                    <summary className="cursor-pointer px-4 py-3 flex items-center gap-2 text-slate-600 hover:bg-slate-100 rounded-2xl transition list-none">
+                      <Copy className="w-4 h-4" />
+                      <span className="text-[11px] font-black uppercase tracking-widest">
+                        {dupHash.length + dupMeta.length} duplicado(s) detectado(s) — no se guardarán
+                      </span>
+                      <ChevronDown className="w-4 h-4 ml-auto text-slate-400 group-open:rotate-180 transition-transform" />
+                    </summary>
+                    <div className="border-t border-slate-200 p-4 space-y-3">
+                      {dupHash.length > 0 && (
+                        <Section
+                          title={`Repetidos por imagen idéntica (${dupHash.length})`}
+                          color="slate"
+                          icon={<Copy className="w-4 h-4" />}
+                          empty="—"
+                          items={dupHash.map(e => ({
+                            key: e.id,
+                            title: e.file.name,
+                            sub: `Ya existe como ${(e.status as any).existing.num} · ${(e.status as any).existing.date}`,
+                            hint: 'Misma imagen ya subida',
+                          }))}
+                        />
+                      )}
+                      {dupMeta.length > 0 && (
+                        <Section
+                          title={`Repetidos por nº+fecha+proveedor (${dupMeta.length})`}
+                          color="amber"
+                          icon={<AlertTriangle className="w-4 h-4" />}
+                          empty="—"
+                          items={dupMeta.map(e => ({
+                            key: e.id,
+                            title: (e.status as any).parsed.proveedor || 'Sin proveedor',
+                            sub: `Nº ${(e.status as any).parsed.num} · ${(e.status as any).parsed.fecha}`,
+                            hint: `Coincide con ${(e.status as any).existing.num} · ${(e.status as any).existing.date}`,
+                          }))}
+                        />
+                      )}
+                    </div>
+                  </details>
+                )}
+
                 {failed.length > 0 && (
                   <Section
                     title={`No se pudieron leer (${failed.length})`}
