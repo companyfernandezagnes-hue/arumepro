@@ -14,6 +14,145 @@ import { PackGestoria } from './PackGestoria';
 import { toast } from '../hooks/useToast';
 import { confirm } from '../hooks/useConfirm';
 import { AIDiagnosticPanel } from './AIDiagnosticPanel';
+import { supabase } from '../services/supabase';
+import { keys as aiKeys } from '../services/aiProviders';
+import { GmailDirectSync } from '../services/gmailDirectSync';
+
+// ── HealthCheck: verifica que todos los servicios están listos ──────────────
+//
+// Pinguea Supabase (read), Storage (list) y comprueba localStorage para
+// API keys + sesión Gmail. Pintar 4 indicadores arriba del modal de Ajustes
+// para que la usuaria sepa de un vistazo si la app está lista para producción.
+type HealthState = 'checking' | 'ok' | 'warn' | 'fail';
+interface HealthSummary {
+  supabase: HealthState;
+  storage: HealthState;
+  claude: HealthState;
+  gmail: HealthState;
+  details: { supabase?: string; storage?: string; claude?: string; gmail?: string };
+}
+
+const HealthCheckPanel: React.FC<{ open: boolean }> = ({ open }) => {
+  const [h, setH] = React.useState<HealthSummary>({
+    supabase: 'checking', storage: 'checking', claude: 'checking', gmail: 'checking', details: {},
+  });
+
+  React.useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const run = async () => {
+      // 1. Supabase: ping a arume_data
+      try {
+        const { error } = await supabase.from('arume_data').select('id').limit(1);
+        if (!cancelled) setH(s => ({
+          ...s,
+          supabase: error ? 'fail' : 'ok',
+          details: { ...s.details, supabase: error?.message },
+        }));
+      } catch (e: any) {
+        if (!cancelled) setH(s => ({ ...s, supabase: 'fail', details: { ...s.details, supabase: e?.message } }));
+      }
+
+      // 2. Storage: listar 1 fichero del bucket arume-files
+      try {
+        const { error } = await supabase.storage.from('arume-files').list('', { limit: 1 });
+        if (!cancelled) setH(s => ({
+          ...s,
+          storage: error ? 'fail' : 'ok',
+          details: { ...s.details, storage: error?.message },
+        }));
+      } catch (e: any) {
+        if (!cancelled) setH(s => ({ ...s, storage: 'fail', details: { ...s.details, storage: e?.message } }));
+      }
+
+      // 3. Claude API key
+      const claudeKey = aiKeys.claude();
+      const geminiKey = aiKeys.gemini();
+      if (!cancelled) {
+        setH(s => ({
+          ...s,
+          claude: claudeKey ? 'ok' : (geminiKey ? 'warn' : 'fail'),
+          details: {
+            ...s.details,
+            claude: claudeKey
+              ? 'Claude principal'
+              : geminiKey
+                ? 'Solo Gemini fallback (Claude vacío)'
+                : 'Sin ninguna API key — la IA no funcionará',
+          },
+        }));
+      }
+
+      // 4. Gmail OAuth
+      const isAuth = GmailDirectSync.isAuthenticated();
+      const tok = GmailDirectSync.getToken();
+      if (!cancelled) {
+        setH(s => ({
+          ...s,
+          gmail: isAuth ? 'ok' : (tok ? 'warn' : 'warn'),
+          details: { ...s.details, gmail: isAuth ? `Conectado: ${tok?.email || ''}` : 'Sin sesión Gmail' },
+        }));
+      }
+    };
+    run();
+    return () => { cancelled = true; };
+  }, [open]);
+
+  const allOk = h.supabase === 'ok' && h.storage === 'ok' && (h.claude === 'ok' || h.claude === 'warn');
+  const anyFail = h.supabase === 'fail' || h.storage === 'fail' || h.claude === 'fail';
+
+  const Pill: React.FC<{ label: string; state: HealthState; detail?: string }> = ({ label, state, detail }) => {
+    const cls =
+      state === 'ok'       ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
+      state === 'warn'     ? 'bg-amber-100 text-amber-700 border-amber-200'      :
+      state === 'fail'     ? 'bg-rose-100 text-rose-700 border-rose-200'         :
+                              'bg-slate-100 text-slate-500 border-slate-200';
+    const icon =
+      state === 'ok'       ? '🟢' :
+      state === 'warn'     ? '🟡' :
+      state === 'fail'     ? '🔴' :
+                              '⏳';
+    return (
+      <div className={cn('px-3 py-2 rounded-xl border text-[11px] font-bold flex items-center gap-2', cls)} title={detail || ''}>
+        <span className="text-sm">{icon}</span>
+        <div className="min-w-0">
+          <p className="font-black uppercase tracking-widest text-[9px]">{label}</p>
+          <p className="font-bold text-[10px] truncate">{state === 'checking' ? 'comprobando...' : (detail || (state === 'ok' ? 'OK' : state === 'warn' ? 'aviso' : 'falla'))}</p>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className={cn(
+      'mb-6 rounded-2xl border-2 p-4',
+      allOk && !anyFail ? 'bg-emerald-50 border-emerald-300' :
+      anyFail            ? 'bg-rose-50 border-rose-300'      :
+                            'bg-amber-50 border-amber-300',
+    )}>
+      <div className="flex items-center gap-2 mb-3">
+        {allOk && !anyFail
+          ? <><CheckCircle2 className="w-5 h-5 text-emerald-600" /><h4 className="text-sm font-black text-emerald-800 uppercase tracking-widest">Todo listo para trabajar</h4></>
+          : anyFail
+            ? <><ShieldAlert className="w-5 h-5 text-rose-600" /><h4 className="text-sm font-black text-rose-800 uppercase tracking-widest">Algo falla — revisa antes de usar</h4></>
+            : <><Sparkles className="w-5 h-5 text-amber-600" /><h4 className="text-sm font-black text-amber-800 uppercase tracking-widest">Revisión rápida del sistema</h4></>
+        }
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        <Pill label="Supabase DB" state={h.supabase} detail={h.details.supabase} />
+        <Pill label="Storage"     state={h.storage}  detail={h.details.storage} />
+        <Pill label="IA Claude"   state={h.claude}   detail={h.details.claude} />
+        <Pill label="Gmail"       state={h.gmail}    detail={h.details.gmail} />
+      </div>
+      {allOk && !anyFail && (
+        <p className="text-[11px] font-bold text-emerald-700 mt-3">✅ Tu app está lista para producción. Adelante.</p>
+      )}
+      {anyFail && (
+        <p className="text-[11px] font-bold text-rose-700 mt-3">⚠️ Pasa el ratón sobre cada chip rojo para ver el error exacto.</p>
+      )}
+    </div>
+  );
+};
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -570,6 +709,10 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
 
         {/* ── CUERPO ───────────────────────────────────────────────────────── */}
         <div className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar">
+          {/* 🩺 HEALTH CHECK: comprueba que todos los servicios están operativos
+              cuando se abre el modal. Verde si todo OK, ámbar avisos, rojo fallo. */}
+          <HealthCheckPanel open={isOpen} />
+
           {/* 🚨 BANNER GIGANTE DE LIMPIEZA: visible siempre que haya basura IA
               sin marca temporal. Imposible de pasar por alto. */}
           {(() => {
