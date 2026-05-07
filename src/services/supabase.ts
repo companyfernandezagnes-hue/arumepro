@@ -196,6 +196,20 @@ export async function fetchArumeData(retries = 3): Promise<{ data: AppData | nul
                                                                     }
                                                     }
 
+                                                    // 🩺 Diagnóstico de tamaño del payload. Supabase tiene un límite
+                                                    // efectivo de 1 MB por celda en el plan Free, mucho mayor en Pro.
+                                                    // Si la usuaria nos llama con "no guarda", la causa #1 suele ser
+                                                    // payload gigante por base64 sin migrar a Storage. Logueamos el peso.
+                                                    let payloadSize = 0;
+                                                    try {
+                                                        const json = JSON.stringify(payload);
+                                                        payloadSize = json.length;
+                                                        const sizeMB = (payloadSize / 1024 / 1024).toFixed(2);
+                                                        if (payloadSize > 4 * 1024 * 1024) {
+                                                            console.warn(`[supabase.saveArumeData] Payload GRANDE: ${sizeMB} MB. Considera migrar PDFs a Storage.`);
+                                                        }
+                                                    } catch { /* sólo diagnóstico */ }
+
                                                     const execUpsert = async () => {
                                                                     const { data: up, error } = await supabase
                                                                         .from('arume_data')
@@ -210,8 +224,28 @@ export async function fetchArumeData(retries = 3): Promise<{ data: AppData | nul
                                                             return { ok: true, newMeta: { updated_at: up?.updated_at, version: up?.version } };
 
                                                 } catch (error: any) {
-                                                            if (!silent) notifyError('Problema de conexion al guardar. Los cambios estan en cache local.');
-                                                            return { ok: false, error: error.message };
+                                                            // 🆕 Logging detallado del error real para diagnóstico.
+                                                            const code   = error?.code || error?.status || '?';
+                                                            const msg    = error?.message || String(error);
+                                                            const detail = error?.details || error?.hint || '';
+                                                            console.error('[supabase.saveArumeData] FALLO:', { code, msg, detail, error });
+
+                                                            if (!silent) {
+                                                                let userMsg = 'Problema de conexion al guardar. Los cambios estan en cache local.';
+                                                                if (/payload too large|413|row size|JSONB.*size/i.test(msg + detail)) {
+                                                                    userMsg = '⚠️ El JSON es demasiado grande para Supabase. Pulsa "Migrar archivos a Storage" en Ajustes para liberar espacio.';
+                                                                } else if (/quota|exceeded|restricted|suspended/i.test(msg + detail)) {
+                                                                    userMsg = '⚠️ Supabase suspendió el proyecto por cuota. Revisa el banner del dashboard.';
+                                                                } else if (/permission denied|RLS|row-level/i.test(msg + detail)) {
+                                                                    userMsg = '⚠️ Supabase rechazó el guardado por permisos (RLS). Revisa policies.';
+                                                                } else if (/network|fetch|timeout|aborted/i.test(msg)) {
+                                                                    userMsg = '📵 Sin conexión. Tu cambio queda en cola y se subirá al volver la red.';
+                                                                } else if (msg && msg.length < 200) {
+                                                                    userMsg = `❌ Error guardando: ${msg}`;
+                                                                }
+                                                                notifyError(userMsg);
+                                                            }
+                                                            return { ok: false, error: msg };
                                                 }
                                         }
 
