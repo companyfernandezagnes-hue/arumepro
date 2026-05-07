@@ -32,12 +32,34 @@ type FileStatus =
   | { kind: 'duplicate-meta'; existing: Albaran; parsed: ParsedAlbaran }
   | { kind: 'new'; parsed: ParsedAlbaran };
 
+interface ParsedLinea {
+  q?: number;
+  n?: string;
+  u?: string;
+  unitPrice?: number;   // base unitaria sin IVA
+  base?: number;        // q × unitPrice
+  rate?: number;        // 4 / 10 / 21
+  iva?: number;         // base × rate/100
+  t?: number;           // base + iva (total con IVA)
+  descuento?: number;   // descuento de la línea, 0 si no hay
+  total?: number;       // alias legacy de t (algunas IAs lo devuelven así)
+}
+
+interface ParsedTotales {
+  base?: number;        // suma de bases imponibles - descuento global
+  iva?: number;         // suma del IVA
+  total?: number;       // base + iva
+  descuento?: number;   // descuento global del documento
+  by_rate?: Record<string, { base: number; iva: number; total: number }>;
+}
+
 interface ParsedAlbaran {
   proveedor: string;
   num: string;
   fecha: string;
-  total: number;
-  lineas: Array<{ q?: number; n?: string; t?: number; rate?: number; u?: string }>;
+  total: number;        // total con IVA (alias de totales.total para compatibilidad)
+  totales?: ParsedTotales;
+  lineas: ParsedLinea[];
   // Confianza autoreportada por la IA. Si es 'low', el albarán se guarda con
   // needs_review:true y no entra al P&L hasta que la usuaria lo revise.
   confidence?: 'high' | 'medium' | 'low';
@@ -180,15 +202,44 @@ const runWithLimit = async <T,>(items: T[], limit: number, worker: (item: T, i: 
   await Promise.all(runners);
 };
 
-const PROMPT = `Eres un OCR contable especializado en albaranes y facturas comerciales españoles para un restaurante japonés (Arume Sake Bar). Analiza este documento y devuelve SOLO JSON sin markdown ni texto antes/después.
+const PROMPT = `Eres un OCR contable especializado en albaranes y facturas comerciales españoles para un restaurante japonés (Arume Sake Bar). En hostelería conviven en la MISMA factura productos con IVA distinto:
+  - 4%  → pan, leche, huevos, frutas/verduras frescas, productos de primera necesidad
+  - 10% → la mayoría de alimentos (carne, pescado, conservas) y bebidas no alcohólicas
+  - 21% → bebidas alcohólicas (vino, cerveza, sake, licores), refrescos azucarados, productos no alimentarios
+
+Lee cada línea con su IVA correcto. NO asumas que toda la factura tiene un único tipo de IVA.
+
+Analiza este documento y devuelve SOLO JSON sin markdown ni texto antes/después.
 
 ESQUEMA EXACTO:
 {
   "proveedor": "string|null",
   "num": "string|null",
   "fecha": "YYYY-MM-DD|null",
-  "total": number,
-  "lineas": [{"q": number, "n": "string", "t": number, "rate": 4|10|21, "u": "string"}],
+  "lineas": [
+    {
+      "q": number,                  // cantidad
+      "n": "string",                // descripción tal cual
+      "u": "string",                // unidad (kg/l/ud/caja/botella…)
+      "unitPrice": number,          // precio unitario SIN IVA (base imponible / cantidad)
+      "base": number,               // base imponible de la línea = q × unitPrice
+      "rate": 4|10|21,              // tipo IVA aplicado a esta línea
+      "iva": number,                // importe IVA de la línea = base × rate/100
+      "t": number,                  // total línea con IVA = base + iva
+      "descuento": number           // 0 si no hay; si lo hay, importe en €
+    }
+  ],
+  "totales": {
+    "base":            number,       // suma de bases imponibles
+    "iva":             number,       // suma de IVA
+    "total":           number,       // base + iva = total con IVA del documento
+    "descuento":       number,       // descuento global aplicado al pie (0 si no hay)
+    "by_rate": {                     // desglose por tipo de IVA
+      "4":  { "base": number, "iva": number, "total": number },
+      "10": { "base": number, "iva": number, "total": number },
+      "21": { "base": number, "iva": number, "total": number }
+    }
+  },
   "confidence": "high"|"medium"|"low"
 }
 
@@ -199,51 +250,51 @@ El EMISOR (quien VENDE y emite el documento). El receptor SIEMPRE es "Arume Sake
 
 ✅ Cómo encontrarlo: busca en la CABECERA (parte superior izquierda normalmente) el nombre + CIF del emisor. En tickets/albaranes térmicos el emisor suele estar arriba con dirección. Devuelve el nombre legal completo, incluyendo "SL", "SA", "SLU", "CB" si los pone.
 
-✅ Ejemplos:
-- Ticket de "MAKRO IBÉRICA SAU" enviado a Arume → proveedor: "MAKRO IBÉRICA SAU"
-- Factura de "Llorenç Cerdà Obrador SL" → proveedor: "Llorenç Cerdà Obrador SL"
-- Si en la cabecera ves "Pescaderías Chiringuito SL" y abajo "Cliente: Arume Sake Bar" → proveedor: "Pescaderías Chiringuito SL"
-
+✅ Ejemplos: "MAKRO IBÉRICA SAU", "Llorenç Cerdà Obrador SL", "Pescaderías Chiringuito SL".
 ❌ NUNCA devuelvas "Arume", "Agnès", "Sake Bar" como proveedor.
 
 ═══ FECHA ═══
-Fecha de EMISIÓN del documento (NO fecha de pago, NI fecha de vencimiento, NI fecha de entrega).
-
-✅ Formato OBLIGATORIO: YYYY-MM-DD con año de 4 dígitos. Conversiones:
-- "06/05/2026" → "2026-05-06"
-- "06-05-26"   → "2026-05-06"  (asume 20XX si solo ves XX)
-- "6 de mayo de 2026" → "2026-05-06"
-
-✅ Año esperado: 2024, 2025 o 2026. Si ves "23" interpretalo como 2023 (no 1923).
-
-❌ Si ves DOS fechas (emisión + vencimiento), prefiere SIEMPRE la de emisión.
-❌ Si la fecha no es clara, está borrosa, o no aparece → devuelve null. NUNCA inventes una fecha.
+Fecha de EMISIÓN del documento (NO pago, NI vencimiento, NI entrega).
+✅ Formato OBLIGATORIO: YYYY-MM-DD con año de 4 dígitos. "06/05/2026" → "2026-05-06". Año esperado: 2024-2026.
+❌ Si dos fechas, prefiere la de emisión. Si no es clara → null. NUNCA inventes.
 
 ═══ NUM ═══
-Referencia única (etiquetas: "Nº Albarán", "Albarán Nº", "Factura nº", "Doc. nº", "Ref.", "F-", "A-"…). Tal cual aparece, con guiones/barras/letras.
-Si no hay → "S/N".
+Referencia única ("Nº Albarán", "Factura nº", "Doc.", "Ref.", "F-", "A-"…). Tal cual aparece con guiones y letras. Si no hay → "S/N".
 
-═══ TOTAL ═══
-Importe TOTAL FINAL del documento con IVA incluido. Etiquetas habituales: "TOTAL", "Total Factura", "Importe Total", "Total a pagar".
-- Punto decimal: 1234.56
-- NO confundir con "Base imponible", "Subtotal" ni "IVA".
-- Si no se ve el total, suma t de todas las líneas.
+═══ LINEAS — DESGLOSE OBLIGATORIO POR LÍNEA ═══
+Para CADA producto:
+- q = cantidad numérica (no string).
+- n = descripción tal como aparece.
+- u = unidad ("kg", "l", "ud", "uds", "caja", "botella", "pack"...). "uds" por defecto.
+- unitPrice = precio unitario SIN IVA (la base imponible por unidad). En hostelería el albarán suele dar precio sin IVA en la columna principal y aplica IVA al pie.
+- base = q × unitPrice (siempre sin IVA)
+- rate = tipo IVA correcto para ESA línea: 4 (pan, leche, fruta…), 10 (carne, pescado, refrescos sin alcohol…), 21 (alcohol, refrescos azucarados, productos no alimentarios).
+- iva = base × rate / 100
+- t = base + iva (total línea con IVA)
+- descuento = importe en € si la línea trae descuento individual, 0 si no.
 
-═══ LINEAS ═══
-Una entrada por cada producto facturado:
-- q = cantidad numérica (no string)
-- n = descripción del producto tal como aparece
-- t = importe TOTAL de la línea con IVA (= q × precio_unitario × (1 + rate/100))
-- rate = % IVA aplicado: 4, 10 o 21 (en España). 10 por defecto si no es claro.
-- u = unidad: "kg", "l", "ud", "uds", "caja", "botella"... "uds" por defecto.
+ATENCIÓN: si la columna "Precio" del albarán es CON IVA en vez de sin IVA, debes:
+  unitPrice = precioConIva / (1 + rate/100)   y luego base = q × unitPrice.
+Decide qué columna mira según las cabeceras del albarán ("Precio neto", "Precio s/IVA", "PVP", "Importe sin IVA"…).
+
+═══ TOTALES — IMPORTANTE ═══
+- "base"  = suma de todas las líneas.base − descuentos globales si los hay
+- "iva"   = suma de todas las líneas.iva
+- "total" = base + iva
+- "descuento" = importe del DESCUENTO GLOBAL al pie (0 si no hay)
+- "by_rate" = desglose por tipo de IVA. Ejemplo:
+    - 5 productos al 10% → by_rate.10 = { base: 50, iva: 5, total: 55 }
+    - 2 botellas vino al 21% → by_rate.21 = { base: 20, iva: 4.20, total: 24.20 }
+    - by_rate.4 = { base: 0, iva: 0, total: 0 } si no hay nada al 4%
+- VERIFICA: la suma de las claves de by_rate debe igualar (base, iva, total). Si no cuadra al céntimo, ajusta los valores que peor leíste.
 
 ═══ CONFIDENCE ═══
-- "high"   = todos los campos legibles sin esfuerzo, foto nítida y limpia
-- "medium" = falta algún detalle o hay borrosidad parcial
-- "low"    = foto borrosa, texto parcial, o tienes dudas sobre algún número/fecha → la app marcará el albarán para revisión manual
+- "high" = todo legible, IVAs claros, totales cuadran al céntimo
+- "medium" = falta algún detalle o totales no cuadran exactamente
+- "low" = foto borrosa o tienes dudas → la app marca el albarán para revisión
 
 ═══ POLÍTICA ANTI-INVENCIÓN ═══
-Es PREFERIBLE devolver null/0 que inventar. Si dudas, marca confidence="low" y deja vacío lo que no veas. Nunca digas que algo es "MAKRO" si no lo lees claramente.`;
+PREFERIBLE devolver null/0 que inventar. Si no ves la columna de IVA por línea, intenta deducirlo del producto (alcohol→21, alimentación→10) pero marca confidence="medium". Si dudas con varios IVAs en una factura mixta, marca "low".`;
 
 // ── Componente ─────────────────────────────────────────────────────────────
 
@@ -376,12 +427,77 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
         // (el original puede ser HEIC/PNG/WebP — la IA recibe siempre JPEG normalizado).
         const result = await scanBase64(entry.base64, 'image/jpeg', PROMPT);
         const raw = result.raw as any;
+
+        // Normalizar líneas — el prompt pide unitPrice/base/rate/iva/t pero la
+        // IA puede devolverlas con nombres alternativos (precio_unitario, etc.)
+        // o sólo con t y rate. Reconstruimos lo que falte.
+        const normLineas: ParsedLinea[] = Array.isArray(raw.lineas) ? raw.lineas.map((l: any): ParsedLinea => {
+          const q   = Number(l?.q ?? l?.cantidad ?? 1) || 1;
+          const r   = Number(l?.rate ?? l?.iva_rate ?? l?.tipoIva ?? 10);
+          const rate = (r === 4 || r === 10 || r === 21) ? r : 10;
+          const desc = Number(l?.descuento ?? l?.dto ?? 0) || 0;
+          // Posibles nombres de la IA para el unitario sin IVA
+          let unitPrice = Number(l?.unitPrice ?? l?.precio_unitario ?? l?.precioUnitario ?? l?.precio ?? 0);
+          let base      = Number(l?.base ?? l?.importeBase ?? l?.subtotal ?? 0);
+          let iva       = Number(l?.iva ?? l?.cuotaIva ?? l?.importe_iva ?? 0);
+          let t         = Number(l?.t ?? l?.total ?? l?.importe ?? 0);
+
+          // Reconstrucción si faltan campos:
+          if (!base && unitPrice) base = Num.round2(q * unitPrice);
+          if (!iva && base)       iva  = Num.round2(base * rate / 100);
+          if (!t && (base || iva)) t   = Num.round2((base || 0) + (iva || 0));
+          if (!base && t)         base = Num.round2(t / (1 + rate / 100));
+          if (!iva && t && base)  iva  = Num.round2(t - base);
+          if (!unitPrice && q && base) unitPrice = Num.round2(base / q);
+
+          return {
+            q, n: String(l?.n ?? l?.descripcion ?? l?.producto ?? '').trim(),
+            u: String(l?.u ?? l?.unidad ?? 'uds'),
+            unitPrice: unitPrice || 0,
+            base: base || 0,
+            rate,
+            iva: iva || 0,
+            t: t || 0,
+            descuento: desc,
+          };
+        }) : [];
+
+        // Reconstruir totales si la IA no los dio o son inconsistentes
+        const rawTot = raw.totales || raw.totals || {};
+        const sumBase = normLineas.reduce((s, l) => s + (l.base || 0), 0);
+        const sumIva  = normLineas.reduce((s, l) => s + (l.iva  || 0), 0);
+        const sumT    = normLineas.reduce((s, l) => s + (l.t    || 0), 0);
+        const totales: ParsedTotales = {
+          base:      Num.round2(Number(rawTot.base) || sumBase),
+          iva:       Num.round2(Number(rawTot.iva)  || sumIva),
+          total:     Num.round2(Number(rawTot.total) || Number(raw.total) || sumT),
+          descuento: Num.round2(Number(rawTot.descuento) || 0),
+          by_rate:   typeof rawTot.by_rate === 'object' && rawTot.by_rate ? rawTot.by_rate : (() => {
+            // Calculamos by_rate desde las líneas si la IA no lo dio.
+            const acc: Record<string, { base: number; iva: number; total: number }> = {};
+            for (const l of normLineas) {
+              const k = String(l.rate || 10);
+              if (!acc[k]) acc[k] = { base: 0, iva: 0, total: 0 };
+              acc[k].base  += l.base  || 0;
+              acc[k].iva   += l.iva   || 0;
+              acc[k].total += l.t     || 0;
+            }
+            // Redondear cada bloque
+            for (const k of Object.keys(acc)) {
+              acc[k] = { base: Num.round2(acc[k].base), iva: Num.round2(acc[k].iva), total: Num.round2(acc[k].total) };
+            }
+            return acc;
+          })(),
+        };
+
         const parsed: ParsedAlbaran = {
           proveedor: String(raw.proveedor || '').trim(),
           num: String(raw.num || '').trim() || 'S/N',
           fecha: String(raw.fecha || '').trim(),
-          total: Num.parse(raw.total),
-          lineas: Array.isArray(raw.lineas) ? raw.lineas : [],
+          // Total canónico = totales.total. Si la IA no lo dio, suma de líneas.
+          total: totales.total || 0,
+          totales,
+          lineas: normLineas,
           confidence: (raw.confidence === 'high' || raw.confidence === 'medium' || raw.confidence === 'low')
             ? raw.confidence : undefined,
           aiProvider: result.provider,
@@ -507,14 +623,53 @@ Si no lo ves claramente, devuelve null. NO inventes.`;
         // Si la usuaria editó los campos en la pantalla de revisión, esos
         // valores tienen prioridad sobre los originales de la IA.
         const p = (e.editedParsed || e.status.parsed) as ParsedAlbaran;
-        const items = (p.lineas || []).map(l => ({
-          q: Number(l.q) || 1,
-          n: String(l.n || '').trim(),
-          t: Num.parse(l.t),
-          rate: Number(l.rate) || 0,
-          u: String(l.u || 'uds'),
-        }));
-        const total = p.total || items.reduce((s, it) => s + (Number(it.t) || 0), 0);
+
+        // Líneas con desglose contable completo. Cada item lleva su rate
+        // (4/10/21), su base sin IVA, su iva, su total con IVA, y opcional
+        // descuento. Esto permite reconciliar la factura del proveedor más
+        // adelante línea por línea con su IVA correcto.
+        const items = (p.lineas || []).map(l => {
+          const q   = Number(l.q) || 1;
+          const r   = Number(l.rate) || 10;
+          const up  = Number(l.unitPrice) || 0;
+          const base = Number(l.base) || Num.round2(q * up);
+          const iva  = Number(l.iva)  || Num.round2(base * r / 100);
+          const tot  = Number(l.t)    || Num.round2(base + iva);
+          return {
+            q,
+            n: String(l.n || '').trim(),
+            u: String(l.u || 'uds'),
+            unitPrice: up,
+            base,
+            rate: r,
+            iva,
+            tax: iva,                       // alias para compatibilidad con motor existente
+            t: tot,
+            total: tot,
+            descuento: Number(l.descuento) || 0,
+          };
+        });
+
+        const totales = p.totales || {} as ParsedTotales;
+        const totalDoc = Number(totales.total ?? p.total) || items.reduce((s, it) => s + (Number(it.t) || 0), 0);
+        const baseDoc  = Number(totales.base) || items.reduce((s, it) => s + (Number(it.base) || 0), 0);
+        const ivaDoc   = Number(totales.iva)  || items.reduce((s, it) => s + (Number(it.iva) || 0), 0);
+        const descDoc  = Number(totales.descuento) || 0;
+        const byRate   = totales.by_rate || (() => {
+          const acc: Record<string, { base: number; tax: number; total: number }> = {};
+          for (const it of items) {
+            const k = String(it.rate || 10);
+            if (!acc[k]) acc[k] = { base: 0, tax: 0, total: 0 };
+            acc[k].base  += Number(it.base) || 0;
+            acc[k].tax   += Number(it.iva)  || 0;
+            acc[k].total += Number(it.t)    || 0;
+          }
+          for (const k of Object.keys(acc)) {
+            acc[k] = { base: Num.round2(acc[k].base), tax: Num.round2(acc[k].tax), total: Num.round2(acc[k].total) };
+          }
+          return acc;
+        })();
+
         const fecha = p.fecha || new Date().toISOString().slice(0, 10);
         // Timestamp COMPLETO (13 dígitos) en vez de los últimos 6 — permite
         // detectar cuándo se creó por el id si created_at no estuviera disponible.
@@ -530,7 +685,17 @@ Si no lo ves claramente, devuelve null. NO inventes.`;
           prov: (p.proveedor || 'DESCONOCIDO').toUpperCase(),
           date: fecha,
           num: p.num || 'S/N',
-          total: String(Num.round2(total)),
+          total: String(Num.round2(totalDoc)),
+          // Desglose contable canónico — el motor de la app (informes, P&L,
+          // cuadre con factura) puede usar estos campos directamente sin
+          // recalcular desde las líneas.
+          base:  String(Num.round2(baseDoc)) as any,
+          taxes: String(Num.round2(ivaDoc)) as any,
+          iva:   String(Num.round2(ivaDoc)) as any,
+          // Desglose por tipo de IVA (4 / 10 / 21). Imprescindible cuando una
+          // misma factura mezcla productos de distintos rate, lo cual es lo
+          // habitual en hostelería.
+          by_rate: byRate as any,
           items: items as any,
           unitId: defaultUnitId,
           status: needsReview ? 'mismatch' : 'ok',
@@ -539,6 +704,8 @@ Si no lo ves claramente, devuelve null. NO inventes.`;
           reconciled: false,
           file_hash: e.hash,
           source: 'bulk-images',
+          // Descuento global del documento si lo hay (no por línea)
+          ...(descDoc > 0 ? { descuento: descDoc } as any : {}),
           // 🆕 Marca temporal de cuándo se subió a la app (NO la fecha del
           // documento). Sirve para el botón "Borrar lo subido hoy por IA":
           // si la IA leyó mal la fecha del albarán pero lo subimos hoy,
@@ -1068,16 +1235,66 @@ const ReviewCard: React.FC<ReviewCardProps> = ({ entry, kind, onToggleSelected, 
                   <Field label="Proveedor" value={parsed.proveedor || '—'} highlight={!parsed.proveedor} />
                   <Field label="Nº documento" value={parsed.num || 'S/N'} />
                   <Field label="Fecha" value={parsed.fecha || '—'} highlight={!parsed.fecha} />
-                  <Field label="Total" value={Num.fmt(parsed.total)} highlight={!parsed.total} />
+                  <Field label="Total c/IVA" value={Num.fmt(parsed.totales?.total || parsed.total)} highlight={!parsed.total} />
+                  <Field label="Base s/IVA" value={Num.fmt(parsed.totales?.base || 0)} highlight={!parsed.totales?.base} />
+                  <Field label="Total IVA" value={Num.fmt(parsed.totales?.iva || 0)} highlight={!parsed.totales?.iva} />
                 </div>
+
+                {/* Desglose por tipo de IVA — clave en hostelería donde una
+                    factura puede mezclar 4% (alimentación), 10% (mayoría),
+                    21% (alcohol). */}
+                {parsed.totales?.by_rate && Object.keys(parsed.totales.by_rate).length > 0 && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">Desglose por tipo de IVA</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(['4', '10', '21'] as const).map(rate => {
+                        const block = parsed.totales!.by_rate![rate];
+                        const hasContent = block && (block.base > 0 || block.iva > 0 || block.total > 0);
+                        return (
+                          <div key={rate} className={cn(
+                            'p-2 rounded-lg border',
+                            hasContent
+                              ? rate === '4'  ? 'bg-emerald-50 border-emerald-200' :
+                                rate === '10' ? 'bg-indigo-50 border-indigo-200'   :
+                                                'bg-rose-50 border-rose-200'
+                              : 'bg-white border-slate-100 opacity-50'
+                          )}>
+                            <p className={cn(
+                              'text-[8px] font-black uppercase tracking-widest',
+                              rate === '4' ? 'text-emerald-700' : rate === '10' ? 'text-indigo-700' : 'text-rose-700'
+                            )}>IVA {rate}%</p>
+                            <p className="text-[10px] font-bold text-slate-700 mt-1">Base: <span className="font-mono">{Num.fmt(block?.base || 0)}</span></p>
+                            <p className="text-[10px] font-bold text-slate-700">IVA: <span className="font-mono">{Num.fmt(block?.iva || 0)}</span></p>
+                            <p className="text-[10px] font-black text-slate-900">Total: <span className="font-mono">{Num.fmt(block?.total || 0)}</span></p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {parsed.totales.descuento && parsed.totales.descuento > 0 && (
+                      <p className="text-[10px] font-bold text-amber-700 mt-2">📉 Descuento global: −{Num.fmt(parsed.totales.descuento)}</p>
+                    )}
+                  </div>
+                )}
+
                 {parsed.lineas && parsed.lineas.length > 0 && (
                   <div>
                     <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">Líneas extraídas ({parsed.lineas.length})</p>
-                    <div className="space-y-1 max-h-48 overflow-y-auto">
+                    <div className="space-y-1 max-h-64 overflow-y-auto">
                       {parsed.lineas.map((l, i) => (
-                        <div key={i} className="text-[10px] bg-slate-50 rounded px-2 py-1 flex justify-between gap-2">
+                        <div key={i} className="text-[10px] bg-slate-50 rounded px-2 py-1.5 grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5">
                           <span className="font-bold text-slate-700 truncate">{l.q || 1}× {l.n || '—'} <span className="text-slate-400">({l.u || 'uds'})</span></span>
-                          <span className="font-mono font-black text-slate-800 shrink-0">{Num.fmt(l.t || 0)} <span className="text-slate-400">({l.rate || 0}%)</span></span>
+                          <span className="font-mono font-black text-slate-900 text-right">{Num.fmt(l.t || 0)} <span className={cn(
+                            'text-[8px] font-black px-1 py-0.5 rounded ml-1',
+                            l.rate === 4  ? 'bg-emerald-100 text-emerald-700' :
+                            l.rate === 21 ? 'bg-rose-100 text-rose-700'      :
+                                            'bg-indigo-100 text-indigo-700'
+                          )}>{l.rate || 0}%</span></span>
+                          {(l.base || 0) > 0 && (
+                            <span className="text-[9px] font-mono text-slate-500 col-span-2">
+                              {l.unitPrice ? `${Num.fmt(l.unitPrice)}/u s/IVA · ` : ''}base {Num.fmt(l.base || 0)} + IVA {Num.fmt(l.iva || 0)}
+                              {l.descuento && l.descuento > 0 ? ` · dto -${Num.fmt(l.descuento)}` : ''}
+                            </span>
+                          )}
                         </div>
                       ))}
                     </div>
