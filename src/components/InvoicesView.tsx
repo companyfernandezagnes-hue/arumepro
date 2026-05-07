@@ -7,7 +7,7 @@ import {
   Eye, Save, MailCheck, FileText, Inbox, AlertCircle, Bot,
   ChevronLeft, ChevronRight, Users, Loader2, Smartphone, Merge,
   // 🆕 NUEVOS para vista de proveedores
-  AlertTriangle, ChevronDown, ChevronUp
+  AlertTriangle, ChevronDown, ChevronUp, Plus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
@@ -233,6 +233,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [autoGroupPreview, setAutoGroupPreview] = useState<FacturaExtended[] | null>(null);
   // Índice del borrador en edición dentro del preview (-1 = ninguno)
   const [editingDraftIdx,  setEditingDraftIdx]  = useState<number>(-1);
+  // Mini-form para crear un albarán manual en mitad de la agrupación
+  // (cuando la usuaria detecta que falta uno y necesita cuadrar el total).
+  const [manualAlbForm, setManualAlbForm] = useState<{ prov: string; date: string; num: string; total: string }>({ prov: '', date: '', num: '', total: '' });
+  const [manualAlbBusy, setManualAlbBusy] = useState(false);
 
   const [emailAuditInbox,  setEmailAuditInbox]  = useState<EmailDraft[]>([]);
   // Resultados del Agente IA: cada email + su match calculado contra albaranes.
@@ -457,6 +461,67 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
       toast.success(`✅ ${validDrafts.length} facturas guardadas correctamente.`);
     } catch { toast.error('⚠️ Hubo un error al guardar.'); }
     finally { setIsProcessing(false); }
+  };
+
+  // ── Crear albarán manual EN MITAD de la agrupación ───────────────────────
+  // Caso real: la usuaria está cuadrando facturas con albaranes y se da
+  // cuenta de que falta uno (no llegó la foto, era un albarán antiguo no
+  // escaneado…). En vez de salir del flujo, crear el albarán en otra
+  // pestaña y volver, lo crea aquí mismo y lo vincula automáticamente al
+  // draft que está editando.
+  const handleAddManualAlbaranToDraft = async (draftIdx: number) => {
+    if (!autoGroupPreview || draftIdx < 0) return;
+    const { prov, date, num, total } = manualAlbForm;
+    if (!prov.trim()) { toast.warning('Falta el proveedor del albarán manual.'); return; }
+    if (!date) { toast.warning('Falta la fecha del albarán manual.'); return; }
+    const totalNum = parseFloat(String(total).replace(',', '.'));
+    if (!Number.isFinite(totalNum) || totalNum <= 0) { toast.warning('Total del albarán inválido.'); return; }
+
+    setManualAlbBusy(true);
+    try {
+      const newId = `alb-manual-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const newAlbaran: any = {
+        id: newId,
+        date,
+        prov: prov.trim().toUpperCase(),
+        num: num.trim() || 'S/N',
+        total: String(Num.round2(totalNum)),
+        items: [],
+        unitId: 'REST',
+        invoiced: false,
+        paid: false,
+        reconciled: false,
+        status: 'ok',
+        source: 'manual-grouping',
+        created_at: new Date().toISOString(),
+      };
+
+      // 1. Persistir en data.albaranes
+      const newData = JSON.parse(JSON.stringify(safeData));
+      if (!Array.isArray(newData.albaranes)) newData.albaranes = [];
+      newData.albaranes.unshift(newAlbaran);
+      await onSave(newData);
+
+      // 2. Vincular el nuevo albarán al draft que estamos editando
+      setAutoGroupPreview(prev => {
+        if (!prev) return prev;
+        const next = [...prev];
+        const draft = next[draftIdx];
+        next[draftIdx] = {
+          ...draft,
+          albaranIdsArr: [...(draft.albaranIdsArr || []), newId],
+        };
+        return next;
+      });
+
+      // 3. Limpiar el form para volver a usarlo si hace falta otro
+      setManualAlbForm({ prov: '', date: '', num: '', total: '' });
+      toast.success(`✅ Albarán manual añadido a la factura: ${prov} · ${Num.fmt(totalNum)}`);
+    } catch (err: any) {
+      toast.error(`❌ Error al crear albarán: ${err?.message || 'desconocido'}`);
+    } finally {
+      setManualAlbBusy(false);
+    }
   };
 
   // ── Fusionar dos borradores en uno ────────────────────────────────────────
@@ -1639,6 +1704,55 @@ REGLAS:
                                     </button>
                                   </div>
                                 </div>
+
+                                {/* ── ➕ Añadir albarán manual ──────────────────────────
+                                    Para cuando la usuaria detecta que falta un albarán y
+                                    quiere crearlo y vincularlo en el momento, sin salir
+                                    del flujo de agrupación. */}
+                                <details className="bg-emerald-50 rounded-xl border-2 border-dashed border-emerald-300 mb-2">
+                                  <summary className="cursor-pointer px-3 py-2 text-[10px] font-black text-emerald-700 uppercase tracking-widest hover:bg-emerald-100/50 rounded-xl transition flex items-center gap-1.5">
+                                    <Plus className="w-3.5 h-3.5" />
+                                    Añadir albarán manual a esta factura
+                                  </summary>
+                                  <div className="p-3 space-y-2 border-t border-emerald-200">
+                                    <p className="text-[9px] font-bold text-emerald-600">¿Te falta un albarán para cuadrar el total? Créalo aquí y se vincula al instante.</p>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <input
+                                        type="text" placeholder="Proveedor"
+                                        value={manualAlbForm.prov}
+                                        onChange={e => setManualAlbForm(f => ({ ...f, prov: e.target.value }))}
+                                        className="px-2 py-1.5 text-xs font-bold border border-emerald-200 rounded-lg outline-none focus:border-emerald-500 col-span-2"
+                                      />
+                                      <input
+                                        type="date"
+                                        value={manualAlbForm.date || (draft.date || '').substring(0, 10)}
+                                        onChange={e => setManualAlbForm(f => ({ ...f, date: e.target.value }))}
+                                        className="px-2 py-1.5 text-xs font-bold border border-emerald-200 rounded-lg outline-none focus:border-emerald-500"
+                                      />
+                                      <input
+                                        type="text" placeholder="Nº (opcional)"
+                                        value={manualAlbForm.num}
+                                        onChange={e => setManualAlbForm(f => ({ ...f, num: e.target.value }))}
+                                        className="px-2 py-1.5 text-xs font-bold border border-emerald-200 rounded-lg outline-none focus:border-emerald-500"
+                                      />
+                                      <input
+                                        type="number" step="0.01" placeholder="Total (€)"
+                                        value={manualAlbForm.total}
+                                        onChange={e => setManualAlbForm(f => ({ ...f, total: e.target.value }))}
+                                        className="px-2 py-1.5 text-xs font-mono font-black text-right border border-emerald-200 rounded-lg outline-none focus:border-emerald-500 col-span-2"
+                                      />
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleAddManualAlbaranToDraft(idx)}
+                                      disabled={manualAlbBusy}
+                                      className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition disabled:opacity-50 flex items-center justify-center gap-1.5"
+                                    >
+                                      {manualAlbBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <Plus className="w-3.5 h-3.5"/>}
+                                      Crear y vincular
+                                    </button>
+                                  </div>
+                                </details>
 
                                 {availableAlbs.length === 0 && (
                                   <p className="text-[10px] text-slate-400 text-center py-4">No hay más albaranes disponibles en este mes</p>
