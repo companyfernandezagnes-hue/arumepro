@@ -48,8 +48,13 @@ interface ParsedLinea {
 interface ParsedTotales {
   base?: number;        // suma de bases imponibles - descuento global
   iva?: number;         // suma del IVA
-  total?: number;       // base + iva
+  total?: number;       // base + iva (o base sólo si recargoEquivalencia)
   descuento?: number;   // descuento global del documento
+  // Régimen especial: si el TOTAL ALBARÁN del documento no incluye el IVA
+  // (tipo Frutas Daniel donde IMPORTE = TOTAL = suma de bases). En este caso
+  // el motor sabe que para reconciliar con la factura mensual hay que
+  // sumar el IVA aparte.
+  recargoEquivalencia?: boolean;
   by_rate?: Record<string, { base: number; iva: number; total: number }>;
 }
 
@@ -74,7 +79,9 @@ interface ParsedAlbaran {
 }
 
 // Validación post-IA: detecta señales de que algo se leyó mal y devuelve
-// razones para marcar needs_review.
+// razones para marcar needs_review. Además detecta automáticamente el
+// régimen especial (recargo equivalencia) cuando el total del documento
+// = suma de bases sin IVA.
 const validateParsed = (p: ParsedAlbaran): string[] => {
   const reasons: string[] = [];
   // Fecha
@@ -90,7 +97,7 @@ const validateParsed = (p: ParsedAlbaran): string[] => {
   const provLower = (p.proveedor || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
   if (!p.proveedor || p.proveedor.length < 3) {
     reasons.push('Proveedor no leído');
-  } else if (/\b(arume|agnes|agnès|sake bar|company fernandez)\b/i.test(provLower)) {
+  } else if (/\b(arume|agnes|agnès|sake bar|company fernandez|celoso de palma)\b/i.test(provLower)) {
     reasons.push('Proveedor parece ser el receptor (Arume), no el emisor');
   }
   // Total
@@ -99,6 +106,35 @@ const validateParsed = (p: ParsedAlbaran): string[] => {
   } else if (p.total > 100000) {
     reasons.push('Total sospechosamente alto');
   }
+
+  // Cuadre matemático: la suma de líneas debe coincidir con el total ±0.50€
+  // (margen para redondeos del proveedor). Si difiere mucho, la IA leyó mal
+  // alguna cifra. Detectamos también el régimen especial sin IVA aplicado
+  // (caso Frutas Daniel donde TOTAL = base sin sumar IVA).
+  if (Array.isArray(p.lineas) && p.lineas.length > 0 && p.total > 0) {
+    const sumBase = p.lineas.reduce((s, l) => s + (Number(l.base) || 0), 0);
+    const sumIva  = p.lineas.reduce((s, l) => s + (Number(l.iva)  || 0), 0);
+    const sumT    = p.lineas.reduce((s, l) => s + (Number(l.t)    || 0), 0);
+
+    const diffConIva = Math.abs(sumT - p.total);
+    const diffSinIva = Math.abs(sumBase - p.total);
+
+    if (diffSinIva < 0.5 && diffConIva > 1) {
+      // El total del documento coincide con la suma de BASES — no se sumó el IVA.
+      // Es el régimen especial (recargo equivalencia) — marcamos en totales y
+      // NO añadimos esto como razón de revisión, es legítimo en hostelería.
+      if (p.totales) {
+        p.totales.recargoEquivalencia = true;
+        // En este caso el IVA real es la suma de IVAs por línea, aunque no
+        // esté incluido en el total facturado. La factura mensual ya lo
+        // sumará por separado.
+        if (!p.totales.iva || p.totales.iva === 0) p.totales.iva = Num.round2(sumIva);
+      }
+    } else if (diffConIva > 1.0 && diffSinIva > 1.0) {
+      reasons.push(`Total no cuadra con líneas: doc=${p.total.toFixed(2)} vs líneas c/IVA=${sumT.toFixed(2)} (diff ${diffConIva.toFixed(2)}€)`);
+    }
+  }
+
   // Confianza autoreportada
   if (p.confidence === 'low') reasons.push('IA reportó baja confianza');
   return reasons;
@@ -141,6 +177,37 @@ const fileToBase64 = (file: File): Promise<string> =>
     reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
     reader.readAsDataURL(file);
   });
+
+// Rota un base64 JPEG 90/180/270 grados en sentido horario y devuelve el
+// nuevo base64. Útil cuando la primera lectura sale mal porque la foto
+// estaba físicamente girada (no EXIF). Lo usamos solo como auto-retry.
+const rotateBase64Image = async (base64: string, degrees: 90 | 180 | 270): Promise<string> => {
+  const blob = await fetch(`data:image/jpeg;base64,${base64}`).then(r => r.blob());
+  const bitmap = await createImageBitmap(blob);
+  const w = bitmap.width;
+  const h = bitmap.height;
+  const canvas = document.createElement('canvas');
+  if (degrees === 180) { canvas.width = w; canvas.height = h; }
+  else                  { canvas.width = h; canvas.height = w; }
+  const ctx = canvas.getContext('2d', { alpha: false });
+  if (!ctx) return base64;
+  ctx.imageSmoothingEnabled = true;
+  (ctx as any).imageSmoothingQuality = 'high';
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate((degrees * Math.PI) / 180);
+  ctx.drawImage(bitmap, -w / 2, -h / 2);
+  const rotatedBlob: Blob = await new Promise(res => canvas.toBlob(b => res(b as Blob), 'image/jpeg', 0.9));
+  const reader = new FileReader();
+  return new Promise<string>((resolve, reject) => {
+    reader.onload = () => {
+      const result = reader.result as string;
+      const idx = result.indexOf(',');
+      resolve(idx >= 0 ? result.slice(idx + 1) : result);
+    };
+    reader.onerror = () => reject(new Error('No se pudo rotar imagen'));
+    reader.readAsDataURL(rotatedBlob);
+  });
+};
 
 // Normaliza un nº de albarán/factura: quita espacios, guiones, barras y
 // ceros a la izquierda. "F-2024-0123" y "F20240123" deben deduplicarse igual.
@@ -294,7 +361,53 @@ Decide qué columna mira según las cabeceras del albarán ("Precio neto", "Prec
 - "low" = foto borrosa o tienes dudas → la app marca el albarán para revisión
 
 ═══ POLÍTICA ANTI-INVENCIÓN ═══
-PREFERIBLE devolver null/0 que inventar. Si no ves la columna de IVA por línea, intenta deducirlo del producto (alcohol→21, alimentación→10) pero marca confidence="medium". Si dudas con varios IVAs en una factura mixta, marca "low".`;
+PREFERIBLE devolver null/0 que inventar. Si no ves la columna de IVA por línea, intenta deducirlo del producto (alcohol→21, alimentación→10) pero marca confidence="medium". Si dudas con varios IVAs en una factura mixta, marca "low".
+
+═══ EJEMPLOS REALES DE ALBARANES QUE VAS A VER ═══
+
+EJEMPLO A — Carmen Peix i Marisc (pescadería, IVAs mixtos):
+- Cabecera: "CARMEN PEIX I MARISC S.L." CIF B57941379 (PROVEEDOR)
+- Cliente: ARUME SAKE BAR (NO usar como proveedor)
+- Líneas: GAMBA PEQUEÑA 2kg × 32€ (10%), PALILLOS 4ud × 3.80€ (21%), ANGUILA 6ud × 7.80€ (10%), CARNE VIEIRA 1kg × 38€ (10%)
+- Pie: Base 10% = 148.80, IVA 14.88 / Base 21% = 15.20, IVA 3.19 / TOTAL 182.07
+- En este formato: la columna "Importe" YA es el total línea con IVA y "Precio" es unitario sin IVA. unitPrice = Precio.
+
+EJEMPLO B — Llorenç Cerdà (alimentación, mixto 4% + 10%):
+- Cabecera: "CERDA OBRADOR ALIMENTACIO, S.L." CIF B57836157 (PROVEEDOR)
+- Cliente: Arume Sake Bar
+- Líneas: PAN CARASATU 3 × 7.95 (IVA 4) = 23.85; PATO MUSLO 2 × 40.57 (IVA 10) = 81.14; FOIE MI-CUIT 1.095 × 58.50 (IVA 10) = 64.06; FOIE ESCALOPADO 1 × 43.50 (IVA 10) = 43.50
+- Pie: Importe bruto 212.55 / Base imponible 4%: 23.85, Cuota 0.95 / Base 10%: 188.70, Cuota 18.87 / Total Albarán 232.37
+- En este formato: "Importe" YA es total línea sin IVA (= base línea). unitPrice = Precio. base línea = Cant × Precio = Importe. Total = Importe + IVA.
+
+EJEMPLO C — Chis! Cakes (un solo producto, IVA único):
+- Cabecera: "CHISLUGOJDBD S.C." CIF J55446843 (PROVEEDOR)
+- Cliente: Arume Sake Bar
+- Línea: TARTA Personalizada 1 × 38.00€ (10% IVA) = 38.00€
+- Pie: Base 38.00 / IVA 3.80 / Total 41.80
+- En este formato: "Precio" es unitario sin IVA, "Importe" = base línea sin IVA. unitPrice = Precio.
+
+EJEMPLO D — Frutas Daniel Palma (RECARGO DE EQUIVALENCIA / albarán sin IVA aplicado):
+- Cabecera: "FRUTAS DANIEL PALMA, S.L." CIF B09857624 (PROVEEDOR)
+- Líneas: NARANJA 1.4kg × 1.21 = 1.69 (IVA 4); CEBOLLINO 2 × 2.16 = 4.32 (IVA 10); etc.
+- Pie: IMPORTE 76.32 / BASE IMPONIBLE 66.03 (al 4%) y 10.29 (al 10%) / TOTAL ALBARÁN 76.32
+- ATENCIÓN ESPECIAL: en este formato Total = Suma de bases (= IMPORTE). El IVA NO se suma al total porque se factura a parte por recargo de equivalencia (régimen especial de hortofrutícolas/comerciantes minoristas).
+- En estos casos: by_rate.4 = { base: 66.03, iva: 0 (NO incluido en total), total: 66.03 } y by_rate.10 igual. El total del albarán SIGUE siendo 76.32.
+- Marca el descuento con un comentario tipo "régimen especial sin IVA aplicado" en la 1ª línea, pero respeta los rates por línea para que cuadre con la factura mensual del proveedor.
+
+EJEMPLO E — Ticket manuscrito (caso edge):
+- Sin cabecera de proveedor formal. Texto a mano.
+- "Camarero: Arume / 5 Sellos 12 / 5 Picados 12 / Total 24"
+- En este caso: proveedor = null (no hay), num = null, fecha si está visible, IVA = 10 por defecto. confidence: "low" obligatorio. La usuaria lo aprobará manualmente.
+
+═══ FORMATO DE PRECIO POR PROVEEDOR — CÓMO INTERPRETARLO ═══
+
+Mira las cabeceras de columnas SIEMPRE. Patrones habituales:
+- "Precio + Importe" donde Importe = Cant × Precio + IVA → Precio es unitario sin IVA, Importe es total línea con IVA. Caso A.
+- "Precio + Importe" donde Importe = Cant × Precio (sin IVA añadido) → Precio es unitario sin IVA, Importe es base línea. Caso B, C.
+- Si en el pie ves "Base Imponible + Cuota IVA + Total" SEPARADOS → el IVA no estaba en línea, hay que sumarlo. Caso B, C.
+- Si en el pie ves SOLO "Importe + Base Imponible + Total" sin "Cuota IVA" → es régimen especial sin IVA. Caso D.
+
+VERIFICA SIEMPRE: la suma de líneas debe igualar lo que muestra el pie. Si no cuadra al céntimo, mira si confundiste qué columna era unitPrice vs total. Si tras intentar sigue sin cuadrar, marca confidence="medium" o "low".`;
 
 // ── Componente ─────────────────────────────────────────────────────────────
 
@@ -528,6 +641,50 @@ Si no lo ves claramente, devuelve null. NO inventes.`;
           } catch { /* el retry es best-effort: si falla, seguimos con lo que ya teníamos */ }
         }
 
+        // 🔄 Auto-rotación: si tras el primer scan la lectura es muy mala
+        // (sin proveedor + sin fecha + total cero), probablemente la foto
+        // está girada físicamente (sin flag EXIF). Probamos rotar 90° y 180°
+        // y elegimos la mejor lectura. Solo se usan recursos extra cuando la
+        // primera lectura es claramente fallida.
+        const isClearlyBad = (pp: ParsedAlbaran): boolean =>
+          (!pp.proveedor || pp.proveedor.length < 3) &&
+          (!pp.fecha || !/^\d{4}-\d{2}-\d{2}$/.test(pp.fecha)) &&
+          (!pp.total || pp.total <= 0);
+
+        if (isClearlyBad(parsed)) {
+          for (const deg of [90, 180, 270] as const) {
+            try {
+              const rotatedB64 = await rotateBase64Image(entry.base64, deg);
+              const rotResult = await scanBase64(rotatedB64, 'image/jpeg', PROMPT);
+              const rotRaw = rotResult.raw as any;
+              const rotParsed: any = {
+                proveedor: String(rotRaw.proveedor || '').trim(),
+                fecha: String(rotRaw.fecha || '').trim(),
+                total: Num.parse(rotRaw.total || (rotRaw.totales?.total)),
+              };
+              if (!isClearlyBad(rotParsed)) {
+                // Rotación corrigió la lectura — usamos esta versión completa.
+                console.log(`[BulkAlbaranes] Rotación ${deg}° rescata albarán: ${entry.file.name}`);
+                // Re-procesar todo con la rotación buena
+                const rotLineas = Array.isArray(rotRaw.lineas) ? rotRaw.lineas : [];
+                parsed.proveedor = rotParsed.proveedor || parsed.proveedor;
+                parsed.fecha     = rotParsed.fecha     || parsed.fecha;
+                parsed.num       = String(rotRaw.num || '').trim() || parsed.num;
+                parsed.total     = rotParsed.total     || parsed.total;
+                parsed.lineas    = rotLineas;
+                parsed.totales   = rotRaw.totales || parsed.totales;
+                parsed.confidence = rotRaw.confidence || parsed.confidence;
+                // Guardar la base64 rotada en la entry para que el thumbnail
+                // y modal de detalle muestren la versión legible.
+                entry.base64 = rotatedB64;
+                break;
+              }
+            } catch (e) {
+              console.warn(`[BulkAlbaranes] Rotación ${deg}° falló:`, e);
+            }
+          }
+        }
+
         // Validación post-IA — detecta señales de "se leyó mal" para marcar
         // el albarán a revisar antes de meterlo al P&L.
         parsed.reviewReasons = validateParsed(parsed);
@@ -706,6 +863,10 @@ Si no lo ves claramente, devuelve null. NO inventes.`;
           source: 'bulk-images',
           // Descuento global del documento si lo hay (no por línea)
           ...(descDoc > 0 ? { descuento: descDoc } as any : {}),
+          // Régimen especial: el total facturado = suma de bases sin IVA
+          // (caso Frutas Daniel con recargo de equivalencia). El motor de
+          // reconciliación con la factura mensual lo tiene en cuenta.
+          ...(totales.recargoEquivalencia ? { recargo_equivalencia: true } as any : {}),
           // 🆕 Marca temporal de cuándo se subió a la app (NO la fecha del
           // documento). Sirve para el botón "Borrar lo subido hoy por IA":
           // si la IA leyó mal la fecha del albarán pero lo subimos hoy,
@@ -1272,6 +1433,12 @@ const ReviewCard: React.FC<ReviewCardProps> = ({ entry, kind, onToggleSelected, 
                     </div>
                     {parsed.totales.descuento && parsed.totales.descuento > 0 && (
                       <p className="text-[10px] font-bold text-amber-700 mt-2">📉 Descuento global: −{Num.fmt(parsed.totales.descuento)}</p>
+                    )}
+                    {parsed.totales.recargoEquivalencia && (
+                      <div className="mt-2 bg-indigo-50 border border-indigo-200 rounded-lg p-2">
+                        <p className="text-[10px] font-black text-indigo-800 uppercase tracking-widest">📋 Régimen especial detectado</p>
+                        <p className="text-[10px] font-bold text-indigo-700">El total del albarán es la SUMA DE BASES (sin IVA aplicado). Habitual en mayoristas de hortofrutícolas con recargo de equivalencia. La factura mensual del proveedor sumará el IVA aparte.</p>
+                      </div>
                     )}
                   </div>
                 )}
