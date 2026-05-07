@@ -15,7 +15,7 @@ import { scanDocument } from '../services/aiProviders';
 import { toast } from '../hooks/useToast';
 import { CashWeekSummary, getLastCierreValues } from './CashWeekSummary';
 import { confirm } from '../hooks/useConfirm';
-import { useVoiceInput } from '../hooks/useVoiceInput';
+import { useVoiceInput, parseSpanishWordsToNumber } from '../hooks/useVoiceInput';
 import { triggerConfetti } from './Confetti';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -152,11 +152,41 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     const lower = text.toLowerCase();
     setLastRawText(text);
 
-    // Extrae el número que sigue inmediatamente a la keyword
+    // Lista de palabras numéricas que activan el extractor de palabras a número.
+    // Si la transcripción del navegador devuelve "trescientos trece" (en vez de
+    // dígitos), capturamos esa cadena hasta la siguiente keyword o fin de frase.
+    const NUMBER_WORDS_REGEX = /(cero|un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|dieci\w+|veinti\w+|veinte|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa|cien|ciento|doscientos|doscientas|trescientos|trescientas|cuatrocientos|cuatrocientas|quinientos|quinientas|seiscientos|seiscientas|setecientos|setecientas|ochocientos|ochocientas|novecientos|novecientas|mil|y|con|coma|euros?|c[eé]ntimos?)/iu;
+
+    // Lista de TODAS las keywords (para saber dónde parar la captura de palabras)
+    const ALL_KEYS = VOICE_MAPPINGS.flatMap(m => m.keys);
+
+    // Extrae un número que sigue a la keyword. Acepta:
+    //  - dígitos directos: "efectivo 313" → "313"
+    //  - dígitos con decimal: "tpv 1446,25" o "1446.25"
+    //  - palabras: "efectivo trescientos trece" → "313"
+    //  - palabras con decimales: "ochocientos cuarenta y dos con cincuenta" → "842.50"
     const extractNum = (keyword: string): string | null => {
-      const re = new RegExp(keyword + '[^\\d]*(\\d+([.,]\\d+)?)', 'i');
-      const m  = lower.match(re);
-      return m ? m[1].replace(',', '.') : null;
+      // 1. Intento directo con dígitos
+      const reNum = new RegExp(keyword + '[^\\d]*(\\d+([.,]\\d+)?)', 'i');
+      const mNum  = lower.match(reNum);
+      if (mNum) return mNum[1].replace(',', '.');
+
+      // 2. Intento con palabras: cogemos el texto desde la keyword hasta la
+      // siguiente keyword (o fin) y lo pasamos por parseSpanishWordsToNumber.
+      const idx = lower.indexOf(keyword);
+      if (idx < 0) return null;
+      const afterKeyword = lower.slice(idx + keyword.length);
+      // Cortamos en la siguiente keyword (que NO sea la misma)
+      let cutAt = afterKeyword.length;
+      for (const k of ALL_KEYS) {
+        if (k === keyword) continue;
+        const ki = afterKeyword.indexOf(k);
+        if (ki >= 0 && ki < cutAt) cutAt = ki;
+      }
+      const fragment = afterKeyword.slice(0, cutAt).trim();
+      if (!fragment || !NUMBER_WORDS_REGEX.test(fragment)) return null;
+      const parsed = parseSpanishWordsToNumber(fragment);
+      return parsed === null ? null : String(parsed);
     };
 
     const updates: Record<string, string> = {};

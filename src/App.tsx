@@ -737,7 +737,7 @@ export default function App() {
   const content = useMemo(() => {
     const props = { data: dbRef.current, onSave: handleSave };
     switch (activeTab) {
-      case 'dashboard':    return <S><DashboardView data={dbRef.current} onNavigate={handleTabChange} /></S>;
+      case 'dashboard':    return <S><DashboardView data={dbRef.current} onNavigate={handleTabChange} onSave={handleSave} /></S>;
       case 'ia':           return <S><AIConsultant data={dbRef.current} /></S>;
       case 'diario':       return <S><CashView {...props} /></S>;
       case 'importador':   return <S><ImportView data={dbRef.current} onSave={handleSave} onNavigate={(tab) => handleTabChange(tab as TabKey)} /></S>;
@@ -763,7 +763,7 @@ export default function App() {
       case 'nominas':      return <S><NominasView data={dbRef.current} onSave={handleSave} /></S>;
       case 'notificaciones': return <S><NotificacionesView data={dbRef.current} onSave={handleSave} /></S>;
       case 'agente':         return <S><AutomatizacionesView data={dbRef.current} onSave={handleSave} /></S>;
-      default:             return <S><DashboardView data={dbRef.current} onNavigate={handleTabChange} /></S>;
+      default:             return <S><DashboardView data={dbRef.current} onNavigate={handleTabChange} onSave={handleSave} /></S>;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, dataVersion, handleSave, handleTabChange]);

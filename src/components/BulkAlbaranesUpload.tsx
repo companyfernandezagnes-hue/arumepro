@@ -44,6 +44,11 @@ interface ParsedAlbaran {
   // Razones de revisión detectadas en validación post-IA (fecha rara, año fuera
   // de rango, proveedor que parece "Arume" / receptor, etc.).
   reviewReasons?: string[];
+  // Qué proveedor de IA leyó esto realmente (claude/gemini/mistral/groq).
+  // Visible en la tarjeta de revisión para que la usuaria sepa si su API de
+  // Claude está funcionando o si la app cae al fallback de Gemini.
+  aiProvider?: string;
+  aiModel?: string;
 }
 
 // Validación post-IA: detecta señales de que algo se leyó mal y devuelve
@@ -379,7 +384,34 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
           lineas: Array.isArray(raw.lineas) ? raw.lineas : [],
           confidence: (raw.confidence === 'high' || raw.confidence === 'medium' || raw.confidence === 'low')
             ? raw.confidence : undefined,
+          aiProvider: result.provider,
+          aiModel: result.model,
         };
+
+        // 🔄 Re-prompt automático: si la IA devolvió fecha o proveedor vacíos,
+        // hacemos UN segundo intento con prompt enfocado SOLO en eso. Antes de
+        // marcar el albarán "a revisar" damos esta segunda oportunidad porque
+        // a veces el primer prompt es demasiado largo y la IA se "cansa" en
+        // los campos finales. Prompt corto + atención específica suele resolver.
+        const needsRetry = !parsed.fecha || !parsed.proveedor;
+        if (needsRetry) {
+          try {
+            const focusPrompt = `Mira esta imagen UNA vez más y devuelve SOLO JSON:
+{"proveedor":"nombre del emisor (NO Arume/receptor)","fecha":"YYYY-MM-DD"}
+
+Ignora todo lo demás del documento. Concéntrate en:
+1. PROVEEDOR: el nombre legal del emisor en la cabecera junto al CIF.
+2. FECHA: la fecha de emisión, formato YYYY-MM-DD con año 4 dígitos. Si ves DD/MM/YYYY conviértelo. Año esperado 2024-2026.
+Si no lo ves claramente, devuelve null. NO inventes.`;
+            const retry = await scanBase64(entry.base64, 'image/jpeg', focusPrompt);
+            const r2 = retry.raw as any;
+            if (!parsed.proveedor && r2?.proveedor) parsed.proveedor = String(r2.proveedor).trim();
+            if (!parsed.fecha && r2?.fecha && /^\d{4}-\d{2}-\d{2}$/.test(String(r2.fecha))) {
+              parsed.fecha = String(r2.fecha).trim();
+            }
+          } catch { /* el retry es best-effort: si falla, seguimos con lo que ya teníamos */ }
+        }
+
         // Validación post-IA — detecta señales de "se leyó mal" para marcar
         // el albarán a revisar antes de meterlo al P&L.
         parsed.reviewReasons = validateParsed(parsed);
@@ -926,9 +958,24 @@ const ReviewCard: React.FC<ReviewCardProps> = ({ entry, kind, onToggleSelected, 
             />
             <span className="text-[10px] font-bold text-slate-400">€</span>
           </div>
-          <div className="flex items-center gap-2 text-[9px] font-bold">
+          <div className="flex items-center gap-1.5 text-[9px] font-bold flex-wrap">
             {parsed.lineas && parsed.lineas.length > 0 && (
               <span className="text-slate-400">{parsed.lineas.length} línea(s)</span>
+            )}
+            {/* Badge de proveedor IA — pink (Claude) / indigo (Gemini) / etc. */}
+            {parsed.aiProvider && (
+              <span className={cn(
+                'text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded',
+                parsed.aiProvider === 'claude' ? 'bg-pink-100 text-pink-700' :
+                parsed.aiProvider === 'gemini' ? 'bg-indigo-100 text-indigo-700' :
+                parsed.aiProvider === 'mistral' ? 'bg-rose-100 text-rose-700' :
+                parsed.aiProvider === 'groq' ? 'bg-emerald-100 text-emerald-700' :
+                'bg-slate-100 text-slate-700',
+              )} title={`Lectura por ${parsed.aiProvider} (${parsed.aiModel || '?'})`}>
+                {parsed.aiProvider === 'claude' ? '🟣 Claude' :
+                 parsed.aiProvider === 'gemini' ? '🔵 Gemini' :
+                 parsed.aiProvider}
+              </span>
             )}
             {parsed.confidence && (
               <span className={cn(

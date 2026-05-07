@@ -22,6 +22,9 @@ import { proximasFestividades } from '../services/festividades';
 interface DashboardViewProps {
   data       : AppData;
   onNavigate?: (tab: string) => void;
+  // Permite aprobar/marcar registros sin abrir el modal de edición. Si no
+  // se pasa, los botones de aprobación quedan deshabilitados.
+  onSave?    : (newData: AppData) => Promise<void> | void;
 }
 
 type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
@@ -200,7 +203,7 @@ const PulsoDelDia: React.FC<{ data: AppData; onNavigate?: (tab: string) => void 
 };
 
 // ─── Componente principal ─────────────────────────────────────────────────────
-export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
+export const DashboardView = ({ data, onNavigate, onSave }: DashboardViewProps) => {
   const [viewMode,        setViewMode]        = useState<'month'|'quarter'|'year'>('month');
   const [selectedMonth,   setSelectedMonth]   = useState(new Date().getMonth());
   const [selectedQuarter, setSelectedQuarter] = useState(Math.floor(new Date().getMonth()/3)+1);
@@ -393,6 +396,33 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
   const hoyISO = new Date().toISOString().slice(0, 10);
   // ── Facturas marcadas "mal procesadas" por la usuaria al subirlas ─────
   const facturasMalProcesadas = facturas.filter((f: any) => f.needs_review === true && !f.reviewed);
+  // 🆕 Albaranes que la IA marcó dudosos (status:'mismatch' o needs_review:true)
+  // Son los del bulk upload donde el OCR tuvo dudas: fecha vacía, proveedor
+  // sospechoso, baja confianza. Hay que revisarlos antes de que entren al
+  // Food Cost.
+  const albaranesMalProcesados = (data.albaranes || []).filter((a: any) =>
+    a && (a.needs_review === true || a.status === 'mismatch') && !a.reviewed
+  );
+
+  // ─── Aprobación rápida sin abrir modal ───────────────────────────────────
+  // Marca un albarán/factura como reviewed:true y limpia needs_review.
+  // Util cuando la usuaria sólo quiere confirmar visualmente sin editar.
+  const handleQuickApprove = async (kind: 'factura' | 'albaran', id: string) => {
+    if (!onSave) return;
+    const newData: AppData = JSON.parse(JSON.stringify(data));
+    if (kind === 'factura') {
+      newData.facturas = (newData.facturas || []).map((f: any) =>
+        f && f.id === id ? { ...f, needs_review: false, reviewed: true } : f
+      );
+    } else {
+      newData.albaranes = (newData.albaranes || []).map((a: any) =>
+        a && a.id === id
+          ? { ...a, needs_review: false, reviewed: true, status: a.status === 'mismatch' ? 'ok' : a.status }
+          : a
+      );
+    }
+    await onSave(newData);
+  };
 
   // ── 🎉 Próxima festividad (dentro de 14 días) para avisar de marketing
   const proximasFiestas = useMemo(() => proximasFestividades(14), []);
@@ -602,30 +632,87 @@ export const DashboardView = ({ data, onNavigate }: DashboardViewProps) => {
       )}
 
       {/* ═════════════ BANNER FACTURAS MAL PROCESADAS ═════════════ */}
-      {facturasMalProcesadas.length > 0 && (
+      {(facturasMalProcesadas.length > 0 || albaranesMalProcesados.length > 0) && (
         <motion.div
           initial={{ opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-[color:var(--arume-warn)]/10 border border-[color:var(--arume-warn)]/30 rounded-2xl p-4"
+          className="bg-[color:var(--arume-warn)]/10 border border-[color:var(--arume-warn)]/30 rounded-2xl p-4 space-y-3"
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-[color:var(--arume-warn)] shrink-0"/>
-            <div className="flex-1">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-warn)]">
-                Pendientes de revisar
-              </p>
-              <p className="text-sm font-semibold text-[color:var(--arume-ink)]">
-                {facturasMalProcesadas.length} factura{facturasMalProcesadas.length > 1 ? 's' : ''} marcada{facturasMalProcesadas.length > 1 ? 's' : ''} como "mal procesada{facturasMalProcesadas.length > 1 ? 's' : ''}"
-              </p>
-              <p className="text-[11px] text-[color:var(--arume-gray-600)] mt-0.5">
-                Son facturas que subiste y la IA leyó mal. Ábrelas en Compras → Bóveda y corrige manualmente.
-              </p>
-            </div>
-            <button onClick={() => onNavigate?.('compras')}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-warn)] text-white hover:brightness-95 transition shrink-0">
-              Revisar ahora →
-            </button>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-warn)]">
+              Pendientes de revisar IA
+            </p>
+            <span className="ml-auto text-[10px] font-bold text-[color:var(--arume-gray-500)]">
+              {facturasMalProcesadas.length + albaranesMalProcesados.length} en total
+            </span>
           </div>
+
+          {/* Lista facturas mal procesadas (primeras 5) */}
+          {facturasMalProcesadas.length > 0 && (
+            <div className="bg-white/70 rounded-xl p-3 space-y-1.5">
+              <p className="text-[10px] font-black text-[color:var(--arume-warn)] uppercase tracking-widest">📄 {facturasMalProcesadas.length} factura(s)</p>
+              {facturasMalProcesadas.slice(0, 5).map((f: any) => (
+                <div key={f.id} className="flex items-center gap-2 bg-white rounded-lg p-2 border border-[color:var(--arume-warn)]/20">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-black text-slate-800 truncate">{f.prov || 'Sin proveedor'}</p>
+                    <p className="text-[10px] font-bold text-slate-500 truncate">{f.num || 'S/N'} · {f.date || '—'} · {Num.fmt(Num.parse(f.total) || 0)}</p>
+                  </div>
+                  <button
+                    onClick={() => handleQuickApprove('factura', f.id)}
+                    disabled={!onSave}
+                    className="text-[9px] font-black uppercase tracking-widest bg-emerald-500 hover:bg-emerald-600 text-white px-2.5 py-1.5 rounded-lg transition disabled:opacity-50"
+                    title="Aprobar tal cual sin abrir modal"
+                  >✅ Aprobar</button>
+                  <button
+                    onClick={() => onNavigate?.('compras')}
+                    className="text-[9px] font-black uppercase tracking-widest bg-slate-200 hover:bg-slate-300 text-slate-700 px-2.5 py-1.5 rounded-lg transition"
+                  >Editar →</button>
+                </div>
+              ))}
+              {facturasMalProcesadas.length > 5 && (
+                <p className="text-[9px] text-slate-400 font-bold text-right">+ {facturasMalProcesadas.length - 5} más</p>
+              )}
+            </div>
+          )}
+
+          {/* Lista albaranes mal procesados (primeras 5) */}
+          {albaranesMalProcesados.length > 0 && (
+            <div className="bg-white/70 rounded-xl p-3 space-y-1.5">
+              <p className="text-[10px] font-black text-[color:var(--arume-warn)] uppercase tracking-widest">📦 {albaranesMalProcesados.length} albarán(es)</p>
+              {albaranesMalProcesados.slice(0, 5).map((a: any) => {
+                const reasons = Array.isArray(a.review_reasons) ? a.review_reasons : [];
+                return (
+                  <div key={a.id} className="flex items-center gap-2 bg-white rounded-lg p-2 border border-[color:var(--arume-warn)]/20">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-black text-slate-800 truncate">{a.prov || 'Sin proveedor'}</p>
+                      <p className="text-[10px] font-bold text-slate-500 truncate">{a.num || 'S/N'} · {a.date || '—'} · {Num.fmt(Num.parse(a.total) || 0)}</p>
+                      {reasons.length > 0 && (
+                        <p className="text-[9px] font-bold text-amber-700 truncate" title={reasons.join(' · ')}>⚠️ {reasons.join(' · ')}</p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => handleQuickApprove('albaran', a.id)}
+                      disabled={!onSave}
+                      className="text-[9px] font-black uppercase tracking-widest bg-emerald-500 hover:bg-emerald-600 text-white px-2.5 py-1.5 rounded-lg transition disabled:opacity-50"
+                      title="Aprobar tal cual sin abrir modal"
+                    >✅ Aprobar</button>
+                    <button
+                      onClick={() => onNavigate?.('albaranes')}
+                      className="text-[9px] font-black uppercase tracking-widest bg-slate-200 hover:bg-slate-300 text-slate-700 px-2.5 py-1.5 rounded-lg transition"
+                    >Editar →</button>
+                  </div>
+                );
+              })}
+              {albaranesMalProcesados.length > 5 && (
+                <p className="text-[9px] text-slate-400 font-bold text-right">+ {albaranesMalProcesados.length - 5} más</p>
+              )}
+            </div>
+          )}
+
+          <p className="text-[10px] text-[color:var(--arume-gray-600)]">
+            Estos registros NO entran al P&L hasta que los apruebes. Pulsa <strong>✅ Aprobar</strong> si los datos cuadran tal como están, o <strong>Editar</strong> para corregir.
+          </p>
         </motion.div>
       )}
 

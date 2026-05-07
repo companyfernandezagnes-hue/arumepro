@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
-import { Save, Trash2, X, Plus, Mic, Package, AlertCircle, Bot, Wand2, MinusCircle, Calculator, Undo2, Loader2 } from 'lucide-react';
+import { Save, Trash2, X, Plus, Mic, Package, AlertCircle, Bot, Wand2, MinusCircle, Calculator, Undo2, Loader2, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Albaran } from '../types';
 import { Num } from '../services/engine';
@@ -333,6 +333,41 @@ export const AlbaranEditModal = ({
 
           {/* ÁREA DE SCROLL */}
           <div className="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar space-y-6 relative">
+
+            {/* Banner needs_review: este albarán fue creado por IA con dudas
+                (fecha vacía, proveedor sospechoso, baja confianza). Le mostramos
+                a la usuaria las razones y un botón rápido "Aprobar tal cual"
+                para marcar reviewed:true sin tener que editar nada si ya lo
+                ha verificado visualmente. */}
+            {(editForm as any).needs_review && !(editForm as any).reviewed && (
+              <div className="bg-gradient-to-r from-amber-50 to-amber-100 border-2 border-amber-400 rounded-2xl p-4 flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-black text-amber-900 uppercase tracking-widest">⚠️ Pendiente de revisión IA</p>
+                  <p className="text-[11px] text-amber-800 font-bold mt-0.5">
+                    Este albarán fue creado por IA con dudas. NO entra al P&L hasta que apruebes los datos.
+                  </p>
+                  {Array.isArray((editForm as any).review_reasons) && (editForm as any).review_reasons.length > 0 && (
+                    <ul className="mt-1.5 text-[10px] font-bold text-amber-700 list-disc list-inside">
+                      {(editForm as any).review_reasons.map((r: string, i: number) => (
+                        <li key={i}>{r}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {(editForm as any).ai_confidence && (
+                    <p className="text-[9px] font-bold text-amber-600 mt-1 uppercase tracking-widest">Confianza IA: {(editForm as any).ai_confidence}</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditForm({ ...editForm, needs_review: false, reviewed: true } as any)}
+                  className="bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-black uppercase tracking-widest px-3 py-2 rounded-xl shadow shrink-0"
+                  title="Marca este albarán como revisado y entra al P&L"
+                >
+                  ✅ Aprobar
+                </button>
+              </div>
+            )}
 
             {/* Banner grabación */}
             <AnimatePresence>
