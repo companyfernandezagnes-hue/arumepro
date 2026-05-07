@@ -81,8 +81,6 @@ export const AlbaranEditModal = ({
   editForm, sociosReales, setEditForm, onClose, onSave, onDelete, recordingMode, startVoiceRecording,
 }: AlbaranEditModalProps) => {
 
-  if (!editForm) return null;
-
   const [saving,          setSaving]          = useState(false);
   const [highlightedIdx,  setHighlightedIdx]  = useState<number | null>(null); // 🆕 para animar cambio de IVA
   const undoRef = useRef<any[]>([]);
@@ -261,17 +259,17 @@ export const AlbaranEditModal = ({
 
   // ── Descuadre ───────────────────────────────────────────────────────────
   const sumLineas = useMemo(() =>
-    (editForm.items || []).reduce((acc, it) => acc + (Num.parse((it as any).t ?? (it as any).total) || 0), 0),
-    [editForm.items]
+    (editForm?.items || []).reduce((acc, it) => acc + (Num.parse((it as any).t ?? (it as any).total) || 0), 0),
+    [editForm?.items]
   );
-  const globalTotal  = Num.parse(editForm.total);
+  const globalTotal  = Num.parse(editForm?.total);
   const diff         = Num.round2(globalTotal - sumLineas);
   const hasDescuadre = Math.abs(diff) > 0.05;
 
   // ── Desglose IVA en footer ──────────────────────────────────────────────
   const ivaDesglose = useMemo(() => {
     const d = { base4: 0, iva4: 0, base10: 0, iva10: 0, base21: 0, iva21: 0 };
-    for (const it of (editForm.items || [])) {
+    for (const it of (editForm?.items || [])) {
       const base = Num.parse((it as any).base) || 0;
       const tax  = Num.parse((it as any).tax)  || 0;
       const r    = Number((it as any).rate) || 10;
@@ -284,7 +282,10 @@ export const AlbaranEditModal = ({
       '10%': { base: Num.round2(d.base10), iva: Num.round2(d.iva10) },
       '21%': { base: Num.round2(d.base21), iva: Num.round2(d.iva21) },
     };
-  }, [editForm.items]);
+  }, [editForm?.items]);
+
+  // 🛡️ Guard: hooks ya declarados, ahora sí podemos salir
+  if (!editForm) return null;
 
   // ============================================================================
   // RENDER

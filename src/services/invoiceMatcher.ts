@@ -73,14 +73,22 @@ export const advancedProvSimilarity = (a?: string | null, b?: string | null): nu
 
 /**
  * Total seguro de un albarán (en €). Si .total no está, suma las líneas.
+ *
+ * Para albaranes con recargo de equivalencia (caso Frutas Daniel), el total
+ * guardado = suma de bases (sin IVA). Pero la factura mensual del proveedor
+ * SÍ incluye el IVA. Con `forInvoiceMatch=true` sumamos el IVA al total
+ * para que el subset-sum cuadre contra la factura.
  */
-const albaranSafeTotal = (a: Albaran): number => {
-  const t = Num.parse((a as any).total);
-  if (t > 0) return t;
-  if (Array.isArray(a.items)) {
-    return a.items.reduce((s, it: any) => s + Num.parse(it?.t ?? it?.total ?? 0), 0);
+const albaranSafeTotal = (a: Albaran, forInvoiceMatch = false): number => {
+  let t = Num.parse((a as any).total);
+  if (t <= 0 && Array.isArray(a.items)) {
+    t = a.items.reduce((s, it: any) => s + Num.parse(it?.t ?? it?.total ?? 0), 0);
   }
-  return 0;
+  if (forInvoiceMatch && (a as any).recargo_equivalencia) {
+    const iva = Num.parse(a.iva ?? a.taxes ?? 0);
+    t += iva;
+  }
+  return t;
 };
 
 /**
@@ -111,7 +119,7 @@ export const findSubsetSum = (
   const tolCents = Math.round(tolerance * 100);
   if (targetCents > 200_000_00) return null; // 200k€ — sanity guard
 
-  const valuesCents: number[] = albaranes.map(a => Math.round(Math.abs(albaranSafeTotal(a)) * 100));
+  const valuesCents: number[] = albaranes.map(a => Math.round(Math.abs(albaranSafeTotal(a, true)) * 100));
 
   // dp[s] = índice del último albarán usado, o -1 si todavía no alcanzable
   // Usamos una Map para que sea sparse y no malgastemos memoria.
@@ -250,14 +258,14 @@ export const smartMatchInvoiceToAlbaranes = (
     };
   }
 
-  const sumaTotal = filtered.reduce((acc, a) => acc + Math.abs(albaranSafeTotal(a)), 0);
+  const sumaTotal = filtered.reduce((acc, a) => acc + Math.abs(albaranSafeTotal(a, true)), 0);
 
   // FASE 3: subset-sum exacto (tolerancia 2€ por redondeos del proveedor)
   const matchedIds = findSubsetSum(filtered, input.total, 2.00);
   if (matchedIds && matchedIds.length > 0) {
     const matchedTotal = filtered
       .filter(a => matchedIds.includes(a.id))
-      .reduce((acc, a) => acc + Math.abs(albaranSafeTotal(a)), 0);
+      .reduce((acc, a) => acc + Math.abs(albaranSafeTotal(a, true)), 0);
     return {
       ...baseResult,
       matchedAlbaranIds: matchedIds,

@@ -82,12 +82,16 @@ const singularize = (word: string) => {
   return w;
 };
 
-const looksLikeDuplicate = (prov: string, num: string, date: string, albaranes: Albaran[]) => 
-  albaranes.some(a =>
+const looksLikeDuplicate = (prov: string, num: string, date: string, albaranes: Albaran[]) => {
+  // 🆕 FIX: si ambos son S/N, no es duplicado — sólo comparamos números reales
+  const numReal = (num && num !== 'S/N') ? num.trim().toUpperCase() : '';
+  if (!numReal) return false;
+  return albaranes.some(a =>
     basicNorm(a.prov || '') === basicNorm(prov || '') &&
-    (a.num  || 'S/N') === (num  || 'S/N') &&
+    (a.num || '').trim().toUpperCase() === numReal &&
     (a.date || '').slice(0, 10) === (date || '').slice(0, 10)
   );
+};
 
 const getDynamicThreshold = (itemName: string) => {
   if (!itemName) return 10;
@@ -518,9 +522,8 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
         const prov    = doc.remitente.match(/📸\s*(.*?)\s*\(/)?.[1]?.trim() ?? 'Desconocido';
         const dateStr = doc.asunto.match(/Fecha:\s*([\d-]+)/)?.[1] ?? DateUtil.today();
         const totalNum= parseFloat(doc.asunto.match(/Importe:\s*([\d.]+)/)?.[1] ?? '0') || 0;
-        setForm(prev => ({ ...prev, prov:prov.toUpperCase(), date:dateStr, num:`TG-${Date.now().toString().slice(-4)}`, expectedTotal:totalNum, text:`1x GASTOS VARIOS ${prov} 10% ${totalNum}` }));
-        await supabase.from('inbox_general').delete().eq('id', doc.id);
-        // 🆕 FIX: toast.success en vez de toast.info (no existe)
+        setForm(prev => ({ ...prev, prov:prov.toUpperCase(), date:dateStr, num:`TG-${Date.now().toString().slice(-4)}`, expectedTotal:totalNum, text:`1x GASTOS VARIOS ${prov} 10% ${totalNum}`, _telegramDocId: doc.id }));
+        // 🆕 FIX: no borramos el ticket aquí — se borra al guardar el albarán
         toast.success('Ticket importado desde Telegram. Revisa el formulario.');
       } else {
         // 🆕 FIX: toast.warning en vez de toast.info
@@ -639,7 +642,11 @@ REGLAS:
       if (alerts.length) toast.warning('⚠️ ALERTA DE COSTES\n\n'+alerts.join('\n\n'));
       // 🆕 Confirmación de guardado
       else toast.success('Albarán guardado correctamente.');
-      setForm(prev => ({ ...prev, prov:'', num:'', text:'', paid:false, expectedTotal:null }));
+      // 🆕 FIX: borrar ticket de Telegram SÓLO después de guardar el albarán
+      if ((form as any)._telegramDocId) {
+        try { await supabase.from('inbox_general').delete().eq('id', (form as any)._telegramDocId); } catch {}
+      }
+      setForm(prev => ({ ...prev, prov:'', num:'', text:'', paid:false, expectedTotal:null, _telegramDocId: undefined }));
     } finally { setIsSaving(false); }
   };
 

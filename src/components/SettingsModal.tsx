@@ -89,7 +89,7 @@ const HealthCheckPanel: React.FC<{ open: boolean }> = ({ open }) => {
       if (!cancelled) {
         setH(s => ({
           ...s,
-          gmail: isAuth ? 'ok' : (tok ? 'warn' : 'warn'),
+          gmail: isAuth ? 'ok' : (tok ? 'warn' : 'fail'),
           details: { ...s.details, gmail: isAuth ? `Conectado: ${tok?.email || ''}` : 'Sin sesión Gmail' },
         }));
       }

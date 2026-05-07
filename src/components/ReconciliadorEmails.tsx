@@ -1,12 +1,10 @@
 // ============================================================================
-// 🤖 ReconciliadorEmails — pipeline automático factura-email vs factura-interna
-// 1. Descarga emails con PDFs del proveedor
-// 2. IA extrae datos de cada PDF (proveedor, num, fecha, total)
-// 3. Busca match en facturas internas (agrupadas de albaranes) por:
-//    - Mismo proveedor (fuzzy ±2 chars)
-//    - Total ±1€ tolerancia
-//    - Fecha ±15 días
-// 4. Presenta resultados con acciones: aprobar/rechazar/buscar manual
+// 🤖 ReconciliadorEmails — pipeline: factura-email → subset-sum vs albaranes
+// 1. Descarga emails con PDFs de proveedores (Gmail API)
+// 2. Descarga cada adjunto bajo demanda (lazy)
+// 3. IA extrae datos de cada PDF (proveedor, num, fecha, total, base, iva)
+// 4. smartMatchInvoiceToAlbaranes cruza contra albaranes por subset-sum
+// 5. Presenta resultados con acciones: aprobar (crea factura + vincula) / descartar
 // ============================================================================
 import React, { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -14,11 +12,12 @@ import {
   X, CheckCircle2, AlertTriangle, Mail, Loader2,
   Sparkles, RefreshCw, Link as LinkIcon, Search, ShieldCheck,
 } from 'lucide-react';
-import { AppData, FacturaExtended } from '../types';
+import { AppData, Albaran, FacturaExtended } from '../types';
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
 import { scanBase64 } from '../services/aiProviders';
 import { GmailDirectSync } from '../services/gmailDirectSync';
+import { smartMatchInvoiceToAlbaranes, SmartMatchResult } from '../services/invoiceMatcher';
 import { toast } from '../hooks/useToast';
 import { EmptyState } from './EmptyState';
 
@@ -29,14 +28,13 @@ interface Props {
   onSave: (newData: AppData) => Promise<void>;
 }
 
-type MatchStatus = 'perfect' | 'probable' | 'no_match' | 'pending';
-
 interface EmailPdfResult {
   id: string;
   emailFrom: string;
   emailSubject: string;
+  emailMessageId: string;
   fileName: string;
-  fileBase64: string;    // PDF original en base64
+  fileBase64: string;
   mimeType: string;
   // Datos extraídos por IA
   iaProveedor: string;
@@ -45,80 +43,11 @@ interface EmailPdfResult {
   iaTotal: number;
   iaBase: number;
   iaIva: number;
-  // Matching
-  status: MatchStatus;
-  matchedFactura?: FacturaExtended;
-  diff?: number;              // diferencia en € vs matched
-  reason?: string;            // explicación por qué match o no
-  processed?: boolean;        // ya se aprobó/rechazó
+  // Match contra albaranes
+  match: SmartMatchResult;
+  // Estado de procesado
+  processed?: boolean;
   processedAction?: 'approved' | 'rejected';
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '');
-
-const daysBetween = (iso1: string, iso2: string): number => {
-  try {
-    const d1 = new Date(iso1).getTime();
-    const d2 = new Date(iso2).getTime();
-    return Math.abs(Math.floor((d1 - d2) / 86_400_000));
-  } catch { return 999; }
-};
-
-// Busca la mejor factura interna que cuadre con los datos del PDF
-function findBestMatch(pdfData: {
-  proveedor: string; total: number; fecha: string; num: string;
-}, facturas: FacturaExtended[]): { factura: FacturaExtended; status: MatchStatus; diff: number; reason: string } | null {
-  const provN = norm(pdfData.proveedor);
-  if (!provN || pdfData.total <= 0) return null;
-
-  const candidates: { f: FacturaExtended; score: number; reason: string }[] = [];
-
-  for (const f of facturas) {
-    if (f.tipo !== 'compra' || (f as any).file_base64) continue; // ya tiene PDF
-    const fProvN = norm(f.prov || f.cliente || '');
-    if (!fProvN) continue;
-
-    // Match nombre (score 0-3)
-    let score = 0;
-    let reasons: string[] = [];
-    if (fProvN === provN) { score += 3; reasons.push('proveedor exacto'); }
-    else if (fProvN.includes(provN.slice(0, 6)) || provN.includes(fProvN.slice(0, 6))) {
-      score += 2; reasons.push('proveedor similar');
-    } else continue;
-
-    // Match número (score +3 si exacto, +1 si parcial)
-    if (pdfData.num && f.num) {
-      const pN = String(pdfData.num).trim().toLowerCase();
-      const fN = String(f.num).trim().toLowerCase();
-      if (pN === fN) { score += 3; reasons.push('nº factura exacto'); }
-      else if (pN.length >= 4 && (pN.includes(fN) || fN.includes(pN))) { score += 1; reasons.push('nº factura parcial'); }
-    }
-
-    // Match total (tolerancia 1€)
-    const fTotal = Math.abs(Num.parse(f.total));
-    const diff = Math.abs(fTotal - pdfData.total);
-    if (diff <= 0.05) { score += 3; reasons.push('total exacto'); }
-    else if (diff <= 1) { score += 2; reasons.push(`total ±${diff.toFixed(2)}€`); }
-    else if (diff <= 5) { score += 1; reasons.push(`total ±${diff.toFixed(2)}€`); }
-
-    // Match fecha (±15 días)
-    if (pdfData.fecha && f.date) {
-      const dd = daysBetween(pdfData.fecha, f.date);
-      if (dd <= 1) { score += 2; reasons.push('fecha exacta'); }
-      else if (dd <= 15) { score += 1; reasons.push(`${dd}d de diferencia`); }
-    }
-
-    if (score >= 4) candidates.push({ f, score, reason: reasons.join(' · ') });
-  }
-
-  candidates.sort((a, b) => b.score - a.score);
-  if (candidates.length === 0) return null;
-
-  const best = candidates[0];
-  const diff = Math.abs(Math.abs(Num.parse(best.f.total)) - pdfData.total);
-  const status: MatchStatus = best.score >= 7 ? 'perfect' : 'probable';
-  return { factura: best.f, status, diff, reason: best.reason };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -127,7 +56,7 @@ export const ReconciliadorEmails: React.FC<Props> = ({ isOpen, onClose, data, on
   const [progress, setProgress] = useState('');
   const [results, setResults] = useState<EmailPdfResult[]>([]);
 
-  const facturas = data.facturas || [];
+  const albaranes = data.albaranes || [];
 
   const runPipeline = useCallback(async () => {
     setLoading(true);
@@ -138,14 +67,14 @@ export const ReconciliadorEmails: React.FC<Props> = ({ isOpen, onClose, data, on
       // 1. Asegurar token Gmail válido
       const token = await GmailDirectSync.ensureValidToken();
       if (!token) {
-        toast.error('Gmail no autorizado. Ve al módulo Agente y conecta Gmail primero.');
+        toast.error('Gmail no autorizado. Ve a Ajustes → Agente y conecta Gmail primero.');
         setLoading(false);
         return;
       }
 
-      // 2. Descargar emails con PDFs
+      // 2. Descargar lista de emails con PDFs (SIN contenido aún — lazy)
       setProgress('Leyendo tu correo (buscando facturas)…');
-      const { emails, error } = await GmailDirectSync.fetchNewEmails(20);
+      const { emails, error } = await GmailDirectSync.fetchNewEmails(20, false);
       if (error) {
         toast.error(`Gmail: ${error}`);
         setLoading(false);
@@ -159,9 +88,10 @@ export const ReconciliadorEmails: React.FC<Props> = ({ isOpen, onClose, data, on
         return;
       }
 
-      // 3. Por cada PDF, extraer con IA y buscar match
-      const promptOCR = `Eres un auditor contable. Extrae de esta factura SOLO un JSON sin markdown:
-{"proveedor":"nombre emisor","num":"número factura","fecha":"YYYY-MM-DD","total":0.00,"base":0.00,"iva":0.00}
+      // 3. Por cada PDF: descargar contenido → OCR → match contra albaranes
+      const promptOCR = `Eres un auditor contable. Extrae de esta factura/albarán SOLO un JSON sin markdown:
+{"proveedor":"nombre emisor (NO el receptor/cliente)","num":"número factura","fecha":"YYYY-MM-DD","total":0.00,"base":0.00,"iva":0.00}
+El EMISOR es quien vende y emite la factura. El RECEPTOR (Arume, Agnès, etc.) NUNCA es el proveedor.
 Importes sin símbolo €, punto decimal. Si algún campo no aparece, usa 0 o "".`;
 
       const allResults: EmailPdfResult[] = [];
@@ -169,9 +99,20 @@ Importes sin símbolo €, punto decimal. Si algún campo no aparece, usa 0 o ""
       for (const email of emails) {
         for (const att of email.attachments) {
           idx++;
-          setProgress(`Analizando adjunto ${idx}: ${att.filename}…`);
+          setProgress(`Descargando y analizando ${idx}/${emails.reduce((s, e) => s + e.attachments.length, 0)}: ${att.filename}…`);
           try {
-            const scan = await scanBase64(att.base64, att.mimeType, promptOCR);
+            // 3a. Descargar el contenido del PDF bajo demanda
+            let base64 = att.base64;
+            if (!base64 && att.attachmentId) {
+              base64 = await GmailDirectSync.fetchAttachmentBase64(email.id, att.attachmentId) || '';
+            }
+            if (!base64) {
+              console.warn('[Reconciliador] Sin contenido para:', att.filename);
+              continue;
+            }
+
+            // 3b. OCR del PDF
+            const scan = await scanBase64(base64, att.mimeType || 'application/pdf', promptOCR);
             const raw: any = scan?.raw || {};
             const pdfData = {
               proveedor: String(raw.proveedor || '').trim(),
@@ -182,27 +123,33 @@ Importes sin símbolo €, punto decimal. Si algún campo no aparece, usa 0 o ""
               iva: Num.parse(raw.iva),
             };
 
-            const matchResult = findBestMatch(pdfData, facturas);
+            // 3c. Match contra albaranes (subset-sum)
+            const match = smartMatchInvoiceToAlbaranes(
+              {
+                proveedor: pdfData.proveedor,
+                total: pdfData.total,
+                fecha: pdfData.fecha,
+                num_factura: pdfData.num,
+              },
+              albaranes.filter(a => !a.invoiced),
+            );
 
             allResults.push({
               id: `rec-${email.id}-${att.filename}`,
               emailFrom: email.from,
               emailSubject: email.subject,
+              emailMessageId: email.id,
               fileName: att.filename,
-              fileBase64: `data:${att.mimeType};base64,${att.base64}`,
-              mimeType: att.mimeType,
+              fileBase64: base64,
+              mimeType: att.mimeType || 'application/pdf',
               iaProveedor: pdfData.proveedor,
               iaNum: pdfData.num,
               iaFecha: pdfData.fecha,
               iaTotal: pdfData.total,
               iaBase: pdfData.base,
               iaIva: pdfData.iva,
-              status: matchResult ? matchResult.status : 'no_match',
-              matchedFactura: matchResult?.factura,
-              diff: matchResult?.diff,
-              reason: matchResult?.reason || 'Sin match en tus facturas',
+              match,
             });
-            // Actualizar UI en tiempo real
             setResults([...allResults]);
           } catch (err: any) {
             console.warn('[Reconciliador] fallo PDF:', att.filename, err?.message);
@@ -213,60 +160,87 @@ Importes sin símbolo €, punto decimal. Si algún campo no aparece, usa 0 o ""
       setProgress('');
       setLoading(false);
 
-      const perfect = allResults.filter(r => r.status === 'perfect').length;
-      const probable = allResults.filter(r => r.status === 'probable').length;
-      const noMatch = allResults.filter(r => r.status === 'no_match').length;
-      toast.success(`✅ ${perfect} cuadran · 🟡 ${probable} revisar · 🔴 ${noMatch} sin match`);
+      const alta = allResults.filter(r => r.match.confidence === 'alta').length;
+      const media = allResults.filter(r => r.match.confidence === 'media').length;
+      const rest = allResults.length - alta - media;
+      toast.success(`✅ ${alta} cuadran · 🟡 ${media} revisar · 🔴 ${rest} sin match`);
     } catch (err: any) {
       toast.error('Error: ' + (err?.message || 'desconocido'));
       setLoading(false);
     }
-  }, [facturas]);
+  }, [albaranes]);
 
+  // Aprobar = crear factura de compra + vincular albaranes matched
   const handleApprove = async (r: EmailPdfResult) => {
-    if (!r.matchedFactura) return;
     const newData = JSON.parse(JSON.stringify(data)) as AppData;
-    const idx = (newData.facturas || []).findIndex((f: any) => f.id === r.matchedFactura!.id);
-    if (idx === -1) return;
-    (newData.facturas as any)[idx] = {
-      ...(newData.facturas as any)[idx],
-      file_base64: r.fileBase64,
-      paid: false,               // lista para pagar, pero no pagada aún
+    if (!newData.facturas) newData.facturas = [];
+
+    const facturaId = `fac-email-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+    const nuevaFactura: FacturaExtended = {
+      id: facturaId,
+      tipo: 'compra',
+      num: r.iaNum || 'S/N',
+      date: r.iaFecha || new Date().toISOString().slice(0, 10),
+      prov: r.iaProveedor,
+      total: r.iaTotal,
+      base: r.iaBase,
+      tax: r.iaIva,
+      paid: false,
+      reconciled: r.match.confidence === 'alta',
+      source: 'gmail-sync',
+      status: r.match.confidence === 'alta' ? 'approved' : 'draft',
+      file_base64: `data:${r.mimeType};base64,${r.fileBase64}`,
+      albaranIdsArr: r.match.matchedAlbaranIds,
+      albaranIds: r.match.matchedAlbaranIds.join(','),
       reviewed: true,
-      status: 'approved',
-      // Si la IA leyó datos que no teníamos, los completamos
-      num: (newData.facturas as any)[idx].num || r.iaNum,
-      base: (newData.facturas as any)[idx].base || r.iaBase,
-      tax:  (newData.facturas as any)[idx].tax  || r.iaIva,
     };
+    newData.facturas.unshift(nuevaFactura);
+
+    // Marcar albaranes como facturados
+    if (r.match.matchedAlbaranIds.length > 0 && newData.albaranes) {
+      const matchedSet = new Set(r.match.matchedAlbaranIds);
+      for (const alb of newData.albaranes) {
+        if (matchedSet.has(alb.id)) {
+          alb.invoiced = true;
+        }
+      }
+    }
+
+    // Marcar email como leído en Gmail
+    try {
+      await GmailDirectSync.markAsRead(r.emailMessageId);
+    } catch { /* no bloquea */ }
+
     await onSave(newData);
     setResults(prev => prev.map(x => x.id === r.id ? { ...x, processed: true, processedAction: 'approved' } : x));
-    toast.success('✅ PDF adjuntado a la factura. Lista para pagar.');
+    toast.success(`✅ Factura creada de ${r.iaProveedor} · ${r.match.matchedAlbaranIds.length} albaranes vinculados`);
   };
 
   const handleReject = (r: EmailPdfResult) => {
     setResults(prev => prev.map(x => x.id === r.id ? { ...x, processed: true, processedAction: 'rejected' } : x));
-    toast.info('Descartado. Puedes crearlo manualmente desde Compras si hace falta.');
+    toast.info('Descartado.');
   };
 
-  const perfect = results.filter(r => r.status === 'perfect' && !r.processed);
-  const probable = results.filter(r => r.status === 'probable' && !r.processed);
-  const noMatch = results.filter(r => r.status === 'no_match' && !r.processed);
+  // Agrupar resultados por calidad de match
+  const alta = results.filter(r => r.match.confidence === 'alta' && !r.processed);
+  const media = results.filter(r => r.match.confidence === 'media' && !r.processed);
+  const baja = results.filter(r => (r.match.confidence === 'baja' || r.match.confidence === 'nula' || r.match.confidence === 'sin_proveedor') && !r.processed);
   const processed = results.filter(r => r.processed);
 
   if (!isOpen) return null;
 
   const renderResult = (r: EmailPdfResult) => {
-    const Icon = r.status === 'perfect' ? CheckCircle2
-      : r.status === 'probable' ? AlertTriangle
-      : Search;
-    const accentCls = r.status === 'perfect'
+    const m = r.match;
+    const isAlta = m.confidence === 'alta';
+    const isMedia = m.confidence === 'media';
+    const Icon = isAlta ? CheckCircle2 : isMedia ? AlertTriangle : Search;
+    const accentCls = isAlta
       ? 'border-[color:var(--arume-ok)]/30 bg-[color:var(--arume-ok)]/5'
-      : r.status === 'probable'
+      : isMedia
       ? 'border-[color:var(--arume-warn)]/30 bg-[color:var(--arume-warn)]/5'
       : 'border-[color:var(--arume-gray-200)] bg-[color:var(--arume-gray-50)]';
-    const iconColor = r.status === 'perfect' ? 'text-[color:var(--arume-ok)]'
-      : r.status === 'probable' ? 'text-[color:var(--arume-warn)]'
+    const iconColor = isAlta ? 'text-[color:var(--arume-ok)]'
+      : isMedia ? 'text-[color:var(--arume-warn)]'
       : 'text-[color:var(--arume-gray-500)]';
 
     return (
@@ -274,6 +248,7 @@ Importes sin símbolo €, punto decimal. Si algún campo no aparece, usa 0 o ""
         <div className="flex items-start gap-3">
           <Icon className={cn('w-5 h-5 shrink-0 mt-0.5', iconColor)}/>
           <div className="flex-1 min-w-0">
+            {/* Cabecera: proveedor + num + fecha + total */}
             <div className="flex items-center gap-2 flex-wrap">
               <p className="font-serif text-base font-semibold text-[color:var(--arume-ink)]">{r.iaProveedor || 'Sin proveedor'}</p>
               <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gray-500)] bg-white px-2 py-0.5 rounded-full border border-[color:var(--arume-gray-200)]">
@@ -285,36 +260,66 @@ Importes sin símbolo €, punto decimal. Si algún campo no aparece, usa 0 o ""
             <p className="text-[11px] text-[color:var(--arume-gray-500)] mt-1 truncate">
               📧 {r.emailSubject} · {r.fileName}
             </p>
-            {r.matchedFactura && (
-              <div className="mt-2 bg-white/60 rounded-lg p-2 border border-[color:var(--arume-gray-200)]">
-                <p className="text-[11px] font-semibold text-[color:var(--arume-ink)] flex items-center gap-1">
-                  <LinkIcon className="w-3 h-3"/> Cuadra con tu factura interna
-                </p>
-                <p className="text-[11px] text-[color:var(--arume-gray-600)]">
-                  {r.matchedFactura.prov || r.matchedFactura.cliente} ·
-                  {' '}{r.matchedFactura.num || 'S/N'} ·
-                  {' '}{r.matchedFactura.date} ·
-                  {' '}<b>{Num.fmt(Math.abs(Num.parse(r.matchedFactura.total)))}</b>
-                  {r.diff !== undefined && r.diff > 0.05 && (
-                    <span className="text-[color:var(--arume-warn)]"> · diff {Num.fmt(r.diff)}</span>
+
+            {/* Comparación factura vs albaranes */}
+            <div className="mt-2 bg-white/60 rounded-lg p-3 border border-[color:var(--arume-gray-200)]">
+              {m.matchedAlbaranIds.length > 0 ? (
+                <>
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <LinkIcon className="w-3 h-3 text-[color:var(--arume-ink)]"/>
+                    <p className="text-[11px] font-semibold text-[color:var(--arume-ink)]">
+                      {m.matchType === 'subset_sum' ? 'Subset-sum cuadra' :
+                       m.matchType === 'todos_albaranes' ? 'Todos los albaranes cuadran' :
+                       m.matchType === 'num_factura' ? 'Match por nº factura' :
+                       'Match aproximado'}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div>
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gray-400)]">Factura</p>
+                      <p className="text-sm font-serif font-semibold tabular-nums text-[color:var(--arume-ink)]">{Num.fmt(m.emailTotal)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gray-400)]">{m.matchedAlbaranIds.length} albarán(es)</p>
+                      <p className="text-sm font-serif font-semibold tabular-nums text-[color:var(--arume-ink)]">{Num.fmt(m.matchedTotal)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.15em] text-[color:var(--arume-gray-400)]">Diferencia</p>
+                      <p className={cn(
+                        'text-sm font-serif font-semibold tabular-nums',
+                        Math.abs(m.diferencia) <= 1 ? 'text-[color:var(--arume-ok)]' :
+                        Math.abs(m.diferencia) <= 5 ? 'text-[color:var(--arume-warn)]' :
+                        'text-[color:var(--arume-error,#dc2626)]'
+                      )}>{m.diferencia >= 0 ? '+' : ''}{Num.fmt(m.diferencia)}</p>
+                    </div>
+                  </div>
+                  {m.albaranesConsiderados > m.matchedAlbaranIds.length && (
+                    <p className="text-[10px] text-[color:var(--arume-gray-400)] mt-1.5">
+                      De {m.albaranesConsiderados} albaranes del proveedor, {m.matchedAlbaranIds.length} cuadran con esta factura.
+                    </p>
                   )}
-                </p>
-                <p className="text-[10px] text-[color:var(--arume-gray-400)] mt-0.5">🤖 {r.reason}</p>
-              </div>
-            )}
+                </>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Search className="w-3.5 h-3.5 text-[color:var(--arume-gray-400)]"/>
+                  <p className="text-[11px] text-[color:var(--arume-gray-500)]">{m.errorMsg || 'Sin albaranes que coincidan.'}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Acciones */}
             {r.processed ? (
               <span className={cn('inline-block mt-2 text-[10px] font-semibold uppercase tracking-[0.15em] px-2 py-0.5 rounded-full',
                 r.processedAction === 'approved' ? 'bg-[color:var(--arume-ok)]/10 text-[color:var(--arume-ok)]' : 'bg-[color:var(--arume-gray-100)] text-[color:var(--arume-gray-500)]')}>
-                {r.processedAction === 'approved' ? '✓ Aprobada' : '✗ Rechazada'}
+                {r.processedAction === 'approved' ? '✓ Factura creada + albaranes vinculados' : '✗ Descartada'}
               </span>
             ) : (
               <div className="flex gap-2 mt-3">
-                {r.matchedFactura && (
-                  <button onClick={() => handleApprove(r)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] hover:bg-[color:var(--arume-gray-700)] transition">
-                    <CheckCircle2 className="w-3.5 h-3.5"/> Aprobar y adjuntar
-                  </button>
-                )}
+                <button onClick={() => handleApprove(r)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] hover:bg-[color:var(--arume-gray-700)] transition">
+                  <CheckCircle2 className="w-3.5 h-3.5"/>
+                  {m.matchedAlbaranIds.length > 0 ? 'Aprobar y vincular' : 'Crear factura sin vincular'}
+                </button>
                 <button onClick={() => handleReject(r)}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] border border-[color:var(--arume-gray-200)] text-[color:var(--arume-gray-600)] hover:bg-white transition">
                   Descartar
@@ -348,9 +353,9 @@ Importes sin símbolo €, punto decimal. Si algún campo no aparece, usa 0 o ""
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gold)]">Agente IA · Reconciliador</p>
-                <h3 className="font-serif text-2xl font-semibold tracking-tight mt-1">Auto-cuadrar facturas del correo</h3>
+                <h3 className="font-serif text-2xl font-semibold tracking-tight mt-1">Facturas del correo vs Albaranes</h3>
                 <p className="text-sm text-[color:var(--arume-gray-500)] mt-1">
-                  Leo los PDFs de tus correos, los comparo con tus facturas generadas y apruebas con 1 click.
+                  Leo los PDFs de tus correos, los comparo con tus albaranes por subset-sum, y apruebas con 1 click.
                 </p>
               </div>
               <button onClick={onClose}
@@ -378,19 +383,19 @@ Importes sin símbolo €, punto decimal. Si algún campo no aparece, usa 0 o ""
             {/* Resumen */}
             {results.length > 0 && (
               <div className="flex gap-2 mt-3 flex-wrap">
-                {perfect.length > 0 && (
+                {alta.length > 0 && (
                   <span className="text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-ok)]/10 text-[color:var(--arume-ok)] border border-[color:var(--arume-ok)]/30 px-2.5 py-1 rounded-full">
-                    ✓ {perfect.length} cuadran
+                    ✓ {alta.length} cuadran
                   </span>
                 )}
-                {probable.length > 0 && (
+                {media.length > 0 && (
                   <span className="text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-warn)]/10 text-[color:var(--arume-warn)] border border-[color:var(--arume-warn)]/30 px-2.5 py-1 rounded-full">
-                    ⚠ {probable.length} revisar
+                    ⚠ {media.length} revisar
                   </span>
                 )}
-                {noMatch.length > 0 && (
+                {baja.length > 0 && (
                   <span className="text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-gray-100)] text-[color:var(--arume-gray-600)] px-2.5 py-1 rounded-full">
-                    🔴 {noMatch.length} sin match
+                    🔴 {baja.length} sin match
                   </span>
                 )}
                 {processed.length > 0 && (
@@ -409,35 +414,35 @@ Importes sin símbolo €, punto decimal. Si algún campo no aparece, usa 0 o ""
                 icon={Mail}
                 eyebrow="Reconciliador"
                 title="Pulsa «Sincronizar y cuadrar»"
-                message="Conectaré con Gmail, descargaré los PDFs de tus correos y los compararé con tus facturas internas."
+                message="Conectaré con Gmail, descargaré los PDFs de tus correos y los compararé con tus albaranes pendientes de facturar."
               />
             )}
 
-            {perfect.length > 0 && (
+            {alta.length > 0 && (
               <section>
                 <div className="flex items-center gap-2 mb-2">
                   <ShieldCheck className="w-4 h-4 text-[color:var(--arume-ok)]"/>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-ok)]">Cuadran perfectamente · aprueba rápido</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-ok)]">Cuadran con tus albaranes · aprueba rápido</p>
                 </div>
-                <div className="space-y-2">{perfect.map(renderResult)}</div>
+                <div className="space-y-2">{alta.map(renderResult)}</div>
               </section>
             )}
-            {probable.length > 0 && (
+            {media.length > 0 && (
               <section>
                 <div className="flex items-center gap-2 mb-2">
                   <AlertTriangle className="w-4 h-4 text-[color:var(--arume-warn)]"/>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-warn)]">Revisar · hay pequeñas diferencias</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-warn)]">Revisar · diferencia pequeña entre factura y albaranes</p>
                 </div>
-                <div className="space-y-2">{probable.map(renderResult)}</div>
+                <div className="space-y-2">{media.map(renderResult)}</div>
               </section>
             )}
-            {noMatch.length > 0 && (
+            {baja.length > 0 && (
               <section>
                 <div className="flex items-center gap-2 mb-2">
                   <Search className="w-4 h-4 text-[color:var(--arume-gray-500)]"/>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Sin coincidencias · crea factura manual si procede</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Sin coincidencias · revisa manualmente</p>
                 </div>
-                <div className="space-y-2">{noMatch.map(renderResult)}</div>
+                <div className="space-y-2">{baja.map(renderResult)}</div>
               </section>
             )}
             {processed.length > 0 && (

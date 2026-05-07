@@ -6,7 +6,8 @@ import { Num, DateUtil } from './engine';
 // ────────────────────────────────────────────────────────────
 export const TOLERANCIA = 0.50;
 
-const ALIAS_KEY = 'arume_prov_aliases';
+// ⚠️ MUST match provAlias.ts — ambos módulos comparten el mismo store
+const ALIAS_KEY = 'arume_prov_alias';
 
 // ────────────────────────────────────────────────────────────
 // 📖 DICCIONARIO DE ALIAS
