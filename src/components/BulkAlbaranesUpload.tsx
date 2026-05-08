@@ -529,11 +529,10 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
     // a la primera del lote.
     const batchSeen = new Map<string, { id: string; parsed: ParsedAlbaran }>();
 
-    // Concurrencia 5 (subido de 3): Claude/Gemini aguantan bien picos cortos
-    // y la subida masiva pasa de tardar 50s a tardar 30s con 30 albaranes.
-    // Si la API se satura, el retry interno de scanBase64 (3 intentos con
-    // backoff) absorbe el pico.
-    await runWithLimit(pendientes, 5, async (entry) => {
+    // 🆕 Concurrencia 2: Claude tiene rate limit de 30K tokens/min.
+    // Con 5 en paralelo se satura al instante. Con 2, Claude procesa
+    // las primeras y si peta, el circuit breaker salta a Gemini automáticamente.
+    await runWithLimit(pendientes, 2, async (entry) => {
       setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: { kind: 'scanning' } } : e));
       try {
         // mimeType siempre image/jpeg porque preprocessImageForOCR lo convierte

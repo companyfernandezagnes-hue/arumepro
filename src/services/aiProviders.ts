@@ -78,6 +78,17 @@ const VISION_MODELS: Partial<Record<AIProvider, string>> = {
   groq:    'meta-llama/llama-4-scout-17b-16e-instruct',
 };
 
+// ─── Circuit breaker: evita machacar Claude/Gemini cuando hay rate limit ──────
+// Cuando un proveedor devuelve rate limit, lo "apagamos" 60s. Así la subida
+// masiva salta directo al fallback sin perder tiempo en reintentos inútiles.
+const _circuitBreaker: Record<string, number> = {};
+const tripCircuit = (provider: string, cooldownMs = 60_000) => {
+  _circuitBreaker[provider] = Date.now() + cooldownMs;
+  console.warn(`[aiProviders] ⚡ Circuit breaker: ${provider} desactivado ${cooldownMs / 1000}s por rate limit`);
+};
+const isCircuitOpen = (provider: string): boolean =>
+  (_circuitBreaker[provider] || 0) > Date.now();
+
 // ─── Helper: fetch con timeout ────────────────────────────────────────────────
 // 90s para visión: imágenes grandes o Gemini saturado necesitan más margen.
 
@@ -255,12 +266,13 @@ export const scanDocument = async (
   const tryAll      = !forceProvider;
 
   // 🟣 Claude PRIMERO — preferido por la usuaria (suscripción Anthropic propia).
-  // Soporta imágenes + PDFs nativos. Mismo retry contra 429/529/overloaded.
+  // 🆕 Circuit breaker: si Claude tiene rate limit activo, saltamos directo.
   const claudeKey = keys.claude();
-  if (claudeKey && (onlyClaude || tryAll)) {
+  if (claudeKey && (onlyClaude || tryAll) && !isCircuitOpen('claude')) {
+    const isRateLimit = (m: string) => /rate.?limit|429/i.test(m);
     const isTransient = (m: string) =>
-      /overloaded|temporarily|529|503|429|rate.?limit/i.test(m);
-    const delays = [0, 2000, 5000];
+      /overloaded|temporarily|529|503/i.test(m) || isRateLimit(m);
+    const delays = [0, 3000, 8000];
     let lastErr = '';
     for (let i = 0; i < delays.length; i++) {
       if (delays[i] > 0) await new Promise(r => setTimeout(r, delays[i]));
@@ -269,22 +281,23 @@ export const scanDocument = async (
       } catch (e: any) {
         lastErr = e?.message || String(e);
         console.warn(`[aiProviders] Claude scanDocument intento ${i + 1}/${delays.length}:`, lastErr);
+        if (isRateLimit(lastErr)) { tripCircuit('claude', 60_000); break; }
         if (!isTransient(lastErr)) break;
       }
     }
     errors.push(`Claude: ${lastErr}`);
+  } else if (isCircuitOpen('claude') && (onlyClaude || tryAll)) {
+    errors.push('Claude: en pausa por rate limit');
   } else if (!claudeKey && (onlyClaude || tryAll)) {
     errors.push('Claude: sin API key configurada');
   }
 
   const gemKey = keys.gemini();
-  if (gemKey && (onlyGemini || tryAll)) {
-    // Reintentar con backoff cuando Gemini devuelve "high demand"/503/429.
-    // Sin esto, un ticket de caja (forzado a gemini, sin fallback) falla
-    // inmediatamente con un pico transitorio del lado de Google.
+  if (gemKey && (onlyGemini || tryAll) && !isCircuitOpen('gemini')) {
+    const isRateLimit = (m: string) => /rate.?limit|429/i.test(m);
     const isTransient = (m: string) =>
-      /high demand|overloaded|temporarily|UNAVAILABLE|503|429|rate.?limit/i.test(m);
-    const delays = [0, 2000, 5000];
+      /high demand|overloaded|temporarily|UNAVAILABLE|503/i.test(m) || isRateLimit(m);
+    const delays = [0, 3000, 8000];
     let lastErr = '';
     for (let i = 0; i < delays.length; i++) {
       if (delays[i] > 0) await new Promise(r => setTimeout(r, delays[i]));
@@ -293,10 +306,13 @@ export const scanDocument = async (
       } catch (e: any) {
         lastErr = e?.message || String(e);
         console.warn(`[aiProviders] Gemini scanDocument intento ${i + 1}/${delays.length}:`, lastErr);
+        if (isRateLimit(lastErr)) { tripCircuit('gemini', 60_000); break; }
         if (!isTransient(lastErr)) break;
       }
     }
     errors.push(`Gemini: ${lastErr}`);
+  } else if (isCircuitOpen('gemini') && (onlyGemini || tryAll)) {
+    errors.push('Gemini: en pausa por rate limit');
   } else if (!gemKey && (onlyGemini || tryAll)) {
     errors.push('Gemini: sin API key configurada');
   }
@@ -433,11 +449,14 @@ export const scanBase64 = async (
   const errors: string[] = [];
 
   // 🟣 Claude PRIMERO — preferido por la usuaria. Visión + PDFs nativos.
+  // 🆕 Circuit breaker: si Claude acaba de dar rate limit, saltamos directo a Gemini
   const claudeKey = keys.claude();
-  if (claudeKey) {
+  if (claudeKey && !isCircuitOpen('claude')) {
+    const isRateLimit = (msg: string) =>
+      /rate.?limit|429/i.test(msg);
     const isTransientClaude = (msg: string) =>
-      /overloaded|temporarily|529|503|429|rate.?limit/i.test(msg);
-    const delays = [0, 2000, 5000];
+      /overloaded|temporarily|529|503/i.test(msg) || isRateLimit(msg);
+    const delays = [0, 3000, 8000];
     let lastErr = '';
     for (let i = 0; i < delays.length; i++) {
       if (delays[i] > 0) await new Promise(r => setTimeout(r, delays[i]));
@@ -446,21 +465,27 @@ export const scanBase64 = async (
       } catch (e: any) {
         lastErr = e?.message || String(e);
         console.warn(`[aiProviders] Claude intento ${i + 1}/${delays.length}:`, lastErr);
+        // Rate limit → activar circuit breaker y saltar a Gemini YA
+        if (isRateLimit(lastErr)) { tripCircuit('claude', 60_000); break; }
         if (!isTransientClaude(lastErr)) break;
       }
     }
     errors.push(`Claude: ${lastErr}`);
+  } else if (isCircuitOpen('claude')) {
+    errors.push('Claude: en pausa por rate limit (reintentará en breve)');
   } else {
     errors.push('Claude: sin API key configurada');
   }
 
   const gemKey = keys.gemini();
-  if (gemKey) {
+  if (gemKey && !isCircuitOpen('gemini')) {
     // Reintentar con backoff cuando Gemini devuelve "high demand" / 503 / 429.
     // Son fallos transitorios del lado de Google, no de la app.
+    const isRateLimit = (msg: string) =>
+      /rate.?limit|429/i.test(msg);
     const isTransient = (msg: string) =>
-      /high demand|overloaded|temporarily|UNAVAILABLE|503|429|rate.?limit/i.test(msg);
-    const delays = [0, 2000, 5000]; // 3 intentos: inmediato, +2s, +5s
+      /high demand|overloaded|temporarily|UNAVAILABLE|503/i.test(msg) || isRateLimit(msg);
+    const delays = [0, 3000, 8000];
     let lastErr = '';
     for (let i = 0; i < delays.length; i++) {
       if (delays[i] > 0) await new Promise(r => setTimeout(r, delays[i]));
@@ -469,10 +494,13 @@ export const scanBase64 = async (
       } catch (e: any) {
         lastErr = e?.message || String(e);
         console.warn(`[aiProviders] Gemini intento ${i + 1}/${delays.length}:`, lastErr);
-        if (!isTransient(lastErr)) break; // error no transitorio → no reintentar
+        if (isRateLimit(lastErr)) { tripCircuit('gemini', 60_000); break; }
+        if (!isTransient(lastErr)) break;
       }
     }
     errors.push(`Gemini: ${lastErr}`);
+  } else if (isCircuitOpen('gemini')) {
+    errors.push('Gemini: en pausa por rate limit (reintentará en breve)');
   } else {
     errors.push('Gemini: sin API key configurada');
   }

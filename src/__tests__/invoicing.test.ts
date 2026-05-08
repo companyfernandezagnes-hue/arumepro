@@ -54,7 +54,7 @@ describe('matchAlbaranesToFactura', () => {
   const makeFac = (total: number, date: string, albaranIdsArr: string[] = []): FacturaExtended => ({
     id: 'fac-1', prov: 'TEST', total: String(total), date, num: 'FAC-1',
     base: '0', tax: '0', albaranIdsArr,
-    reconciled: false, source: '',
+    reconciled: false, source: 'manual', tipo: 'compra', paid: false,
   } as FacturaExtended);
 
   it('prioridad 1: match por IDs explícitos', () => {
@@ -141,7 +141,7 @@ describe('linkAlbaranesToFactura + unlinkAlbaranFromFactura', () => {
 
   it('unlink último albarán de factura auto → elimina factura', () => {
     const data = makeData();
-    data.facturas[0].source = 'auto-group';
+    (data.facturas[0] as any).source = 'auto-group';
     linkAlbaranesToFactura(data, 'f1', ['a1']);
     unlinkAlbaranFromFactura(data, 'f1', 'a1');
     // Factura auto sin albaranes se elimina
