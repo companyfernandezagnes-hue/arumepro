@@ -180,6 +180,54 @@ const enhanceForOCR = (ctx: CanvasRenderingContext2D, w: number, h: number): voi
   }
 };
 
+// Sharpening "unsharp mask" suave: realza bordes para que la IA lea mejor
+// el texto pequeño. Implementado como convolución 3x3 con kernel suave de
+// ganancia +0.5 en el centro y -0.0625 en los 8 vecinos. No es agresivo
+// (alpha=0.4) para no introducir ruido.
+const sharpenForOCR = (ctx: CanvasRenderingContext2D, w: number, h: number): void => {
+  try {
+    const src = ctx.getImageData(0, 0, w, h);
+    const dst = ctx.createImageData(w, h);
+    const s = src.data;
+    const d = dst.data;
+    const alpha = 0.4; // intensidad del sharpening (0 = sin, 1 = full)
+    // kernel: sum=1, ligero realce de bordes
+    //   0  -1  0
+    //  -1   5 -1
+    //   0  -1  0
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const i = (y * w + x) * 4;
+        for (let c = 0; c < 3; c++) {
+          const center = s[i + c];
+          const top    = s[((y - 1) * w + x) * 4 + c];
+          const bottom = s[((y + 1) * w + x) * 4 + c];
+          const left   = s[(y * w + (x - 1)) * 4 + c];
+          const right  = s[(y * w + (x + 1)) * 4 + c];
+          const sharpened = 5 * center - top - bottom - left - right;
+          // Mezcla: alpha del sharpening + (1-alpha) del original.
+          let v = alpha * sharpened + (1 - alpha) * center;
+          if (v < 0) v = 0; else if (v > 255) v = 255;
+          d[i + c] = v | 0;
+        }
+        d[i + 3] = 255;
+      }
+    }
+    // Bordes: copiar del original (no se sharpean para evitar artefactos)
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (y === 0 || y === h - 1 || x === 0 || x === w - 1) {
+          const i = (y * w + x) * 4;
+          d[i] = s[i]; d[i + 1] = s[i + 1]; d[i + 2] = s[i + 2]; d[i + 3] = 255;
+        }
+      }
+    }
+    ctx.putImageData(dst, 0, 0);
+  } catch {
+    // Si falla, dejamos la imagen como estaba.
+  }
+};
+
 // Versión pública del preprocesado, reutilizable desde otros componentes
 // (BulkAlbaranesUpload usa esto antes de enviar a scanBase64 para que las
 // fotos del móvil con orientación EXIF se roten ANTES de llegar a la IA).
@@ -188,22 +236,20 @@ export const preprocessImageForOCR = (file: File | Blob) => compressImage(file);
 const compressImage = async (file: File | Blob): Promise<{ base64: string; mimeType: string }> => {
   // Compresión calibrada para OCR: el texto de tickets/albaranes ES PEQUEÑO,
   // si se comprime demasiado la IA lee mal "8,50€" como "8,90€" o pierde
-  // dígitos. Subimos el techo a 1800px + calidad alta. Si el resultado pasa
-  // de 4MB (límite cómodo para subir a Claude/Gemini), bajamos calidad
-  // progresivamente pero mantenemos resolución alta.
-  const QUALITY_LEVELS = [0.92, 0.85, 0.75, 0.6, 0.45];
-  const MAX_BYTES = 4 * 1024 * 1024;     // 4MB
-  const MAX_W = 1800, MAX_H = 1800;      // antes 1200 — pequeño para OCR fino
+  // dígitos. Subimos el techo a 2200px + calidad mínima 0.85 (antes 1800/0.45).
+  // Si el resultado pasa de 5MB, bajamos calidad pero mantenemos resolución.
+  // Aplicamos auto-levels (contraste) + sharpening (afinar bordes) antes de
+  // exportar para que la IA reciba la imagen lo más legible posible.
+  const QUALITY_LEVELS = [0.95, 0.9, 0.85, 0.75, 0.6];
+  const MAX_BYTES = 5 * 1024 * 1024;     // 5MB
+  const MAX_W = 2200, MAX_H = 2200;      // antes 1800 — más detalle para texto fino
 
   // Respetamos la orientación EXIF: las fotos del móvil suelen guardarse en
   // landscape pero con un flag EXIF que indica que deben mostrarse en portrait.
-  // Sin esto, la IA recibe la imagen rotada 90° y lee TODO mal (fechas, totales,
-  // proveedor). Chrome/Edge/Firefox modernos soportan imageOrientation:'from-image'.
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' as any });
   } catch {
-    // Fallback para navegadores antiguos: ignora EXIF, mejor algo que nada.
     bitmap = await createImageBitmap(file);
   }
   const ratio  = Math.min(MAX_W / bitmap.width, MAX_H / bitmap.height, 1);
@@ -214,12 +260,18 @@ const compressImage = async (file: File | Blob): Promise<{ base64: string; mimeT
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext('2d', { alpha: false });
   if (ctx) {
-    // Suavizado de alta calidad — preserva mejor el contraste del texto
     ctx.imageSmoothingEnabled = true;
     (ctx as any).imageSmoothingQuality = 'high';
     ctx.drawImage(bitmap, 0, 0, w, h);
-    // 🆕 Realce de contraste para fotos planas / tickets pálidos
+    // Pipeline de pre-procesado para OCR óptimo:
+    //   1. enhanceForOCR — auto-levels + gamma para fotos planas/tickets pálidos
+    //   2. sharpenForOCR — afilado de bordes para texto pequeño/borroso
     enhanceForOCR(ctx, w, h);
+    // Solo aplicar sharpening si la imagen no es enorme (>5MP en este punto)
+    // — evita pre-procesado muy lento con ningún beneficio adicional.
+    if (w * h <= 5_000_000) {
+      sharpenForOCR(ctx, w, h);
+    }
   }
 
   let blob: Blob | null = null;
