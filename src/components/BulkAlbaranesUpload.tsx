@@ -1402,6 +1402,27 @@ const ReviewCard: React.FC<ReviewCardProps> = ({ entry, kind, onToggleSelected, 
           {isDudoso && reasons.length > 0 && (
             <p className="text-[9px] font-bold text-amber-700 truncate" title={reasons.join(' · ')}>⚠️ {reasons.join(' · ')}</p>
           )}
+
+          {/* Botón "✏️ Editar todo" — visible en cada tarjeta para que la
+              usuaria sepa que puede abrir el modal y editar líneas, IVA, etc. */}
+          <div className="flex items-center gap-2 mt-1.5">
+            <button
+              type="button"
+              onClick={() => setShowDetail(true)}
+              className={cn(
+                'text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-lg transition flex items-center gap-1',
+                isDudoso
+                  ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                  : 'bg-indigo-500 hover:bg-indigo-600 text-white',
+              )}
+              title="Abre el editor completo: líneas, IVA, totales, todo editable"
+            >
+              ✏️ Editar todo
+            </button>
+            <span className="text-[9px] font-bold text-slate-400">
+              {parsed.lineas?.length || 0} líneas · {Num.fmt(parsed.total || 0)}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -1419,12 +1440,18 @@ const ReviewCard: React.FC<ReviewCardProps> = ({ entry, kind, onToggleSelected, 
               <img src={thumbUrl} alt={entry.file.name} className="max-w-full max-h-full object-contain rounded-lg shadow-2xl" />
             </div>
             <div className="md:w-1/2 flex flex-col">
-              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Lectura de la IA</p>
+              <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-indigo-50 to-violet-50">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-indigo-700">✏️ Editor del albarán</p>
                   <p className="text-sm font-black text-slate-800 truncate">{entry.file.name}</p>
+                  <p className="text-[10px] font-bold text-slate-500 mt-0.5">Todos los campos son editables. Los cambios se guardan al cerrar.</p>
                 </div>
-                <button onClick={() => setShowDetail(false)} className="p-2 rounded-lg hover:bg-slate-200 transition"><X className="w-4 h-4 text-slate-500" /></button>
+                <button
+                  onClick={() => setShowDetail(false)}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-xl shadow flex items-center gap-1.5 shrink-0"
+                >
+                  ✅ Listo
+                </button>
               </div>
               <div className="flex-1 overflow-y-auto p-5 space-y-3">
                 {/* 🆕 Campos de cabecera EDITABLES en el modal */}
