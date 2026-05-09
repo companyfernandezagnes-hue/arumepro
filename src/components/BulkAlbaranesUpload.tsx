@@ -1220,6 +1220,42 @@ interface ReviewCardProps {
 const ReviewCard: React.FC<ReviewCardProps> = ({ entry, kind, onToggleSelected, onEdit, onDiscard }) => {
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
   const [showDetail, setShowDetail] = useState(false);
+  // 🆕 Para edición de líneas individuales en el modal
+  const editLinea = (lineIdx: number, field: keyof ParsedLinea, val: any) => {
+    const base = (entry.editedParsed || (entry.status as any).parsed) as ParsedAlbaran;
+    const newLineas = [...(base.lineas || [])];
+    newLineas[lineIdx] = { ...newLineas[lineIdx], [field]: val };
+    // Recalcular total de la línea si cambian q, unitPrice o rate
+    const l = newLineas[lineIdx];
+    const q = Number(l.q) || 1;
+    const up = Number(l.unitPrice) || 0;
+    const rate = Number(l.rate) || 10;
+    const lineBase = Num.round2(q * up);
+    const lineIva = Num.round2(lineBase * rate / 100);
+    newLineas[lineIdx] = { ...newLineas[lineIdx], base: lineBase, iva: lineIva, t: Num.round2(lineBase + lineIva), total: Num.round2(lineBase + lineIva) };
+    // Recalcular totales del documento
+    const sumBase = Num.round2(newLineas.reduce((s, x) => s + (x.base || 0), 0));
+    const sumIva = Num.round2(newLineas.reduce((s, x) => s + (x.iva || 0), 0));
+    const sumTotal = Num.round2(newLineas.reduce((s, x) => s + (x.t || x.total || 0), 0));
+    onEdit('lineas', newLineas);
+    // Actualizar totales también
+    setTimeout(() => {
+      onEdit('total', sumTotal);
+      onEdit('totales', { ...(base.totales || {}), base: sumBase, iva: sumIva, total: sumTotal });
+    }, 0);
+  };
+  const addLinea = () => {
+    const base = (entry.editedParsed || (entry.status as any).parsed) as ParsedAlbaran;
+    const newLineas = [...(base.lineas || []), { q: 1, n: '', u: 'uds', unitPrice: 0, base: 0, rate: 10, iva: 0, t: 0, total: 0 }];
+    onEdit('lineas', newLineas);
+  };
+  const removeLinea = (idx: number) => {
+    const base = (entry.editedParsed || (entry.status as any).parsed) as ParsedAlbaran;
+    const newLineas = (base.lineas || []).filter((_, i) => i !== idx);
+    onEdit('lineas', newLineas);
+    const sumTotal = Num.round2(newLineas.reduce((s, x) => s + (x.t || x.total || 0), 0));
+    setTimeout(() => onEdit('total', sumTotal), 0);
+  };
 
   useEffect(() => {
     const url = URL.createObjectURL(entry.file);
@@ -1391,13 +1427,20 @@ const ReviewCard: React.FC<ReviewCardProps> = ({ entry, kind, onToggleSelected, 
                 <button onClick={() => setShowDetail(false)} className="p-2 rounded-lg hover:bg-slate-200 transition"><X className="w-4 h-4 text-slate-500" /></button>
               </div>
               <div className="flex-1 overflow-y-auto p-5 space-y-3">
+                {/* 🆕 Campos de cabecera EDITABLES en el modal */}
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label="Proveedor" value={parsed.proveedor || '—'} highlight={!parsed.proveedor} />
-                  <Field label="Nº documento" value={parsed.num || 'S/N'} />
-                  <Field label="Fecha" value={parsed.fecha || '—'} highlight={!parsed.fecha} />
-                  <Field label="Total c/IVA" value={Num.fmt(parsed.totales?.total || parsed.total)} highlight={!parsed.total} />
-                  <Field label="Base s/IVA" value={Num.fmt(parsed.totales?.base || 0)} highlight={!parsed.totales?.base} />
-                  <Field label="Total IVA" value={Num.fmt(parsed.totales?.iva || 0)} highlight={!parsed.totales?.iva} />
+                  <EditableField label="Proveedor" value={parsed.proveedor || ''} highlight={!parsed.proveedor}
+                    onChange={v => onEdit('proveedor', v)} />
+                  <EditableField label="Nº documento" value={parsed.num || ''}
+                    onChange={v => onEdit('num', v)} />
+                  <EditableField label="Fecha" value={parsed.fecha || ''} highlight={!parsed.fecha} type="date"
+                    onChange={v => onEdit('fecha', v)} />
+                  <EditableField label="Total c/IVA" value={String(parsed.totales?.total || parsed.total || 0)} highlight={!parsed.total} type="number"
+                    onChange={v => onEdit('total', parseFloat(v) || 0)} />
+                  <EditableField label="Base s/IVA" value={String(parsed.totales?.base || 0)} highlight={!parsed.totales?.base} type="number"
+                    onChange={v => onEdit('totales', { ...(parsed.totales || {}), base: parseFloat(v) || 0 })} />
+                  <EditableField label="Total IVA" value={String(parsed.totales?.iva || 0)} highlight={!parsed.totales?.iva} type="number"
+                    onChange={v => onEdit('totales', { ...(parsed.totales || {}), iva: parseFloat(v) || 0 })} />
                 </div>
 
                 {/* Desglose por tipo de IVA — clave en hostelería donde una
@@ -1442,29 +1485,69 @@ const ReviewCard: React.FC<ReviewCardProps> = ({ entry, kind, onToggleSelected, 
                   </div>
                 )}
 
+                {/* 🆕 Líneas EDITABLES — la usuaria puede corregir lo que la IA leyó mal */}
                 {parsed.lineas && parsed.lineas.length > 0 && (
                   <div>
-                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2">Líneas extraídas ({parsed.lineas.length})</p>
-                    <div className="space-y-1 max-h-64 overflow-y-auto">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Líneas extraídas ({parsed.lineas.length})</p>
+                      <button type="button" onClick={addLinea} className="text-[9px] font-black uppercase tracking-widest text-indigo-600 hover:text-indigo-800 transition">+ Añadir línea</button>
+                    </div>
+                    <div className="space-y-1.5 max-h-72 overflow-y-auto">
                       {parsed.lineas.map((l, i) => (
-                        <div key={i} className="text-[10px] bg-slate-50 rounded px-2 py-1.5 grid grid-cols-[1fr_auto] gap-x-3 gap-y-0.5">
-                          <span className="font-bold text-slate-700 truncate">{l.q || 1}× {l.n || '—'} <span className="text-slate-400">({l.u || 'uds'})</span></span>
-                          <span className="font-mono font-black text-slate-900 text-right">{Num.fmt(l.t || 0)} <span className={cn(
-                            'text-[8px] font-black px-1 py-0.5 rounded ml-1',
-                            l.rate === 4  ? 'bg-emerald-100 text-emerald-700' :
-                            l.rate === 21 ? 'bg-rose-100 text-rose-700'      :
-                                            'bg-indigo-100 text-indigo-700'
-                          )}>{l.rate || 0}%</span></span>
-                          {(l.base || 0) > 0 && (
-                            <span className="text-[9px] font-mono text-slate-500 col-span-2">
-                              {l.unitPrice ? `${Num.fmt(l.unitPrice)}/u s/IVA · ` : ''}base {Num.fmt(l.base || 0)} + IVA {Num.fmt(l.iva || 0)}
-                              {l.descuento && l.descuento > 0 ? ` · dto -${Num.fmt(l.descuento)}` : ''}
-                            </span>
-                          )}
+                        <div key={i} className="text-[10px] bg-slate-50 rounded-lg px-2 py-2 border border-slate-200 space-y-1 relative group">
+                          {/* Botón eliminar línea */}
+                          <button type="button" onClick={() => removeLinea(i)}
+                            className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition text-[8px] font-black"
+                            title="Eliminar línea">×</button>
+                          {/* Fila 1: cantidad, nombre, unidad */}
+                          <div className="flex items-center gap-1">
+                            <input type="number" step="0.01" value={l.q ?? 1}
+                              onChange={e => editLinea(i, 'q', parseFloat(e.target.value) || 0)}
+                              className="w-12 text-[10px] font-bold text-center bg-white border border-slate-200 rounded px-1 py-0.5 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none"
+                              title="Cantidad" />
+                            <span className="text-slate-400 text-[10px]">×</span>
+                            <input value={l.n || ''}
+                              onChange={e => editLinea(i, 'n', e.target.value)}
+                              placeholder="Producto"
+                              className="flex-1 text-[10px] font-bold bg-white border border-slate-200 rounded px-1.5 py-0.5 focus:border-indigo-400 focus:ring-1 focus:ring-indigo-200 outline-none truncate" />
+                            <input value={l.u || 'uds'}
+                              onChange={e => editLinea(i, 'u', e.target.value)}
+                              className="w-10 text-[10px] text-slate-500 bg-white border border-slate-200 rounded px-1 py-0.5 focus:border-indigo-400 outline-none text-center"
+                              title="Unidad" />
+                          </div>
+                          {/* Fila 2: precio unitario, IVA%, total */}
+                          <div className="flex items-center gap-1">
+                            <input type="number" step="0.01" value={l.unitPrice ?? 0}
+                              onChange={e => editLinea(i, 'unitPrice', parseFloat(e.target.value) || 0)}
+                              className="w-16 text-[10px] font-mono font-bold bg-white border border-slate-200 rounded px-1 py-0.5 text-right focus:border-indigo-400 outline-none"
+                              title="Precio unitario s/IVA" />
+                            <span className="text-[9px] text-slate-400">€/u</span>
+                            <select value={l.rate ?? 10}
+                              onChange={e => editLinea(i, 'rate', parseInt(e.target.value))}
+                              className={cn(
+                                'text-[10px] font-black rounded px-1.5 py-0.5 border outline-none cursor-pointer',
+                                (l.rate ?? 10) === 4  ? 'bg-emerald-50 border-emerald-300 text-emerald-700' :
+                                (l.rate ?? 10) === 21 ? 'bg-rose-50 border-rose-300 text-rose-700'         :
+                                                        'bg-indigo-50 border-indigo-300 text-indigo-700'
+                              )}>
+                              <option value={4}>4%</option>
+                              <option value={10}>10%</option>
+                              <option value={21}>21%</option>
+                            </select>
+                            <span className="text-slate-300 mx-0.5">=</span>
+                            <span className="text-[10px] font-mono font-black text-slate-900">{Num.fmt(l.t || l.total || 0)}</span>
+                          </div>
                         </div>
                       ))}
                     </div>
                   </div>
+                )}
+                {/* Botón añadir primera línea si no hay */}
+                {(!parsed.lineas || parsed.lineas.length === 0) && (
+                  <button type="button" onClick={addLinea}
+                    className="w-full py-2 text-[10px] font-black uppercase tracking-widest text-indigo-600 border-2 border-dashed border-indigo-200 rounded-xl hover:bg-indigo-50 transition">
+                    + Añadir línea manualmente
+                  </button>
                 )}
                 {reasons.length > 0 && (
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
@@ -1491,6 +1574,23 @@ const Field: React.FC<{ label: string; value: string; highlight?: boolean }> = (
   <div className={cn('rounded-lg p-2 border', highlight ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-100')}>
     <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">{label}</p>
     <p className={cn('text-xs font-black truncate', highlight ? 'text-rose-700' : 'text-slate-800')} title={value}>{value}</p>
+  </div>
+);
+
+// 🆕 Campo editable para el modal de detalle
+const EditableField: React.FC<{ label: string; value: string; highlight?: boolean; type?: string; onChange: (v: string) => void }> = ({ label, value, highlight, type, onChange }) => (
+  <div className={cn('rounded-lg p-2 border', highlight ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-100')}>
+    <p className="text-[8px] font-black uppercase tracking-widest text-slate-500">{label}</p>
+    <input
+      type={type || 'text'}
+      step={type === 'number' ? '0.01' : undefined}
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      className={cn(
+        'w-full text-xs font-black bg-transparent outline-none border-b border-transparent focus:border-indigo-400 focus:bg-indigo-50/50 px-0.5 py-0.5 rounded transition',
+        highlight ? 'text-rose-700 placeholder-rose-400' : 'text-slate-800',
+      )}
+    />
   </div>
 );
 

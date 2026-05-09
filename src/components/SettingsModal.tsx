@@ -258,6 +258,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
   // ── IAs ────────────────────────────────────────────────────────────────────
   const [claudeKey,   setClaudeKey]   = useState('');
   const [geminiKey,   setGeminiKey]   = useState('');
+  const [zaiKey,      setZaiKey]      = useState('');
   const [groqKey,     setGroqKey]     = useState('');
   const [cerebrasKey, setCerebrasKey] = useState('');
   const [deepseekKey, setDeepseekKey] = useState('');
@@ -290,6 +291,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
     setConfig(db?.config || {});
     setClaudeKey(localStorage.getItem('claude_api_key') || '');
     setGeminiKey(localStorage.getItem('gemini_api_key') || '');
+    setZaiKey(localStorage.getItem('zai_api_key') || '');
     setGroqKey(localStorage.getItem('groq_api_key') || '');
     setCerebrasKey(localStorage.getItem('cerebras_api_key') || '');
     setDeepseekKey(localStorage.getItem('deepseek_api_key') || '');
@@ -316,6 +318,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
     // IAs
     if (claudeKey.trim())   localStorage.setItem('claude_api_key',   claudeKey.trim());   else localStorage.removeItem('claude_api_key');
     if (geminiKey.trim())   localStorage.setItem('gemini_api_key',   geminiKey.trim());   else localStorage.removeItem('gemini_api_key');
+    if (zaiKey.trim())      localStorage.setItem('zai_api_key',      zaiKey.trim());      else localStorage.removeItem('zai_api_key');
     if (groqKey.trim())     localStorage.setItem('groq_api_key',     groqKey.trim());     else localStorage.removeItem('groq_api_key');
     if (cerebrasKey.trim()) localStorage.setItem('cerebras_api_key', cerebrasKey.trim()); else localStorage.removeItem('cerebras_api_key');
     if (deepseekKey.trim()) localStorage.setItem('deepseek_api_key', deepseekKey.trim()); else localStorage.removeItem('deepseek_api_key');
@@ -814,6 +817,17 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
                   <SecretInput value={geminiKey} onChange={setGeminiKey} placeholder="AIzaSy..." colorClass="indigo"
                     linkHref="https://aistudio.google.com/apikey" linkLabel="Gratis en AI Studio →" />
                   <p className="text-[8px] text-indigo-400 font-bold leading-tight">Respaldo si Claude está saturado o sin clave. También necesario para escaneo multipágina.</p>
+                </div>
+
+                {/* Z.AI GLM-5V (fallback adicional) */}
+                <div className="bg-orange-50 p-3 rounded-2xl border border-orange-100 space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-1">
+                    <span className="text-[10px] font-black text-orange-800 uppercase tracking-widest">🟠 Z.AI</span>
+                    <span className="text-[8px] text-orange-400 font-bold">fallback extra · solo imágenes</span>
+                  </div>
+                  <SecretInput value={zaiKey} onChange={setZaiKey} placeholder="z.ai key..." colorClass="orange"
+                    linkHref="https://z.ai/" linkLabel="Crear clave en Z.AI →" />
+                  <p className="text-[8px] text-orange-400 font-bold leading-tight">GLM-5V-Turbo. Tercer fallback tras Claude+Gemini. Puede fallar por CORS si el navegador lo bloquea — el caller absorbe.</p>
                 </div>
 
                 {/* Groq */}

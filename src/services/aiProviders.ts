@@ -8,7 +8,8 @@
  * ║                                                                  ║
  * ║  Proveedores soportados:                                         ║
  * ║   🟣 Claude   — imágenes + PDFs (PRINCIPAL — Anthropic)          ║
- * ║   🔵 Gemini   — imágenes + PDFs (fallback)                       ║
+ * ║   🔵 Gemini   — imágenes + PDFs (fallback 1)                     ║
+ * ║   🟠 Z.AI     — solo imágenes (fallback 2 — GLM-5V-Turbo)        ║
  * ║   🟢 Groq     — velocidad + Whisper (voz)                        ║
  * ║   🟪 Cerebras — texto ultrarrápido (~0.10$/M tokens)             ║
  * ║   🔷 DeepSeek — análisis largo (5M tokens gratis al registrarse) ║
@@ -18,7 +19,7 @@
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
-export type AIProvider = 'claude' | 'gemini' | 'groq' | 'cerebras' | 'deepseek' | 'mistral';
+export type AIProvider = 'claude' | 'gemini' | 'zai' | 'groq' | 'cerebras' | 'deepseek' | 'mistral';
 
 export type VoiceProvider = 'browser' | 'groq';
 
@@ -47,6 +48,7 @@ const getKey = (name: string): string =>
 export const keys = {
   claude:   () => getKey('claude_api_key'),
   gemini:   () => getKey('gemini_api_key'),
+  zai:      () => getKey('zai_api_key'),
   groq:     () => getKey('groq_api_key'),
   cerebras: () => getKey('cerebras_api_key'),
   deepseek: () => getKey('deepseek_api_key'),
@@ -61,6 +63,7 @@ export const voiceProvider = (): VoiceProvider =>
 const MODELS: Record<AIProvider, string> = {
   claude:   'claude-sonnet-4-5',
   gemini:   'gemini-2.5-flash',
+  zai:      'glm-5v-turbo',
   groq:     'llama-3.3-70b-versatile',
   cerebras: 'llama3.1-8b',
   deepseek: 'deepseek-chat',
@@ -72,6 +75,10 @@ const VISION_MODELS: Partial<Record<AIProvider, string>> = {
   // por precisión OCR superior en facturas/tickets.
   claude:  'claude-sonnet-4-5',
   gemini:  'gemini-2.5-flash',
+  // Z.AI GLM-5V-Turbo — multimodal. Va al final de la cadena de fallback.
+  // ATENCIÓN: el endpoint api.z.ai puede NO permitir CORS desde browser.
+  // Si falla por preflight, el try/catch absorbe y se sigue al siguiente.
+  zai:     'glm-5v-turbo',
   mistral: 'pixtral-12b-2409',
   // llama-3.2-11b-vision-preview fue deprecado en dic 2025. Reemplazado por
   // el modelo de producción de Meta con visión.
@@ -261,6 +268,7 @@ export const scanDocument = async (
   // la usuaria meta los números a mano que confiar en un modelo más débil.
   const onlyClaude  = forceProvider === 'claude';
   const onlyGemini  = forceProvider === 'gemini';
+  const onlyZai     = forceProvider === 'zai';
   const onlyMistral = forceProvider === 'mistral';
   const onlyGroq    = forceProvider === 'groq';
   const tryAll      = !forceProvider;
@@ -315,6 +323,23 @@ export const scanDocument = async (
     errors.push('Gemini: en pausa por rate limit');
   } else if (!gemKey && (onlyGemini || tryAll)) {
     errors.push('Gemini: sin API key configurada');
+  }
+
+  // 🟠 Z.AI GLM-5V — fallback adicional. Solo imágenes (no PDFs).
+  // Si el navegador bloquea por CORS, el catch absorbe y seguimos.
+  const zaiKey = keys.zai();
+  if (zaiKey && isImage && (onlyZai || tryAll)) {
+    try {
+      return await _scanWithZai(file, prompt, zaiKey, isImage);
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      console.warn('[aiProviders] Z.AI falló en scanDocument:', msg);
+      errors.push(`Z.AI: ${msg}`);
+    }
+  } else if (!zaiKey && (onlyZai || tryAll)) {
+    errors.push('Z.AI: sin API key configurada');
+  } else if (!isImage && (onlyZai || tryAll)) {
+    errors.push('Z.AI: solo soporta imágenes, no PDFs');
   }
 
   const misKey = keys.mistral();
@@ -503,6 +528,22 @@ export const scanBase64 = async (
     errors.push('Gemini: en pausa por rate limit (reintentará en breve)');
   } else {
     errors.push('Gemini: sin API key configurada');
+  }
+
+  // 🟠 Z.AI GLM-5V (fallback adicional, solo imágenes)
+  const zaiKey = keys.zai();
+  if (zaiKey && isImage) {
+    try {
+      return await _scanBase64WithZai(cleanB64, mimeType, prompt, zaiKey);
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      console.warn('[aiProviders] Z.AI falló en scanBase64:', msg);
+      errors.push(`Z.AI: ${msg}`);
+    }
+  } else if (!zaiKey) {
+    errors.push('Z.AI: sin API key configurada');
+  } else if (!isImage) {
+    errors.push('Z.AI: solo soporta imágenes, no PDFs');
   }
 
   const misKey = keys.mistral();
@@ -717,6 +758,79 @@ const _scanWithGemini = async (
     throw new Error('Gemini devolvió respuesta vacía. La imagen puede ser ilegible.');
   }
   return { raw: parseJSON(text), provider: 'gemini', model };
+};
+
+// ─── Z.AI GLM-5V-Turbo ───────────────────────────────────────────────────────
+//
+// Endpoint OpenAI-compatible: api.z.ai/api/paas/v4/chat/completions.
+// Útil como tercer fallback (tras Claude y Gemini). ATENCIÓN: el dominio
+// api.z.ai puede NO incluir cabeceras CORS para llamadas desde browser. Si
+// falla por preflight OPTIONS, el navegador bloqueará la respuesta y el
+// try/catch del caller dejará pasar al siguiente proveedor.
+const Z_AI_ENDPOINT = 'https://api.z.ai/api/paas/v4/chat/completions';
+
+const _scanWithZai = async (
+  file: File, prompt: string, apiKey: string, isImage: boolean
+): Promise<ScanResult> => {
+  const model = VISION_MODELS.zai!;
+  // GLM-5V acepta imágenes; los PDFs no están soportados oficialmente.
+  if (!isImage) throw new Error('Z.AI GLM-5V solo acepta imágenes, no PDFs.');
+  const { base64, mimeType } = await compressImage(file);
+  const body = {
+    model,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text',      text: `${prompt}\n\nResponde ÚNICAMENTE con el JSON pedido, sin explicaciones, sin markdown, sin texto antes ni después.` },
+        { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
+      ],
+    }],
+    temperature: 0.1,
+  };
+  const res = await fetchWithTimeout(Z_AI_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errJson = await res.json().catch(() => ({} as any));
+    throw new Error(`Z.AI: ${errJson?.error?.message || `HTTP ${res.status}`}`);
+  }
+  const data = await res.json();
+  const text = data?.choices?.[0]?.message?.content || '';
+  if (!text.trim()) throw new Error('Z.AI devolvió respuesta vacía.');
+  return { raw: parseJSON(text), provider: 'zai', model };
+};
+
+const _scanBase64WithZai = async (
+  base64: string, mimeType: string, prompt: string, apiKey: string
+): Promise<ScanResult> => {
+  const model = VISION_MODELS.zai!;
+  if (!mimeType.startsWith('image/')) throw new Error('Z.AI GLM-5V solo acepta imágenes, no PDFs.');
+  const body = {
+    model,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text',      text: `${prompt}\n\nResponde ÚNICAMENTE con el JSON pedido, sin explicaciones, sin markdown.` },
+        { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
+      ],
+    }],
+    temperature: 0.1,
+  };
+  const res = await fetchWithTimeout(Z_AI_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errJson = await res.json().catch(() => ({} as any));
+    throw new Error(`Z.AI: ${errJson?.error?.message || `HTTP ${res.status}`}`);
+  }
+  const data = await res.json();
+  const text = data?.choices?.[0]?.message?.content || '';
+  if (!text.trim()) throw new Error('Z.AI devolvió respuesta vacía.');
+  return { raw: parseJSON(text), provider: 'zai', model };
 };
 
 const _scanWithMistral = async (
@@ -1081,6 +1195,7 @@ const _chatGemini = async (
 export const getProvidersStatus = (): Record<AIProvider, boolean> => ({
   claude:   !!keys.claude(),
   gemini:   !!keys.gemini(),
+  zai:      !!keys.zai(),
   groq:     !!keys.groq(),
   cerebras: !!keys.cerebras(),
   deepseek: !!keys.deepseek(),
