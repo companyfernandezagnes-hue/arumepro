@@ -797,37 +797,37 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
 
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-3">
 
-                {/* Claude (Anthropic) — PRINCIPAL */}
-                <div className="bg-pink-50 p-3 rounded-2xl border-2 border-pink-200 space-y-2 ring-2 ring-pink-100">
-                  <div className="flex items-center justify-between flex-wrap gap-1">
-                    <span className="text-[10px] font-black text-pink-800 uppercase tracking-widest">🟣 Claude</span>
-                    <span className="text-[8px] text-pink-500 font-bold">⭐ PRINCIPAL · imágenes + PDF</span>
-                  </div>
-                  <SecretInput value={claudeKey} onChange={setClaudeKey} placeholder="sk-ant-..." colorClass="pink"
-                    linkHref="https://console.anthropic.com/settings/keys" linkLabel="Crear clave en Anthropic →" />
-                  <p className="text-[8px] text-pink-500 font-bold leading-tight">Sonnet 4.5 — primera opción para leer facturas, tickets y albaranes. Si falla, cae a Gemini.</p>
-                </div>
-
-                {/* Gemini */}
-                <div className="bg-indigo-50 p-3 rounded-2xl border border-indigo-100 space-y-2">
-                  <div className="flex items-center justify-between flex-wrap gap-1">
-                    <span className="text-[10px] font-black text-indigo-800 uppercase tracking-widest">🔵 Gemini</span>
-                    <span className="text-[8px] text-indigo-400 font-bold">fallback · imágenes + PDF</span>
-                  </div>
-                  <SecretInput value={geminiKey} onChange={setGeminiKey} placeholder="AIzaSy..." colorClass="indigo"
-                    linkHref="https://aistudio.google.com/apikey" linkLabel="Gratis en AI Studio →" />
-                  <p className="text-[8px] text-indigo-400 font-bold leading-tight">Respaldo si Claude está saturado o sin clave. También necesario para escaneo multipágina.</p>
-                </div>
-
-                {/* Z.AI GLM-5V (fallback adicional) */}
-                <div className="bg-orange-50 p-3 rounded-2xl border border-orange-100 space-y-2">
+                {/* Z.AI GLM-5V — PRINCIPAL (gratuito) */}
+                <div className="bg-orange-50 p-3 rounded-2xl border-2 border-orange-300 space-y-2 ring-2 ring-orange-100">
                   <div className="flex items-center justify-between flex-wrap gap-1">
                     <span className="text-[10px] font-black text-orange-800 uppercase tracking-widest">🟠 Z.AI</span>
-                    <span className="text-[8px] text-orange-400 font-bold">fallback extra · solo imágenes</span>
+                    <span className="text-[8px] text-orange-600 font-bold">⭐ PRINCIPAL · GRATIS · solo imágenes</span>
                   </div>
                   <SecretInput value={zaiKey} onChange={setZaiKey} placeholder="z.ai key..." colorClass="orange"
                     linkHref="https://z.ai/" linkLabel="Crear clave en Z.AI →" />
-                  <p className="text-[8px] text-orange-400 font-bold leading-tight">GLM-5V-Turbo. Tercer fallback tras Claude+Gemini. Puede fallar por CORS si el navegador lo bloquea — el caller absorbe.</p>
+                  <p className="text-[8px] text-orange-600 font-bold leading-tight">GLM-5V-Turbo. Primera opción gratis para leer albaranes. Si el navegador bloquea CORS, cae automáticamente a Claude (durante 30 min, no penaliza más llamadas).</p>
+                </div>
+
+                {/* Claude — fallback 1 */}
+                <div className="bg-pink-50 p-3 rounded-2xl border border-pink-200 space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-1">
+                    <span className="text-[10px] font-black text-pink-800 uppercase tracking-widest">🟣 Claude</span>
+                    <span className="text-[8px] text-pink-500 font-bold">fallback 1 · imágenes + PDF</span>
+                  </div>
+                  <SecretInput value={claudeKey} onChange={setClaudeKey} placeholder="sk-ant-..." colorClass="pink"
+                    linkHref="https://console.anthropic.com/settings/keys" linkLabel="Crear clave en Anthropic →" />
+                  <p className="text-[8px] text-pink-500 font-bold leading-tight">Sonnet 4.5. Lee si Z.AI no funciona desde browser (CORS) o no responde. También necesario para PDFs (Z.AI sólo imágenes).</p>
+                </div>
+
+                {/* Gemini — fallback 2 */}
+                <div className="bg-indigo-50 p-3 rounded-2xl border border-indigo-100 space-y-2">
+                  <div className="flex items-center justify-between flex-wrap gap-1">
+                    <span className="text-[10px] font-black text-indigo-800 uppercase tracking-widest">🔵 Gemini</span>
+                    <span className="text-[8px] text-indigo-400 font-bold">fallback 2 · imágenes + PDF</span>
+                  </div>
+                  <SecretInput value={geminiKey} onChange={setGeminiKey} placeholder="AIzaSy..." colorClass="indigo"
+                    linkHref="https://aistudio.google.com/apikey" linkLabel="Gratis en AI Studio →" />
+                  <p className="text-[8px] text-indigo-400 font-bold leading-tight">Respaldo si Z.AI y Claude están saturados o sin clave. También necesario para escaneo multipágina.</p>
                 </div>
 
                 {/* Groq */}

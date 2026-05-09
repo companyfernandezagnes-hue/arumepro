@@ -6,10 +6,10 @@
  * ║  Todos los componentes importan de aquí. Nunca llaman a          ║
  * ║  proveedores de IA directamente.                                 ║
  * ║                                                                  ║
- * ║  Proveedores soportados:                                         ║
- * ║   🟣 Claude   — imágenes + PDFs (PRINCIPAL — Anthropic)          ║
- * ║   🔵 Gemini   — imágenes + PDFs (fallback 1)                     ║
- * ║   🟠 Z.AI     — solo imágenes (fallback 2 — GLM-5V-Turbo)        ║
+ * ║  Proveedores soportados (ORDEN de fallback):                     ║
+ * ║   🟠 Z.AI     — solo imágenes (PRINCIPAL — gratis, GLM-5V)       ║
+ * ║   🟣 Claude   — imágenes + PDFs (fallback 1 — Anthropic)         ║
+ * ║   🔵 Gemini   — imágenes + PDFs (fallback 2)                     ║
  * ║   🟢 Groq     — velocidad + Whisper (voz)                        ║
  * ║   🟪 Cerebras — texto ultrarrápido (~0.10$/M tokens)             ║
  * ║   🔷 DeepSeek — análisis largo (5M tokens gratis al registrarse) ║
@@ -273,8 +273,36 @@ export const scanDocument = async (
   const onlyGroq    = forceProvider === 'groq';
   const tryAll      = !forceProvider;
 
-  // 🟣 Claude PRIMERO — preferido por la usuaria (suscripción Anthropic propia).
-  // 🆕 Circuit breaker: si Claude tiene rate limit activo, saltamos directo.
+  // 🟠 Z.AI GLM-5V PRIMERO — gratuito, OCR específico para documentos.
+  // Si el navegador bloquea por CORS o falla la red, el circuit breaker lo
+  // desactiva 30 min y el resto de la sesión va directo a Claude. Así NO
+  // se penaliza cada llamada con un preflight fallido.
+  const zaiKey = keys.zai();
+  if (zaiKey && isImage && (onlyZai || tryAll) && !isCircuitOpen('zai')) {
+    try {
+      return await _scanWithZai(file, prompt, zaiKey, isImage);
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      console.warn('[aiProviders] Z.AI falló en scanDocument:', msg);
+      // Errores típicos cuando el navegador bloquea CORS: "Failed to fetch",
+      // "NetworkError", "Network request failed". Si pasa, desactivamos
+      // Z.AI 30 min para que no se reintente cada imagen y la cadena vaya
+      // directa a Claude. La usuaria puede limpiar manualmente con un reload.
+      if (/Failed to fetch|NetworkError|CORS|Network request failed/i.test(msg)) {
+        tripCircuit('zai', 30 * 60_000);
+        console.warn('[aiProviders] Z.AI bloqueado por CORS — pausa 30min, usando Claude.');
+      }
+      errors.push(`Z.AI: ${msg}`);
+    }
+  } else if (isCircuitOpen('zai') && (onlyZai || tryAll)) {
+    errors.push('Z.AI: en pausa (bloqueado por CORS o saturado)');
+  } else if (!zaiKey && (onlyZai || tryAll)) {
+    errors.push('Z.AI: sin API key configurada');
+  } else if (!isImage && (onlyZai || tryAll)) {
+    errors.push('Z.AI: solo soporta imágenes, no PDFs');
+  }
+
+  // 🟣 Claude — fallback principal cuando Z.AI no está o falla.
   const claudeKey = keys.claude();
   if (claudeKey && (onlyClaude || tryAll) && !isCircuitOpen('claude')) {
     const isRateLimit = (m: string) => /rate.?limit|429/i.test(m);
@@ -325,22 +353,7 @@ export const scanDocument = async (
     errors.push('Gemini: sin API key configurada');
   }
 
-  // 🟠 Z.AI GLM-5V — fallback adicional. Solo imágenes (no PDFs).
-  // Si el navegador bloquea por CORS, el catch absorbe y seguimos.
-  const zaiKey = keys.zai();
-  if (zaiKey && isImage && (onlyZai || tryAll)) {
-    try {
-      return await _scanWithZai(file, prompt, zaiKey, isImage);
-    } catch (e: any) {
-      const msg = e?.message || String(e);
-      console.warn('[aiProviders] Z.AI falló en scanDocument:', msg);
-      errors.push(`Z.AI: ${msg}`);
-    }
-  } else if (!zaiKey && (onlyZai || tryAll)) {
-    errors.push('Z.AI: sin API key configurada');
-  } else if (!isImage && (onlyZai || tryAll)) {
-    errors.push('Z.AI: solo soporta imágenes, no PDFs');
-  }
+  // (Z.AI ahora va al principio de la cadena, antes que Claude)
 
   const misKey = keys.mistral();
   if (misKey && isImage && (onlyMistral || tryAll)) {
@@ -474,6 +487,31 @@ export const scanBase64 = async (
   const errors: string[] = [];
 
   // 🟣 Claude PRIMERO — preferido por la usuaria. Visión + PDFs nativos.
+  // 🟠 Z.AI GLM-5V PRIMERO (gratuito, OCR optimizado para documentos).
+  // Si el navegador bloquea CORS, circuit breaker 30 min → cae a Claude
+  // automáticamente sin penalización en sesiones siguientes.
+  const zaiKey = keys.zai();
+  if (zaiKey && isImage && !isCircuitOpen('zai')) {
+    try {
+      return await _scanBase64WithZai(cleanB64, mimeType, prompt, zaiKey);
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      console.warn('[aiProviders] Z.AI falló en scanBase64:', msg);
+      if (/Failed to fetch|NetworkError|CORS|Network request failed/i.test(msg)) {
+        tripCircuit('zai', 30 * 60_000);
+        console.warn('[aiProviders] Z.AI bloqueado por CORS — pausa 30min, usando Claude.');
+      }
+      errors.push(`Z.AI: ${msg}`);
+    }
+  } else if (isCircuitOpen('zai')) {
+    errors.push('Z.AI: en pausa (bloqueado CORS o saturado)');
+  } else if (!zaiKey) {
+    errors.push('Z.AI: sin API key configurada');
+  } else if (!isImage) {
+    errors.push('Z.AI: solo soporta imágenes, no PDFs');
+  }
+
+  // 🟣 Claude — fallback principal cuando Z.AI no está o falla.
   // 🆕 Circuit breaker: si Claude acaba de dar rate limit, saltamos directo a Gemini
   const claudeKey = keys.claude();
   if (claudeKey && !isCircuitOpen('claude')) {
@@ -530,21 +568,7 @@ export const scanBase64 = async (
     errors.push('Gemini: sin API key configurada');
   }
 
-  // 🟠 Z.AI GLM-5V (fallback adicional, solo imágenes)
-  const zaiKey = keys.zai();
-  if (zaiKey && isImage) {
-    try {
-      return await _scanBase64WithZai(cleanB64, mimeType, prompt, zaiKey);
-    } catch (e: any) {
-      const msg = e?.message || String(e);
-      console.warn('[aiProviders] Z.AI falló en scanBase64:', msg);
-      errors.push(`Z.AI: ${msg}`);
-    }
-  } else if (!zaiKey) {
-    errors.push('Z.AI: sin API key configurada');
-  } else if (!isImage) {
-    errors.push('Z.AI: solo soporta imágenes, no PDFs');
-  }
+  // (Z.AI ahora va al principio de la cadena, antes que Claude)
 
   const misKey = keys.mistral();
   if (misKey && isImage) {
