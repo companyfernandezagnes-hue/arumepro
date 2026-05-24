@@ -3,6 +3,40 @@
 // ==========================================
 export type BusinessUnit = 'REST' | 'DLV' | 'SHOP' | 'CORP';
 
+export type EmpresaId = 'arume' | 'raco';
+
+export interface EmpresaConfig {
+  id: EmpresaId;
+  nombre: string;
+  nombreCorto: string;
+  sociedad: string;
+  cif: string;
+  direccion?: string;
+  color: string;
+  activa: boolean;
+}
+
+export const EMPRESAS_DEFAULT: EmpresaConfig[] = [
+  { id: 'arume', nombre: 'Arume Sake Bar', nombreCorto: 'ARUME', sociedad: 'Arume Sake Bar SL', cif: '', color: '#4f46e5', activa: true },
+  { id: 'raco',  nombre: 'Raco Blanquerna', nombreCorto: 'RACO',  sociedad: 'Raco Blanquerna SL', cif: '', color: '#059669', activa: true },
+];
+
+export const EMPRESA_MODULES: Record<EmpresaId, Set<string>> = {
+  arume: new Set([
+    'dashboard', 'ia', 'importador', 'compras', 'proveedores',
+    'diario', 'menus', 'presupuestos', 'banco', 'tesoreria',
+    'liquidez', 'librosiva', 'balance', 'nominas', 'fixed',
+    'cierre', 'aeat', 'informes', 'cuentas', 'agente',
+    'notificaciones', 'stock', 'shop',
+  ]),
+  raco: new Set([
+    'dashboard', 'ia', 'importador', 'compras', 'proveedores',
+    'diario', 'menus', 'banco', 'tesoreria', 'liquidez',
+    'librosiva', 'balance', 'nominas', 'fixed', 'cierre',
+    'aeat', 'informes', 'cuentas', 'agente', 'notificaciones',
+  ]),
+};
+
 // ✅ Tipo utilitario: los campos numéricos en Supabase pueden llegar como string
 // desde datos legacy. enforceSchema en supabase.ts los normaliza a number al leer,
 // pero los tipos aceptan ambos para compatibilidad con datos legacy y drafts.

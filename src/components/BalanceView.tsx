@@ -1,7 +1,7 @@
 /**
  * BalanceView.tsx — Balance de Situación simplificado
  * ────────────────────────────────────────────────────
- * Balance contable para Celoso de Palma SL:
+ * Balance contable para {empresaConfig.sociedad}:
  *
  *  ACTIVO (lo que la empresa TIENE)
  *    • Banco: saldo actual
@@ -29,6 +29,7 @@ import * as XLSX from 'xlsx';
 import { cn } from '../lib/utils';
 import { Num, DateUtil } from '../services/engine';
 import { AppData } from '../types';
+import { useEmpresa } from '../hooks/useEmpresa';
 import { toast } from '../hooks/useToast';
 
 /* ── Tipos locales ─────────────────────────────────────────── */
@@ -42,6 +43,7 @@ interface PartidaBalance {
 
 /* ══════════════════════════════════════════════════════════════ */
 export const BalanceView: React.FC<{ data: AppData }> = ({ data }) => {
+  const { empresaConfig } = useEmpresa();
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth());
   const [year, setYear]   = useState(now.getFullYear());
@@ -270,7 +272,7 @@ export const BalanceView: React.FC<{ data: AppData }> = ({ data }) => {
             <Scale className="w-7 h-7 text-[color:var(--arume-gold)]" />
             Balance de situación
           </h2>
-          <p className="text-sm text-white/60 mt-1">Celoso de Palma SL · {MONTHS[month]} {year}</p>
+          <p className="text-sm text-white/60 mt-1">{empresaConfig.sociedad} · {MONTHS[month]} {year}</p>
 
           {/* Selector periodo */}
           <div className="mt-4 flex items-center gap-3">
@@ -395,7 +397,7 @@ export const BalanceView: React.FC<{ data: AppData }> = ({ data }) => {
         <div className="text-[10px] text-indigo-700 font-bold leading-relaxed space-y-1">
           <p><strong>ACTIVO</strong> = lo que la empresa TIENE (dinero, stock, lo que le deben clientes, mobiliario...)</p>
           <p><strong>PASIVO</strong> = lo que la empresa DEBE (proveedores sin pagar, IVA pendiente, nóminas...)</p>
-          <p><strong>PATRIMONIO NETO</strong> = Activo − Pasivo = el valor real de Celoso de Palma SL</p>
+          <p><strong>PATRIMONIO NETO</strong> = Activo − Pasivo = el valor real de {empresaConfig.sociedad}</p>
           <p className="text-indigo-400 mt-2">Los activos fijos se amortizan: su valor contable baja con el tiempo (vida útil). Esto es fiscal, no significa que valgan menos en la realidad.</p>
         </div>
       </div>

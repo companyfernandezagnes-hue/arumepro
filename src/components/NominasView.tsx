@@ -14,6 +14,7 @@ import { AnimatedNumber } from './AnimatedNumber';
 import { triggerConfetti } from './Confetti';
 import { motion, AnimatePresence } from 'motion/react';
 import { AppData } from '../types';
+import { useEmpresa } from '../hooks/useEmpresa';
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
 import { toast } from '../hooks/useToast';
@@ -90,6 +91,7 @@ interface Props {
 // ── Componente principal ────────────────────────────────────────────────────
 
 export const NominasView: React.FC<Props> = ({ data, onSave }) => {
+  const { empresaConfig } = useEmpresa();
   const [tab, setTab] = useState<'dashboard' | 'plantilla' | 'registro' | 'resumen'>('dashboard');
   const [year, setYear] = useState(new Date().getFullYear());
   const [showForm, setShowForm] = useState(false);
@@ -526,7 +528,7 @@ Reglas estrictas:
         <div className="relative z-10">
           <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-[color:var(--arume-gold)]">Personal</p>
           <h2 className="font-serif text-3xl md:text-4xl font-semibold tracking-tight mt-2">Nóminas y Seguridad Social</h2>
-          <p className="text-sm text-white/60 mt-1">Celoso de Palma SL</p>
+          <p className="text-sm text-white/60 mt-1">{empresaConfig.sociedad}</p>
           <div className="flex items-center gap-2 mt-5 flex-wrap">
             <span className="text-[11px] font-semibold uppercase tracking-[0.15em] bg-white/5 border border-white/10 px-3 py-1.5 rounded-full">
               👥 <AnimatedNumber value={kpis.activos} format={(n) => Math.round(n).toString()}/> empleados activos

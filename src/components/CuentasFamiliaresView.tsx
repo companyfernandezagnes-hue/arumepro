@@ -23,6 +23,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { AppData, MovimientoInterno, Albaran } from '../types';
+import { useEmpresa } from '../hooks/useEmpresa';
 import { Num, DateUtil } from '../services/engine';
 import { cn } from '../lib/utils';
 import { toast } from '../hooks/useToast';
@@ -36,6 +37,7 @@ interface Props {
 const newId = () => `mi-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
 export const CuentasFamiliaresView: React.FC<Props> = ({ data, onSave }) => {
+  const { empresaConfig } = useEmpresa();
   const [ocultar, setOcultar]   = useState(false);
   const [showAdd, setShowAdd]   = useState(false);
   const [selectedYear, setYear] = useState(new Date().getFullYear());
@@ -228,7 +230,7 @@ export const CuentasFamiliaresView: React.FC<Props> = ({ data, onSave }) => {
             </div>
             <h2 className="text-3xl font-black tracking-tighter">Cuentas Familiares Internas</h2>
             <p className="text-xs text-slate-400 mt-1 max-w-lg">
-              Librito privado entre Celoso de Palma SL y los familiares. Muestra qué gastos personales pasaron por el CIF de la empresa y están pendientes de saldar.
+              Librito privado entre {empresaConfig.sociedad} y los familiares. Muestra qué gastos personales pasaron por el CIF de la empresa y están pendientes de saldar.
             </p>
           </div>
           <div className="flex flex-col gap-2">

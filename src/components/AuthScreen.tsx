@@ -119,8 +119,8 @@ function AuthScreenInner({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center">
       <div className="bg-gray-900 border border-gray-800 rounded-2xl p-10 shadow-2xl flex flex-col items-center gap-6 w-full max-w-sm">
-        <h1 className="text-2xl font-bold text-white">Arume Sake Bar</h1>
-        <p className="text-xs text-indigo-400 font-bold uppercase tracking-widest">Celoso de Palma SL</p>
+        <h1 className="text-2xl font-bold text-white">Arume PRO</h1>
+        <p className="text-xs text-indigo-400 font-bold uppercase tracking-widest">Gestión Multi-Empresa</p>
         <p className="text-gray-400 text-sm text-center">Accede con tu cuenta de Google autorizada</p>
         <LoginButton onSuccess={setSession} />
       </div>

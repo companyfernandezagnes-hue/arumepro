@@ -11,8 +11,9 @@ import { motion, AnimatePresence } from 'motion/react';
 // SERVICIOS Y HOOKS
 import { supabase } from './services/supabase';
 import { useArumeData } from './hooks/useArumeData';
+import { EmpresaProvider, useEmpresa } from './hooks/useEmpresa';
 import { cn } from './lib/utils';
-import { AppData, FacturaExtended } from './types';
+import { AppData, FacturaExtended, EmpresaId } from './types';
 import { scanBase64 } from './services/aiProviders';
 import { DateUtil } from './services/engine';
 import { toast, ToastRenderer } from './hooks/useToast';
@@ -461,7 +462,16 @@ function DesktopTabButton<T extends string>({ item, active, onClick }: { item: D
  * 4. COMPONENTE APP PRINCIPAL
  * ======================================================= */
 export default function App() {
-  const { data: db, loading, saveData, setData, reloadData, isDirty, lastSaved } = useArumeData();
+  return (
+    <EmpresaProvider>
+      <AppContent />
+    </EmpresaProvider>
+  );
+}
+
+function AppContent() {
+  const { empresaActiva, setEmpresaActiva, empresaConfig, empresas, modulosPermitidos } = useEmpresa();
+  const { data: db, loading, saveData, setData, reloadData, isDirty, lastSaved } = useArumeData(empresaActiva);
   const dbRef = useRef<typeof db>(db);
   const [dataVersion, setDataVersion] = useState(0);
   useEffect(() => {
@@ -486,7 +496,7 @@ export default function App() {
     if (navigator.vibrate) navigator.vibrate(30); 
     setActiveTab(tab);
     window.location.hash = tab;
-    document.title = `${TAB_LABELS[tab]} · Arume Sake Bar`;
+    document.title = `${TAB_LABELS[tab]} · ${empresaConfig.nombre}`;
     setIsCmdOpen(false);
   }, []);
 
@@ -518,9 +528,9 @@ export default function App() {
   }, [loading, db]);
 
   useEffect(() => {
-    const channel = supabase.channel('arume-changes', { config: { broadcast: { self: false } } }).on('postgres_changes', { event: '*', schema: 'public', table: 'arume_data' }, () => { reloadData(); }).subscribe();
+    const channel = supabase.channel(`arume-changes-${empresaActiva}`, { config: { broadcast: { self: false } } }).on('postgres_changes', { event: '*', schema: 'public', table: 'arume_data', filter: `empresa_id=eq.${empresaActiva}` }, () => { reloadData(); }).subscribe();
     return () => { try { supabase.removeChannel(channel); } catch { /* noop */ } };
-  }, [reloadData]);
+  }, [reloadData, empresaActiva]);
 
   const REQUIRED: (keyof AppData)[] = ['banco','platos','recetas','ingredientes','ventas_menu','cierres','facturas','albaranes','gastos_fijos', 'socios', 'control_pagos', 'cierres_mensuales', 'activos'];
   
@@ -590,7 +600,7 @@ export default function App() {
       while (lastPayloadRef.current) {
         const payload = lastPayloadRef.current; lastPayloadRef.current = null;
         setData(payload);
-        localStorage.setItem('arume_backup_last', JSON.stringify(payload));
+        localStorage.setItem(`arume_backup_last_${empresaActiva}`, JSON.stringify(payload));
         // 🔒 SIEMPRE llamar a saveData. Internamente detecta el fallo de red y
         // pone el cambio en la cola offline (offlineQueue) para flushear al
         // reconectar. ANTES saltábamos esto en isOffline → el cambio quedaba
@@ -677,52 +687,44 @@ export default function App() {
         if (e.key === '2') { e.preventDefault(); handleTabChange('diario'); }
         if (e.key === '3') { e.preventDefault(); handleTabChange('compras'); } 
         if (e.key === '4') { e.preventDefault(); handleTabChange('banco'); }
-        if (e.key === '5') { e.preventDefault(); handleTabChange('marketing'); } 
+        if (e.key === '5') { e.preventDefault(); handleTabChange('informes'); }
       }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [handleTabChange]);
 
-  const navItems = useMemo<DockItemDef<TabKey>[]>(() => ([
-    // 📊 INICIO
-    { key: 'dashboard',   label: 'Dash',       icon: LayoutDashboard, group: 'inicio', shortcut: '⌘1' },
-    { key: 'ia',          label: 'IA',          icon: Sparkles,        group: 'inicio' },
-    // 📥 COMPRAS (entradas, albaranes, facturas, proveedores)
-    { key: 'importador',  label: 'Subir',       icon: Import,          group: 'compras' },
-    { key: 'compras',     label: 'Facturas',    icon: Receipt,         group: 'compras', shortcut: '⌘3' },
-    { key: 'proveedores', label: 'Proveed.',    icon: Users,           group: 'compras' },
-    // 💰 VENTAS (caja, menús, presupuestos)
-    { key: 'diario',      label: 'Caja',        icon: Wallet,          group: 'ventas',  shortcut: '⌘2' },
-    { key: 'menus',       label: 'Menús',       icon: ChefHat,         group: 'ventas'  },
-    { key: 'presupuestos',label: 'Presuptos.',  icon: FileText,        group: 'ventas'  },
-    // 🏦 DINERO (banco, tesorería, liquidez, libros IVA, balance)
-    { key: 'banco',       label: 'Banco',       icon: Building2,       group: 'dinero',  shortcut: '⌘4' },
-    { key: 'tesoreria',   label: 'Tesorería',   icon: TrendingUp,      group: 'dinero'  },
-    { key: 'liquidez',    label: 'Liquidez',    icon: Scale,           group: 'dinero'  },
-    { key: 'librosiva',   label: 'Libros IVA',  icon: BookOpen,        group: 'dinero'  },
-    { key: 'balance',     label: 'Balance',     icon: Scale,           group: 'dinero'  },
-    // 👥 PERSONAL
-    { key: 'nominas',     label: 'Nóminas',     icon: Users,           group: 'personal' },
-    { key: 'fixed',       label: 'Fijos',       icon: Zap,             group: 'personal' },
-    // 📋 CIERRES & INFORMES
-    { key: 'cierre',      label: 'Cierre',      icon: Lock,            group: 'cierres'  },
-    { key: 'aeat',        label: 'AEAT',        icon: ShieldCheck,     group: 'cierres'  },
-    { key: 'informes',    label: 'Informes',    icon: PieChart,        group: 'cierres'  },
-    // 🛒 TIENDA (Shop + Stock)
-    { key: 'shop',        label: 'Tienda',      icon: ShoppingBag,     group: 'tienda'   },
-    { key: 'stock',       label: 'Stock',       icon: Package,         group: 'tienda'   },
-    // 📣 MARKETING
-    { key: 'marketing',   label: 'Marketing',   icon: Megaphone,       group: 'marketing', shortcut: '⌘5' },
-    // ⚙️ SISTEMA (agente, alertas)
-    { key: 'agente',         label: 'Agente',   icon: Bot,             group: 'sistema'  },
-    { key: 'notificaciones', label: 'Alertas',  icon: Bell,            group: 'sistema'  },
-  ]), []);
+  const navItems = useMemo<DockItemDef<TabKey>[]>(() => {
+    const all: DockItemDef<TabKey>[] = [
+      { key: 'dashboard',   label: 'Dash',       icon: LayoutDashboard, group: 'inicio', shortcut: '⌘1' },
+      { key: 'ia',          label: 'IA',          icon: Sparkles,        group: 'inicio' },
+      { key: 'importador',  label: 'Subir',       icon: Import,          group: 'compras' },
+      { key: 'compras',     label: 'Facturas',    icon: Receipt,         group: 'compras', shortcut: '⌘3' },
+      { key: 'proveedores', label: 'Proveed.',    icon: Users,           group: 'compras' },
+      { key: 'diario',      label: 'Caja',        icon: Wallet,          group: 'ventas',  shortcut: '⌘2' },
+      { key: 'menus',       label: 'Menús',       icon: ChefHat,         group: 'ventas'  },
+      { key: 'presupuestos',label: 'Presuptos.',  icon: FileText,        group: 'ventas'  },
+      { key: 'banco',       label: 'Banco',       icon: Building2,       group: 'dinero',  shortcut: '⌘4' },
+      { key: 'tesoreria',   label: 'Tesorería',   icon: TrendingUp,      group: 'dinero'  },
+      { key: 'liquidez',    label: 'Liquidez',    icon: Scale,           group: 'dinero'  },
+      { key: 'librosiva',   label: 'Libros IVA',  icon: BookOpen,        group: 'dinero'  },
+      { key: 'balance',     label: 'Balance',     icon: Scale,           group: 'dinero'  },
+      { key: 'nominas',     label: 'Nóminas',     icon: Users,           group: 'personal' },
+      { key: 'fixed',       label: 'Fijos',       icon: Zap,             group: 'personal' },
+      { key: 'cierre',      label: 'Cierre',      icon: Lock,            group: 'cierres'  },
+      { key: 'aeat',        label: 'AEAT',        icon: ShieldCheck,     group: 'cierres'  },
+      { key: 'informes',    label: 'Informes',    icon: PieChart,        group: 'cierres'  },
+      { key: 'shop',        label: 'Tienda',      icon: ShoppingBag,     group: 'tienda'   },
+      { key: 'stock',       label: 'Stock',       icon: Package,         group: 'tienda'   },
+      { key: 'agente',         label: 'Agente',   icon: Bot,             group: 'sistema'  },
+      { key: 'notificaciones', label: 'Alertas',  icon: Bell,            group: 'sistema'  },
+    ];
+    return all.filter(item => modulosPermitidos.has(item.key));
+  }, [modulosPermitidos]);
 
   const cmdItems = useMemo<CmdItem<string>[]>(() => [
-    ...navItems.map(n => ({ key: n.key, label: TAB_LABELS[n.key as TabKey], group: n.group, icon: n.icon, shortcut: n.shortcut, badge: n.key === 'marketing' ? 'Nuevo' : undefined })),
-    // 🔒 Vista privada — solo accesible vía Cmd+K, no sale en el dock (invisible para gestoría)
-    { key: 'cuentas',         label: '🔒 Cuentas Familia (Privado)', icon: Lock,     shortcut: 'Privado' },
+    ...navItems.map(n => ({ key: n.key, label: TAB_LABELS[n.key as TabKey], group: n.group, icon: n.icon, shortcut: n.shortcut })),
+    { key: 'cuentas',         label: 'Cuentas Familia (Privado)', icon: Lock,     shortcut: 'Privado' },
     { key: 'action_scan',     label: 'Escanear Ticket o Factura',    icon: Camera,   isAction: true, shortcut: 'Enter' },
     { key: 'action_settings', label: 'Abrir Configuración (APIs)',   icon: Settings, isAction: true },
   ], [navItems]);
@@ -806,7 +808,7 @@ export default function App() {
     </div>
   );
 
-  const showCameraButton = !['marketing', 'informes', 'cierre'].includes(activeTab);
+  const showCameraButton = !['informes', 'cierre'].includes(activeTab);
 
   // ── RENDER PRINCIPAL ──────────────────────────────────────────────────────
   return (
@@ -818,10 +820,19 @@ export default function App() {
         {/* HEADER */}
         <header className="sticky top-0 z-[110] bg-white/90 backdrop-blur-xl border-b border-slate-200 px-4 py-2 flex justify-between items-center shadow-sm">
           <div className="flex items-center gap-3">
-            <h1 className="text-sm font-black text-slate-900 tracking-tight flex items-center gap-1.5">
-              ARUME <span className="bg-indigo-600 text-white px-1.5 py-0.5 rounded text-[8px] uppercase tracking-widest">SAKE BAR</span>
-            </h1>
-            <span className="hidden md:inline text-[8px] font-bold text-slate-400 uppercase tracking-widest">Celoso de Palma SL</span>
+            {/* Selector de empresa */}
+            <button
+              onClick={() => setEmpresaActiva(empresaActiva === 'arume' ? 'raco' : 'arume')}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border transition-all hover:shadow-sm active:scale-[0.97]"
+              style={{ borderColor: empresaConfig.color + '50', backgroundColor: empresaConfig.color + '0a' }}
+              title={`Cambiar a ${empresas.find(e => e.id !== empresaActiva)?.nombre}`}
+            >
+              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: empresaConfig.color }} />
+              <span className="text-[10px] font-black uppercase tracking-[0.12em]" style={{ color: empresaConfig.color }}>
+                {empresaConfig.nombreCorto}
+              </span>
+            </button>
+            <span className="hidden md:inline text-[8px] font-bold text-slate-400 uppercase tracking-widest">{empresaConfig.sociedad}</span>
             <div className="w-px h-4 bg-slate-200 hidden sm:block" />
             <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest hidden sm:block">{TAB_LABELS[activeTab]}</p>
           </div>

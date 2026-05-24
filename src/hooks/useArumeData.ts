@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { AppData } from '../types';
+import { AppData, EmpresaId } from '../types';
 import { fetchArumeData, saveArumeData } from '../services/supabase';
 
-// ─── Claves localStorage ──────────────────────────────────────────────────────
-const CACHE_KEY       = 'arume_data_cache';
-const CACHE_META_KEY  = 'arume_meta_cache';
-const SAVE_QUEUE_KEY  = 'arume_save_queue'; // cola de saves offline persistida
+// ─── Claves localStorage (scoped por empresa) ───────────────────────────────
+const cacheKey      = (eid: EmpresaId) => `arume_data_cache_${eid}`;
+const cacheMetaKey  = (eid: EmpresaId) => `arume_meta_cache_${eid}`;
+const saveQueueKey  = (eid: EmpresaId) => `arume_save_queue_${eid}`;
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 interface CacheMeta {
@@ -21,10 +21,10 @@ interface SaveResult {
 }
 
 // ─── Helpers de caché ─────────────────────────────────────────────────────────
-function readCache(): { data: AppData; meta: CacheMeta } | null {
+function readCache(eid: EmpresaId): { data: AppData; meta: CacheMeta } | null {
   try {
-    const raw  = localStorage.getItem(CACHE_KEY);
-    const meta = localStorage.getItem(CACHE_META_KEY);
+    const raw  = localStorage.getItem(cacheKey(eid));
+    const meta = localStorage.getItem(cacheMetaKey(eid));
     if (!raw) return null;
     return { data: JSON.parse(raw), meta: meta ? JSON.parse(meta) : {} };
   } catch {
@@ -32,75 +32,86 @@ function readCache(): { data: AppData; meta: CacheMeta } | null {
   }
 }
 
-function writeCache(data: AppData, meta: CacheMeta) {
+function writeCache(eid: EmpresaId, data: AppData, meta: CacheMeta) {
   try {
-    localStorage.setItem(CACHE_KEY,      JSON.stringify(data));
-    localStorage.setItem(CACHE_META_KEY, JSON.stringify(meta));
+    localStorage.setItem(cacheKey(eid),     JSON.stringify(data));
+    localStorage.setItem(cacheMetaKey(eid), JSON.stringify(meta));
   } catch {
     // localStorage lleno — no es crítico, la app sigue funcionando
   }
 }
 
-function clearCache() {
+function clearCache(eid: EmpresaId) {
   try {
-    localStorage.removeItem(CACHE_KEY);
-    localStorage.removeItem(CACHE_META_KEY);
-    localStorage.removeItem(SAVE_QUEUE_KEY);
-    localStorage.removeItem('arume_shadow_backup');
+    localStorage.removeItem(cacheKey(eid));
+    localStorage.removeItem(cacheMetaKey(eid));
+    localStorage.removeItem(saveQueueKey(eid));
+    localStorage.removeItem(`arume_shadow_backup_${eid}`);
   } catch {/* noop */}
 }
 
 // ─── Cola offline (persistida en localStorage) ────────────────────────────────
-// Si el usuario guarda offline, la cola se intenta vaciar al reconectar.
-function readOfflineQueue(): AppData | null {
+function readOfflineQueue(eid: EmpresaId): AppData | null {
   try {
-    const raw = localStorage.getItem(SAVE_QUEUE_KEY);
+    const raw = localStorage.getItem(saveQueueKey(eid));
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
 
-function writeOfflineQueue(data: AppData) {
-  try { localStorage.setItem(SAVE_QUEUE_KEY, JSON.stringify(data)); } catch {/* noop */}
+function writeOfflineQueue(eid: EmpresaId, data: AppData) {
+  try { localStorage.setItem(saveQueueKey(eid), JSON.stringify(data)); } catch {/* noop */}
 }
 
-function clearOfflineQueue() {
-  try { localStorage.removeItem(SAVE_QUEUE_KEY); } catch {/* noop */}
+function clearOfflineQueue(eid: EmpresaId) {
+  try { localStorage.removeItem(saveQueueKey(eid)); } catch {/* noop */}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Hook principal
 // ─────────────────────────────────────────────────────────────────────────────
-export function useArumeData() {
-  const cached       = useRef(readCache());
+export function useArumeData(empresaId: EmpresaId = 'arume') {
+  const empresaRef = useRef(empresaId);
+  const cached     = useRef(readCache(empresaId));
 
   const [data,     setData]     = useState<AppData | null>(cached.current?.data ?? null);
   const [meta,     setMeta]     = useState<CacheMeta | null>(cached.current?.meta ?? null);
-  // Si hay caché, la UI aparece al instante sin spinner
   const [loading,  setLoading]  = useState(!cached.current);
-  // Sincronización silenciosa en background
   const [syncing,  setSyncing]  = useState(false);
-  // true si el último save no llegó a Supabase (offline o error de red)
-  const [isDirty,  setIsDirty]  = useState(() => readOfflineQueue() !== null);
-  // Cuándo fue el último save exitoso
+  const [isDirty,  setIsDirty]  = useState(() => readOfflineQueue(empresaId) !== null);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
-  // Refs internos
   const dataRef      = useRef<AppData | null>(cached.current?.data ?? null);
   const metaRef      = useRef<CacheMeta | null>(cached.current?.meta ?? null);
   const isSavingRef  = useRef(false);
   const pendingRef   = useRef<AppData | null>(null);
 
+  // ── Cambio de empresa: resetear estado y recargar ─────────────────────────
+  useEffect(() => {
+    if (empresaRef.current === empresaId) return;
+    empresaRef.current = empresaId;
+
+    const newCache = readCache(empresaId);
+    setData(newCache?.data ?? null);
+    setMeta(newCache?.meta ?? null);
+    dataRef.current = newCache?.data ?? null;
+    metaRef.current = newCache?.meta ?? null;
+    cached.current  = newCache;
+    setIsDirty(readOfflineQueue(empresaId) !== null);
+    setLastSaved(null);
+
+    if (!newCache) setLoading(true);
+  }, [empresaId]);
+
   // ── loadData ───────────────────────────────────────────────────────────────
   const loadData = useCallback(async () => {
+    const eid = empresaRef.current;
     const hasCache = dataRef.current !== null;
     if (hasCache) setSyncing(true);
     else          setLoading(true);
 
     try {
-      const result = await fetchArumeData();
+      const result = await fetchArumeData(eid);
       if (result?.data) {
-        // ✅ FIX: comparación estricta con > en lugar de >= para no sobreescribir
-        // cambios locales más nuevos que aún no llegaron al servidor.
         const remoteVersion = result.meta?.version ?? 0;
         const localVersion  = metaRef.current?.version ?? 0;
 
@@ -109,35 +120,31 @@ export function useArumeData() {
           dataRef.current = result.data;
           setMeta(result.meta ?? null);
           metaRef.current = result.meta ?? null;
-          writeCache(result.data, result.meta ?? {});
+          writeCache(eid, result.data, result.meta ?? {});
         }
 
-        // Si teníamos datos sucios offline, intentamos flushear ahora
-        const offlineQueue = readOfflineQueue();
+        const offlineQueue = readOfflineQueue(eid);
         if (offlineQueue) {
-          console.info('[useArumeData] Reconexión detectada — flusheando cola offline...');
-          // No esperamos para no bloquear la UI
+          console.info(`[useArumeData:${eid}] Reconexión detectada — flusheando cola offline...`);
           saveData(offlineQueue).then(res => {
             if (res.ok) {
-              clearOfflineQueue();
+              clearOfflineQueue(eid);
               setIsDirty(false);
             }
           });
         }
       }
     } catch {
-      console.warn('[useArumeData] Sin conexión a Supabase — usando caché local.');
+      console.warn(`[useArumeData:${eid}] Sin conexión a Supabase — usando caché local.`);
     } finally {
       setLoading(false);
       setSyncing(false);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  // ↑ Deps vacías intencionadas: loadData es estable y no necesita meta en deps
-  //   porque accedemos a metaRef (mutable) en lugar de la closure.
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+  }, [loadData, empresaId]);
 
   // ── Flush automático al reconectar ────────────────────────────────────────
   useEffect(() => {
@@ -151,7 +158,7 @@ export function useArumeData() {
 
   // ── saveData ───────────────────────────────────────────────────────────────
   const saveData = useCallback(async (newData: AppData): Promise<SaveResult> => {
-    // Semáforo: encola si ya hay un save en curso
+    const eid = empresaRef.current;
     if (isSavingRef.current) {
       pendingRef.current = newData;
       return { ok: false };
@@ -159,20 +166,17 @@ export function useArumeData() {
     pendingRef.current = null;
     isSavingRef.current = true;
 
-    // Deep clone para que React detecte siempre el cambio
     const cloned   = JSON.parse(JSON.stringify(newData)) as AppData;
     const prevData = dataRef.current;
     const prevMeta = metaRef.current;
 
-    // Actualización optimista — la UI responde al instante
     setData(cloned);
     dataRef.current = cloned;
-
-    // Guardamos en caché local inmediatamente (funciona offline)
-    writeCache(cloned, metaRef.current ?? {});
+    writeCache(eid, cloned, metaRef.current ?? {});
 
     try {
       const res = await saveArumeData(cloned, {
+        empresaId: eid,
         lastKnownUpdatedAt: metaRef.current?.updated_at,
         lastKnownVersion:   metaRef.current?.version,
       });
@@ -180,45 +184,39 @@ export function useArumeData() {
       if (res.ok && res.newMeta) {
         setMeta(res.newMeta);
         metaRef.current = res.newMeta;
-        writeCache(cloned, res.newMeta);
-        clearOfflineQueue();
+        writeCache(eid, cloned, res.newMeta);
+        clearOfflineQueue(eid);
         setIsDirty(false);
         setLastSaved(new Date());
         return { ok: true };
       }
 
       if (res.conflict) {
-        // Otro dispositivo guardó primero — recargamos del servidor
-        console.warn('[useArumeData] Conflicto de versiones — recargando del servidor...');
+        console.warn(`[useArumeData:${eid}] Conflicto de versiones — recargando del servidor...`);
         await loadData();
         return { ok: false, conflict: true };
       }
 
-      // Fallo de red / Supabase caído — guardamos en cola offline
-      writeOfflineQueue(cloned);
+      writeOfflineQueue(eid, cloned);
       setIsDirty(true);
       return { ok: false, offline: true };
 
     } catch {
-      // Rollback visual + cola offline
       setData(prevData);
       dataRef.current = prevData;
-      writeCache(prevData ?? ({} as AppData), prevMeta ?? {});
-      writeOfflineQueue(cloned);
+      writeCache(eid, prevData ?? ({} as AppData), prevMeta ?? {});
+      writeOfflineQueue(eid, cloned);
       setIsDirty(true);
       return { ok: false, offline: true };
 
     } finally {
       isSavingRef.current = false;
-      // Flush del pending encola si llegó mientras guardábamos
       const pending = pendingRef.current;
       if (pending) { pendingRef.current = null; saveData(pending); }
     }
   }, [loadData]);
 
-  // ── patchData — helper para actualizaciones parciales ─────────────────────
-  // Uso: await patchData({ facturas: [...nuevasFacturas] })
-  // Hace deep-merge con los datos actuales sin tener que leer data manualmente.
+  // ── patchData ─────────────────────────────────────────────────────────────
   const patchData = useCallback(async (
     partial: Partial<AppData>
   ): Promise<SaveResult> => {
@@ -228,10 +226,9 @@ export function useArumeData() {
     return saveData(merged);
   }, [saveData]);
 
-  // ── resetCache — limpia caché local y recarga del servidor ─────────────────
-  // Útil cuando la app va lenta o tiene datos corruptos.
+  // ── resetCache ────────────────────────────────────────────────────────────
   const resetCache = useCallback(async () => {
-    clearCache();
+    clearCache(empresaRef.current);
     setData(null);
     dataRef.current  = null;
     metaRef.current  = null;
@@ -240,45 +237,43 @@ export function useArumeData() {
     await loadData();
   }, [loadData]);
 
-  // ── exportBackup — descarga el JSON completo como fichero ─────────────────
+  // ── exportBackup ──────────────────────────────────────────────────────────
   const exportBackup = useCallback(() => {
     const current = dataRef.current;
     if (!current) return;
-    const payload  = JSON.stringify({ version: 2, data: current, exportedAt: new Date().toISOString() }, null, 2);
+    const eid = empresaRef.current;
+    const payload  = JSON.stringify({ version: 2, empresa: eid, data: current, exportedAt: new Date().toISOString() }, null, 2);
     const blob     = new Blob([payload], { type: 'application/json' });
     const url      = URL.createObjectURL(blob);
     const a        = document.createElement('a');
     const ts       = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     a.href         = url;
-    a.download     = `Arume_Backup_${ts}.json`;
+    a.download     = `${eid}_Backup_${ts}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }, []);
 
-  // ── getCacheSize — tamaño aproximado de la caché en KB ────────────────────
+  // ── getCacheSize ──────────────────────────────────────────────────────────
   const getCacheSize = useCallback((): string => {
     try {
-      const raw = localStorage.getItem(CACHE_KEY) || '';
+      const raw = localStorage.getItem(cacheKey(empresaRef.current)) || '';
       const kb  = (new Blob([raw]).size / 1024).toFixed(1);
       return `${kb} KB`;
     } catch { return '—'; }
   }, []);
 
   return {
-    // Estado principal
     data,
     loading,
     syncing,
-    isDirty,       // true si hay cambios pendientes de sincronizar con Supabase
-    lastSaved,     // Date | null — cuándo fue el último save exitoso
-
-    // Acciones
-    saveData,      // saveData(fullData) → SaveResult
-    patchData,     // patchData({ facturas: [...] }) → SaveResult — merge parcial
+    isDirty,
+    lastSaved,
+    saveData,
+    patchData,
     reloadData: loadData,
-    resetCache,    // limpia localStorage y recarga del servidor
-    exportBackup,  // descarga el JSON completo como fichero
-    setData,       // escape hatch para updates locales sin guardar
-    getCacheSize,  // "124.3 KB" — útil en SettingsModal
+    resetCache,
+    exportBackup,
+    setData,
+    getCacheSize,
   };
 }

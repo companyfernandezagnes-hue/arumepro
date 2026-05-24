@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { AppData, EmailDraft } from '../types';
+import { AppData, EmailDraft, EmpresaId } from '../types';
 
 // SEGURO: Las credenciales vienen de variables de entorno, nunca del codigo fuente.
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
@@ -134,23 +134,24 @@ const unwrapData = (rawData: any) => {
         return enforceSchema(cleanData);
 };
 
-export async function fetchArumeData(retries = 3): Promise<{ data: AppData | null; meta?: { updated_at?: string; version?: number } }> {
+export async function fetchArumeData(empresaId: EmpresaId = 'arume', retries = 3): Promise<{ data: AppData | null; meta?: { updated_at?: string; version?: number } }> {
+        const shadowKey = `arume_shadow_backup_${empresaId}`;
         try {
                     const exec = async () => {
                                     const { data, error } = await supabase
                                         .from('arume_data')
                                         .select('id, data, updated_at, version')
-                                        .eq('id', 1)
+                                        .eq('empresa_id', empresaId)
                                         .single();
                                     if (error) throw error;
                                     const sanitizedData = unwrapData(data?.data);
-                                    try { localStorage.setItem('arume_shadow_backup', JSON.stringify(sanitizedData)); } catch (e) {}
+                                    try { localStorage.setItem(shadowKey, JSON.stringify(sanitizedData)); } catch (e) {}
                                     return { data: sanitizedData, meta: { updated_at: data?.updated_at, version: data?.version } };
                     };
                     return await withRetries(() => withTimeout(exec()), { retries });
         } catch (error: any) {
                     try {
-                                    const shadow = localStorage.getItem('arume_shadow_backup');
+                                    const shadow = localStorage.getItem(shadowKey);
                                     if (shadow) return { data: unwrapData(JSON.parse(shadow)) };
                     } catch (e) {}
                     return { data: null };
@@ -159,21 +160,22 @@ export async function fetchArumeData(retries = 3): Promise<{ data: AppData | nul
 
                                         export async function saveArumeData(
                                                 data: AppData,
-                                                opts?: { lastKnownUpdatedAt?: string; lastKnownVersion?: number; silent?: boolean; retries?: number }
+                                                opts?: { empresaId?: EmpresaId; lastKnownUpdatedAt?: string; lastKnownVersion?: number; silent?: boolean; retries?: number }
                                             ): Promise<{ ok: boolean; conflict?: boolean; error?: string; newMeta?: { updated_at?: string; version?: number } }> {
-                                                const { lastKnownUpdatedAt, lastKnownVersion, silent = false, retries = 3 } = (opts || {});
+                                                const { empresaId = 'arume', lastKnownUpdatedAt, lastKnownVersion, silent = false, retries = 3 } = (opts || {});
+                                                const shadowKey = `arume_shadow_backup_${empresaId}`;
                                                 try {
                                                             const cleanData = unwrapData(data);
                                                             const payload: AppData = { ...cleanData, lastSync: Date.now() };
 
-                                                    try { localStorage.setItem('arume_shadow_backup', JSON.stringify(payload)); } catch (e) {}
+                                                    try { localStorage.setItem(shadowKey, JSON.stringify(payload)); } catch (e) {}
 
                                                     // Deteccion de conflictos via version (evita un fetch extra si tenemos version)
                                                     if (lastKnownVersion !== undefined) {
                                                                     const { data: curr, error: e } = await supabase
                                                                         .from('arume_data')
                                                                         .select('updated_at, version')
-                                                                        .eq('id', 1)
+                                                                        .eq('empresa_id', empresaId)
                                                                         .single();
                                                                     if (!e && curr) {
                                                                                         const remoteVersion = curr.version ?? 0;
@@ -185,7 +187,7 @@ export async function fetchArumeData(retries = 3): Promise<{ data: AppData | nul
                                                     } else if (lastKnownUpdatedAt) {
                                                                     // Fallback: comparar por updated_at
                                                                 const readMeta = async () => {
-                                                                                    const { data: curr, error: e } = await supabase.from('arume_data').select('updated_at, version').eq('id', 1).single();
+                                                                                    const { data: curr, error: e } = await supabase.from('arume_data').select('updated_at, version').eq('empresa_id', empresaId).single();
                                                                                     if (e) throw e;
                                                                                     return curr;
                                                                 };
@@ -213,7 +215,8 @@ export async function fetchArumeData(retries = 3): Promise<{ data: AppData | nul
                                                     const execUpsert = async () => {
                                                                     const { data: up, error } = await supabase
                                                                         .from('arume_data')
-                                                                        .upsert({ id: 1, data: payload }, { onConflict: 'id' })
+                                                                        .update({ data: payload })
+                                                                        .eq('empresa_id', empresaId)
                                                                         .select('updated_at, version')
                                                                         .single();
                                                                     if (error) throw error;

@@ -21,6 +21,7 @@ import * as XLSX from 'xlsx';
 import { cn } from '../lib/utils';
 import { Num, DateUtil } from '../services/engine';
 import { AppData } from '../types';
+import { useEmpresa } from '../hooks/useEmpresa';
 import { toast } from '../hooks/useToast';
 
 /* ── Helpers IVA ─────────────────────────────────────────────── */
@@ -80,6 +81,7 @@ interface RegistroIVA {
 
 /* ══════════════════════════════════════════════════════════════ */
 export const LibrosIVAView: React.FC<{ data: AppData }> = ({ data }) => {
+  const { empresaConfig } = useEmpresa();
   const now = new Date();
   const [year, setYear]         = useState(now.getFullYear());
   const [quarter, setQuarter]   = useState<number | null>(null); // null = todo el año
@@ -344,7 +346,7 @@ export const LibrosIVAView: React.FC<{ data: AppData }> = ({ data }) => {
             <BookOpen className="w-7 h-7 text-[color:var(--arume-gold)]" />
             Libros de IVA
           </h2>
-          <p className="text-sm text-white/60 mt-1">Registro oficial de facturas · Celoso de Palma SL</p>
+          <p className="text-sm text-white/60 mt-1">Registro oficial de facturas · {empresaConfig.sociedad}</p>
 
           {/* Controles periodo */}
           <div className="mt-4 flex flex-wrap items-center gap-3">
