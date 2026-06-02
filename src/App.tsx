@@ -742,7 +742,7 @@ function AppContent() {
       case 'dashboard':    return <S><DashboardView data={dbRef.current} onNavigate={handleTabChange} onSave={handleSave} /></S>;
       case 'ia':           return <S><AIConsultant data={dbRef.current} /></S>;
       case 'diario':       return <S><CashView {...props} /></S>;
-      case 'importador':   return <S><ImportView data={dbRef.current} onSave={handleSave} onNavigate={(tab) => handleTabChange(tab as TabKey)} /></S>;
+      case 'importador':   return <S><div>{ /* ImportView rendered persistently below */ }</div></S>;
       case 'compras':
       case 'facturas':
       case 'albaranes':    return <S><ComprasDashboard {...props} /></S>;
@@ -890,6 +890,15 @@ function AppContent() {
               </ErrorBoundary>
             </motion.div>
           </AnimatePresence>
+
+          {/* ImportView PERSISTENTE — se mantiene montado para no perder la cola OCR */}
+          <div style={{ display: activeTab === 'importador' ? 'block' : 'none' }}>
+            <div className="p-2 md:p-6 w-full">
+              <React.Suspense fallback={<div className="flex items-center justify-center p-12"><div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"/></div>}>
+                <ImportView data={dbRef.current} onSave={handleSave} onNavigate={(tab) => handleTabChange(tab as TabKey)} />
+              </React.Suspense>
+            </div>
+          </div>
         </main>
 
         {/* BOTÓN CÁMARA (móvil) */}
