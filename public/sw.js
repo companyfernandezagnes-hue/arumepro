@@ -36,8 +36,40 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// ── Fetch: network-first with cache fallback ──
+// ── Fetch: network-first with cache fallback + Share Target ──
 self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+
+  // 📱 SHARE TARGET: interceptar POST de "Compartir desde WhatsApp"
+  // Cuando el usuario comparte fotos desde WhatsApp → la PWA las recibe aquí.
+  if (event.request.method === 'POST' && url.hash.includes('importador')) {
+    event.respondWith(
+      (async () => {
+        const formData = await event.request.formData();
+        const files = formData.getAll('media');
+
+        // Guardar archivos compartidos en un cache temporal para que la app los recoja
+        const cache = await caches.open('arume-shared-files');
+        const sharedFiles = [];
+        for (const file of files) {
+          if (file instanceof File) {
+            const name = file.name || `shared-${Date.now()}.jpg`;
+            const response = new Response(file, {
+              headers: { 'Content-Type': file.type, 'X-Filename': name },
+            });
+            await cache.put(`/shared/${name}`, response);
+            sharedFiles.push(name);
+          }
+        }
+
+        // Redirigir a la app con parámetro indicando que hay archivos compartidos
+        const redirectUrl = `${BASE}#importador?shared=${sharedFiles.length}`;
+        return Response.redirect(redirectUrl, 303);
+      })()
+    );
+    return;
+  }
+
   // Skip non-GET and chrome-extension requests
   if (event.request.method !== 'GET') return;
   if (event.request.url.startsWith('chrome-extension://')) return;

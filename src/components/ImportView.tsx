@@ -336,6 +336,44 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
   const pauseRef = useRef(false);
   const abortRef = useRef(false);
 
+  // 📱 SHARE TARGET: recoger fotos compartidas desde WhatsApp (móvil)
+  // El Service Worker las guarda en cache 'arume-shared-files' y redirige aquí.
+  useEffect(() => {
+    const pickUpSharedFiles = async () => {
+      try {
+        const cache = await caches.open('arume-shared-files');
+        const keys = await cache.keys();
+        if (keys.length === 0) return;
+
+        const files: File[] = [];
+        for (const req of keys) {
+          const res = await cache.match(req);
+          if (!res) continue;
+          const blob = await res.blob();
+          const name = res.headers.get('X-Filename') || req.url.split('/').pop() || 'shared.jpg';
+          files.push(new File([blob], name, { type: blob.type }));
+        }
+        // Limpiar cache de archivos compartidos
+        await caches.delete('arume-shared-files');
+
+        if (files.length > 0) {
+          toast.success(`📱 ${files.length} foto(s) recibida(s) desde WhatsApp`);
+          setImportMode('ia_auto');
+          // Pequeño delay para que el modo se active
+          setTimeout(() => processFilesArray(files), 300);
+        }
+      } catch {
+        // Cache API no disponible o error — ignorar silenciosamente
+      }
+    };
+
+    // Comprobar al montar y cuando cambia el hash (por si viene de share_target)
+    pickUpSharedFiles();
+    const onHash = () => { if (window.location.hash.includes('shared=')) pickUpSharedFiles(); };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 🐛 FIX: el resolve ahora devuelve también el result editado para que
   // runQueue lo pueda persistir en su variable local updatedQueue antes
   // del siguiente setQueue (que sobreescribiría la edición).

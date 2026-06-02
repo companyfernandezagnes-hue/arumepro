@@ -1,0 +1,38 @@
+{
+  "name": "Arume PRO — Gestión Multi-Empresa",
+  "short_name": "Arume PRO",
+  "description": "ERP hostelería: albaranes, facturas, banco, cierres",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0a",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='128' fill='%234f46e5'/%3E%3Ctext x='256' y='340' text-anchor='middle' font-size='280' font-weight='bold' fill='white' font-family='system-ui'%3EA%3C/text%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "share_target": {
+    "action": "./#importador",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "name",
+      "text": "description",
+      "url": "link",
+      "files": [
+        {
+          "name": "media",
+          "accept": ["image/*", "application/pdf", "application/zip"]
+        }
+      ]
+    }
+  },
+  "categories": ["business", "finance"],
+  "lang": "es",
+  "dir": "ltr"
+}
