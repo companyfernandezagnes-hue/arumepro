@@ -3,7 +3,7 @@ import {
   Upload, FileText, CheckCircle2, Database, Building2,
   Sparkles, Loader2, Receipt, AlertTriangle, X, Edit3, Grid, ListPlus, Trash2, ClipboardPaste, CalendarClock,
   ShieldCheck, Zap, Copy, RefreshCw, Play, Pause, SkipForward, AlertCircle, Clock, ChevronDown, ChevronUp,
-  KeyRound, Eye, EyeOff, PlusCircle, Check, Plus, Minus, ChevronLeft, ChevronRight, Truck
+  KeyRound, Eye, EyeOff, PlusCircle, Check, Plus, Minus, ChevronLeft, ChevronRight, Truck, MessageCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
@@ -14,6 +14,7 @@ import { useColumnDetector } from '../hooks/useColumnDetector';
 import { toast } from '../hooks/useToast';
 import { confirm } from '../hooks/useConfirm';
 import { scanDocument, scanDocumentMultiPage, getActiveVisionProvider } from '../services/aiProviders';
+import JSZip from 'jszip';
 
 const MONTHS_FULL = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -25,7 +26,7 @@ interface ImportViewProps {
   onSave: (newData: AppData) => Promise<void>;
   onNavigate: (tab: string) => void;
 }
-export type ImportMode = 'tpv' | 'albaranes_excel' | 'ia_auto' | 'banco_excel';
+export type ImportMode = 'tpv' | 'albaranes_excel' | 'ia_auto' | 'banco_excel' | 'whatsapp';
 
 /**
  * Detecta el socio actual a partir de la sesión Google guardada por AuthScreen.
@@ -276,23 +277,28 @@ const classifyError=(msg:string):{retryable:boolean;friendly:string;waitMs?:numb
 const CURRENT_YEAR_FOR_PROMPT = new Date().getFullYear();
 const TODAY_ISO_FOR_PROMPT = new Date().toLocaleDateString('sv-SE');
 
-const PROMPT_OMNI_IA = `Eres un Auditor Contable Experto español. Analiza el documento y extrae los datos con precisión milimétrica.
+const PROMPT_OMNI_IA = `Eres un Auditor Contable EXPERTO español especializado en hostelería. Lee el documento DOS VECES: primero la estructura, luego las cifras exactas.
 
-CONTEXTO DE FECHA ACTUAL: Hoy es ${TODAY_ISO_FOR_PROMPT} (año ${CURRENT_YEAR_FOR_PROMPT}).
+CONTEXTO: Restaurante Arume Sake Bar (Palma de Mallorca). Hoy es ${TODAY_ISO_FOR_PROMPT} (año ${CURRENT_YEAR_FOR_PROMPT}).
 
 REGLA FECHAS (CRÍTICO):
-  - Devuelve siempre en formato YYYY-MM-DD.
-  - El año DEBE ser ${CURRENT_YEAR_FOR_PROMPT - 1}, ${CURRENT_YEAR_FOR_PROMPT} o ${CURRENT_YEAR_FOR_PROMPT + 1}. NUNCA pongas años antiguos como 2020, 2019, etc.
-  - Si ves día/mes sin año (ej: "12/04"), usa año ${CURRENT_YEAR_FOR_PROMPT}.
-  - Si ves una fecha escrita a mano que no estás 100% seguro de qué año es, usa ${CURRENT_YEAR_FOR_PROMPT}.
-  - Si no hay fecha visible en absoluto, usa ${TODAY_ISO_FOR_PROMPT}.
-  - Si la fecha está en formato americano (MM/DD/YYYY), conviértela correctamente.
+  - Formato OBLIGATORIO: YYYY-MM-DD.
+  - El año DEBE ser ${CURRENT_YEAR_FOR_PROMPT - 1}, ${CURRENT_YEAR_FOR_PROMPT} o ${CURRENT_YEAR_FOR_PROMPT + 1}. NUNCA años antiguos (2020, 2019...).
+  - Si ves día/mes sin año (ej: "12/04"), usa ${CURRENT_YEAR_FOR_PROMPT}.
+  - Si fecha escrita a mano poco clara, usa ${CURRENT_YEAR_FOR_PROMPT}.
+  - Si no hay fecha visible → usa ${TODAY_ISO_FOR_PROMPT}.
+  - España usa DD/MM/YYYY (NO MM/DD/YYYY).
 REGLA TIPO:
-  - "factura" si tiene número de factura oficial (F-XXX, FAC-XXX, etc.)
-  - "ticket_simplificado" si es un ticket de caja o recibo sin NIF del receptor
-  - "albaran" si es un albarán o nota de entrega sin IVA separado o con IVA incluido en precio
-REGLA PAGO: Busca "Pagado", "Efectivo", "Tarjeta", "Visa", "Mastercard", "Transferencia", "Recibí", "Cobrado".
-REGLA IMPORTES: Sin símbolo €. Usa punto decimal. (Ej: 1500.50)
+  - "factura" si tiene número de factura oficial (F-XXX, FAC-XXX, FRA-, etc.) y desglose IVA
+  - "ticket_simplificado" si es ticket de caja, recibo TPV, o documento sin NIF del receptor
+  - "albaran" si es albarán o nota de entrega
+REGLA PROVEEDOR:
+  - EMISOR = quien VENDE. Busca nombre + CIF en la cabecera.
+  - NUNCA devuelvas "Arume", "Agnès Company", "Celoso de Palma", "Sake Bar" como proveedor — son el RECEPTOR.
+REGLA PAGO: Busca "Pagado", "Efectivo", "Tarjeta", "Visa", "Mastercard", "Transferencia", "Recibí", "Cobrado", "Domiciliado".
+REGLA IMPORTES: Sin símbolo €. Usa punto decimal (1500.50, no 1.500,50).
+REGLA IVA: En hostelería conviven 4% (pan, leche, fruta), 10% (carne, pescado, alimentación general), 21% (alcohol, no alimentario). Asigna el rate correcto a cada línea.
+REGLA IRPF: Si hay retención IRPF (profesionales), extráela como valor negativo en "irpf".
 
 Devuelve SOLO un JSON estricto sin comentarios ni markdown:
 {
@@ -304,6 +310,7 @@ Devuelve SOLO un JSON estricto sin comentarios ni markdown:
   "total": 0.00,
   "base": 0.00,
   "iva": 0.00,
+  "irpf": 0.00,
   "metodo_pago": "efectivo|tarjeta|banco|pendiente",
   "referencias_albaranes": [],
   "lineas": [
@@ -722,8 +729,127 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     if (!isRunning) runQueue(toProcess);
   }, [queue, runQueue, isRunning]);
 
+  // ─── WhatsApp ZIP extraction ─────────────────────────────────────────────────
+  // Extrae imágenes y PDFs de un export de WhatsApp (ZIP con _chat.txt + multimedia).
+  // Parsea el chat para dar contexto (proveedor, fecha) y alimenta la cola IA.
+  const [whatsappStatus, setWhatsappStatus] = useState<string | null>(null);
+  const [whatsappChatContext, setWhatsappChatContext] = useState<string | null>(null);
+
+  const extractWhatsAppZip = async (zipFile: File) => {
+    setWhatsappStatus('Leyendo ZIP…');
+    try {
+      const zip = await JSZip.loadAsync(zipFile);
+      const imageFiles: File[] = [];
+      let chatText = '';
+
+      // 1. Recorrer todos los archivos del ZIP
+      const entries = Object.values(zip.files).filter(f => !f.dir);
+      setWhatsappStatus(`ZIP abierto: ${entries.length} archivos encontrados…`);
+
+      for (const entry of entries) {
+        const name = entry.name.toLowerCase();
+
+        // Extraer texto del chat para contexto
+        if (name.endsWith('.txt') && (name.includes('chat') || name.includes('whatsapp') || name === '_chat.txt')) {
+          chatText = await entry.async('string');
+          continue;
+        }
+
+        // Extraer imágenes y PDFs
+        const isImg = /\.(jpe?g|png|webp|heic)$/i.test(name);
+        const isPdf = name.endsWith('.pdf');
+        if (!isImg && !isPdf) continue;
+
+        // Saltar thumbnails y archivos muy pequeños
+        if (name.includes('thumb') || name.includes('sticker')) continue;
+
+        const blob = await entry.async('blob');
+        // Saltar archivos < 10KB (stickers, iconos)
+        if (blob.size < 10_000) continue;
+
+        const mimeType = isPdf ? 'application/pdf'
+          : name.endsWith('.png') ? 'image/png'
+          : name.endsWith('.webp') ? 'image/webp'
+          : 'image/jpeg';
+
+        const file = new File([blob], entry.name.split('/').pop() || `wa-${imageFiles.length}.jpg`, { type: mimeType });
+        imageFiles.push(file);
+      }
+
+      if (imageFiles.length === 0) {
+        setWhatsappStatus(null);
+        toast.warning('⚠️ No se encontraron imágenes ni PDFs en el ZIP de WhatsApp.');
+        return;
+      }
+
+      // 2. Parsear chat para contexto (nombre del contacto/grupo)
+      let contactName = '';
+      if (chatText) {
+        // Formato WhatsApp: "[DD/MM/YYYY, HH:MM:SS] Nombre: mensaje" o "DD/MM/YYYY, HH:MM - Nombre: mensaje"
+        const lines = chatText.split('\n').filter(l => l.trim());
+        const senderCounts: Record<string, number> = {};
+        for (const line of lines) {
+          // Intentar extraer remitente
+          const match = line.match(/(?:\[?\d{1,2}\/\d{1,2}\/\d{2,4}[,\s]+\d{1,2}:\d{2}(?::\d{2})?\]?\s*[-–]\s*)(.+?):\s/);
+          if (match) {
+            const sender = match[1].trim();
+            // Filtrar mensajes de sistema
+            if (!/cifrado|creó|añadió|eliminó|cambió|seguridad|grupo|admin/i.test(sender)) {
+              senderCounts[sender] = (senderCounts[sender] || 0) + 1;
+            }
+          }
+        }
+        // El contacto que NO es Agnes/Arume es probablemente el proveedor
+        const senders = Object.entries(senderCounts).sort((a, b) => b[1] - a[1]);
+        const nonSelf = senders.filter(([name]) =>
+          !/agnes|agnès|arume|sake|company|celoso/i.test(name)
+        );
+        if (nonSelf.length > 0) contactName = nonSelf[0][0];
+
+        setWhatsappChatContext(contactName
+          ? `💬 Chat con: ${contactName} · ${lines.length} mensajes · ${imageFiles.length} documentos`
+          : `💬 ${lines.length} mensajes · ${imageFiles.length} documentos`
+        );
+      }
+
+      setWhatsappStatus(`✅ ${imageFiles.length} documentos extraídos${contactName ? ` de chat con ${contactName}` : ''}. Procesando con IA…`);
+
+      // 3. Cambiar a modo IA y alimentar la cola
+      setImportMode('ia_auto');
+      // Pequeño delay para que el cambio de modo se renderice
+      await new Promise(r => setTimeout(r, 100));
+
+      const newItems = addFilesToQueue(imageFiles);
+      toast.success(`📱 ${imageFiles.length} documentos de WhatsApp extraídos y añadidos a la cola.`);
+
+      // Auto-iniciar procesamiento
+      if (!isRunning) {
+        const allItems = [...queue, ...newItems];
+        setTimeout(() => runQueue(allItems), 200);
+      }
+
+      // Limpiar status después de 5s
+      setTimeout(() => { setWhatsappStatus(null); }, 5000);
+
+    } catch (err: any) {
+      console.error('[WhatsApp ZIP]', err);
+      setWhatsappStatus(null);
+      toast.error(`❌ Error leyendo ZIP: ${err?.message || 'formato no válido'}`);
+    }
+  };
+
+  const whatsappInputRef = useRef<HTMLInputElement>(null);
+
   const processFilesArray = async (files: File[]) => {
     if (files.length === 0) return;
+
+    // WhatsApp mode: acepta ZIP
+    if (importMode === 'whatsapp') {
+      const zipFile = files.find(f => f.name.toLowerCase().endsWith('.zip') || f.type === 'application/zip');
+      if (!zipFile) return void toast.warning('⚠️ Sube el archivo .zip exportado de WhatsApp.');
+      return extractWhatsAppZip(zipFile);
+    }
+
     if (importMode === 'ia_auto') {
       const invalid = files.filter(f => !f.type.includes('pdf') && !f.type.startsWith('image/'));
       if (invalid.length > 0) return void toast.warning(`⚠️ ${invalid.length} archivo(s) ignorados — solo PDF o Imágenes (JPG/PNG).`);
@@ -1047,11 +1173,12 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden p-6 md:p-8">
 
         {/* Selector de modo */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-          <ModuleButton active={importMode === 'ia_auto'}         onClick={() => { setImportMode('ia_auto');         setProcessedData(null); }} icon={Sparkles}  title="IA Batch (Lotes)"  subtitle="Facturas/Albaranes" color="indigo"  />
-          <ModuleButton active={importMode === 'banco_excel'}     onClick={() => { setImportMode('banco_excel');     setProcessedData(null); }} icon={Building2}  title="Banco CSV"          subtitle="Extracto"           color="blue"    />
-          <ModuleButton active={importMode === 'tpv'}             onClick={() => { setImportMode('tpv');             setProcessedData(null); }} icon={Grid}       title="TPV Madis"          subtitle="Excel Cajas"        color="amber"   />
-          <ModuleButton active={importMode === 'albaranes_excel'} onClick={() => { setImportMode('albaranes_excel'); setProcessedData(null); }} icon={Truck}      title="Albaranes Excel"    subtitle="Madis / CSV"        color="emerald" />
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-8">
+          <ModuleButton active={importMode === 'ia_auto'}         onClick={() => { setImportMode('ia_auto');         setProcessedData(null); }} icon={Sparkles}       title="IA Batch (Lotes)"  subtitle="Facturas/Albaranes" color="indigo"  />
+          <ModuleButton active={importMode === 'whatsapp'}        onClick={() => { setImportMode('whatsapp');        setProcessedData(null); }} icon={MessageCircle}  title="WhatsApp"          subtitle="ZIP Export"          color="green"   />
+          <ModuleButton active={importMode === 'banco_excel'}     onClick={() => { setImportMode('banco_excel');     setProcessedData(null); }} icon={Building2}      title="Banco CSV"          subtitle="Extracto"           color="blue"    />
+          <ModuleButton active={importMode === 'tpv'}             onClick={() => { setImportMode('tpv');             setProcessedData(null); }} icon={Grid}           title="TPV Madis"          subtitle="Excel Cajas"        color="amber"   />
+          <ModuleButton active={importMode === 'albaranes_excel'} onClick={() => { setImportMode('albaranes_excel'); setProcessedData(null); }} icon={Truck}          title="Albaranes Excel"    subtitle="Madis / CSV"        color="emerald" />
         </div>
 
         {/* Zona IA */}
@@ -1215,8 +1342,58 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
           </div>
         )}
 
+        {/* Zona WhatsApp */}
+        {importMode === 'whatsapp' && (
+          <div className="space-y-4">
+            <div
+              className={cn('border-2 border-dashed rounded-2xl p-10 flex flex-col items-center justify-center transition-all cursor-pointer relative overflow-hidden',
+                isDragging ? 'border-green-500 bg-green-50/50 scale-[1.02]' : 'border-slate-200 bg-slate-50 hover:bg-slate-100')}
+              onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
+              onClick={() => whatsappInputRef.current?.click()}
+            >
+              <input type="file" ref={whatsappInputRef} onChange={(e) => {
+                const files = Array.from(e.target.files || []);
+                if (files.length > 0) processFilesArray(files);
+                e.target.value = '';
+              }} accept=".zip" className="hidden" />
+
+              <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center shadow-sm mb-4">
+                <MessageCircle className="w-10 h-10 text-green-600" />
+              </div>
+
+              <h3 className="text-xl font-black text-slate-700 text-center">
+                Arrastra el ZIP de WhatsApp aquí
+              </h3>
+              <p className="text-sm text-slate-500 font-medium mt-2 text-center max-w-md">
+                Exporta un chat de WhatsApp con tu proveedor <strong>incluyendo archivos multimedia</strong> y sube el .zip
+              </p>
+
+              <div className="mt-6 bg-green-50 border border-green-200 rounded-xl p-4 text-left max-w-sm">
+                <p className="text-xs font-black text-green-700 uppercase tracking-widest mb-2">Cómo exportar</p>
+                <ol className="text-xs text-green-800 space-y-1 list-decimal list-inside">
+                  <li>Abre el chat del proveedor en WhatsApp</li>
+                  <li>Toca <strong>⋮ → Más → Exportar chat</strong></li>
+                  <li>Selecciona <strong>"Incluir archivos multimedia"</strong></li>
+                  <li>Guárdalo y súbelo aquí</li>
+                </ol>
+              </div>
+
+              {whatsappStatus && (
+                <div className="mt-4 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-2">
+                  <p className="text-sm font-bold text-indigo-700">{whatsappStatus}</p>
+                </div>
+              )}
+              {whatsappChatContext && (
+                <div className="mt-2 bg-slate-100 rounded-xl px-4 py-2">
+                  <p className="text-xs font-bold text-slate-600">{whatsappChatContext}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Zona Excel */}
-        {importMode !== 'ia_auto' && (
+        {importMode !== 'ia_auto' && importMode !== 'whatsapp' && (
           <div>
             <div className={cn('border-2 border-dashed rounded-2xl p-12 flex flex-col items-center justify-center transition-all cursor-pointer relative overflow-hidden',
               isDragging ? 'border-indigo-500 bg-indigo-50/50 scale-[1.02]' : 'border-slate-200 bg-slate-50 hover:bg-slate-100')}
@@ -1948,6 +2125,7 @@ const QueueRow = ({ item, onSkip, onReview }: { item: QueueItem; onSkip: () => v
 const ModuleButton = ({ active, onClick, icon: Icon, title, subtitle, color }: any) => {
   const colors: any = {
     indigo:  active ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] border-indigo-600 shadow-md shadow-indigo-200'    : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50',
+    green:   active ? 'bg-green-600 text-white border-green-600 shadow-md shadow-green-200'        : 'bg-white text-slate-600 border-slate-200 hover:border-green-300 hover:bg-green-50',
     blue:    active ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-200'          : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:bg-blue-50',
     amber:   active ? 'bg-amber-500 text-white border-amber-500 shadow-md shadow-amber-200'       : 'bg-white text-slate-600 border-slate-200 hover:border-amber-300 hover:bg-amber-50',
     emerald: active ? 'bg-emerald-600 text-white border-emerald-600 shadow-md shadow-emerald-200' : 'bg-white text-slate-600 border-slate-200 hover:border-emerald-300 hover:bg-emerald-50',

@@ -829,7 +829,7 @@ REGLAS:
       <div className="flex flex-col gap-8">
 
         <section className="w-full">
-          <AlbaranesList albaranes={filteredForList} searchQ={deferredSearch} selectedUnit={selectedUnit} businessUnits={BUSINESS_UNITS} onOpenEdit={setEditForm}/>
+          <AlbaranesList albaranes={filteredForList} searchQ={deferredSearch} selectedUnit={selectedUnit} businessUnits={BUSINESS_UNITS} onOpenEdit={setEditForm} onDelete={handleDelete}/>
         </section>
 
         <div className="w-full flex flex-col items-center opacity-30 my-2">

@@ -7,9 +7,9 @@
  * ║  proveedores de IA directamente.                                 ║
  * ║                                                                  ║
  * ║  Proveedores soportados (ORDEN de fallback):                     ║
- * ║   🟠 Z.AI     — solo imágenes (PRINCIPAL — gratis, GLM-5V)       ║
- * ║   🟣 Claude   — imágenes + PDFs (fallback 1 — Anthropic)         ║
- * ║   🔵 Gemini   — imágenes + PDFs (fallback 2)                     ║
+ * ║   🟠 Z.AI     — solo imágenes (PRINCIPAL — gratis, GLM-5V)      ║
+ * ║   🟣 Claude   — imágenes + PDFs (fallback 1 — máx. precisión)   ║
+ * ║   🔵 Gemini   — imágenes + PDFs (fallback 2 — multi-página)     ║
  * ║   🟢 Groq     — velocidad + Whisper (voz)                        ║
  * ║   🟪 Cerebras — texto ultrarrápido (~0.10$/M tokens)             ║
  * ║   🔷 DeepSeek — análisis largo (5M tokens gratis al registrarse) ║
@@ -71,11 +71,11 @@ const MODELS: Record<AIProvider, string> = {
 };
 
 const VISION_MODELS: Partial<Record<AIProvider, string>> = {
-  // Claude Sonnet 4.5 — visión + PDFs nativos. Preferido como primer proveedor
-  // por precisión OCR superior en facturas/tickets.
+  // Claude Sonnet 4.5 (pinned) — visión + PDFs nativos. PRINCIPAL: el más
+  // preciso para OCR de facturas/albaranes españoles con IVA mixto.
   claude:  'claude-sonnet-4-5',
   gemini:  'gemini-2.5-flash',
-  // Z.AI GLM-5V-Turbo — multimodal. Va al final de la cadena de fallback.
+  // Z.AI GLM-5V-Turbo — multimodal gratuito. BACKUP tras Claude y Gemini.
   // ATENCIÓN: el endpoint api.z.ai puede NO permitir CORS desde browser.
   // Si falla por preflight, el try/catch absorbe y se sigue al siguiente.
   zai:     'glm-5v-turbo',
@@ -325,10 +325,8 @@ export const scanDocument = async (
   const onlyGroq    = forceProvider === 'groq';
   const tryAll      = !forceProvider;
 
-  // 🟠 Z.AI GLM-5V PRIMERO — gratuito, OCR específico para documentos.
-  // Si el navegador bloquea por CORS o falla la red, el circuit breaker lo
-  // desactiva 30 min y el resto de la sesión va directo a Claude. Así NO
-  // se penaliza cada llamada con un preflight fallido.
+  // 🟠 Z.AI PRIMERO — gratuito, OCR optimizado para documentos.
+  // Si CORS falla, circuit breaker 30 min → cae a Claude automáticamente.
   const zaiKey = keys.zai();
   if (zaiKey && isImage && (onlyZai || tryAll) && !isCircuitOpen('zai')) {
     try {
@@ -336,10 +334,6 @@ export const scanDocument = async (
     } catch (e: any) {
       const msg = e?.message || String(e);
       console.warn('[aiProviders] Z.AI falló en scanDocument:', msg);
-      // Errores típicos cuando el navegador bloquea CORS: "Failed to fetch",
-      // "NetworkError", "Network request failed". Si pasa, desactivamos
-      // Z.AI 30 min para que no se reintente cada imagen y la cadena vaya
-      // directa a Claude. La usuaria puede limpiar manualmente con un reload.
       if (/Failed to fetch|NetworkError|CORS|Network request failed/i.test(msg)) {
         tripCircuit('zai', 30 * 60_000);
         console.warn('[aiProviders] Z.AI bloqueado por CORS — pausa 30min, usando Claude.');
@@ -354,7 +348,7 @@ export const scanDocument = async (
     errors.push('Z.AI: solo soporta imágenes, no PDFs');
   }
 
-  // 🟣 Claude — fallback principal cuando Z.AI no está o falla.
+  // 🟣 Claude — fallback 1. Máxima precisión. Imágenes + PDFs nativos.
   const claudeKey = keys.claude();
   if (claudeKey && (onlyClaude || tryAll) && !isCircuitOpen('claude')) {
     const isRateLimit = (m: string) => /rate.?limit|429/i.test(m);
@@ -380,6 +374,7 @@ export const scanDocument = async (
     errors.push('Claude: sin API key configurada');
   }
 
+  // 🔵 Gemini — fallback 2. Soporta multi-página y PDFs.
   const gemKey = keys.gemini();
   if (gemKey && (onlyGemini || tryAll) && !isCircuitOpen('gemini')) {
     const isRateLimit = (m: string) => /rate.?limit|429/i.test(m);
@@ -404,8 +399,6 @@ export const scanDocument = async (
   } else if (!gemKey && (onlyGemini || tryAll)) {
     errors.push('Gemini: sin API key configurada');
   }
-
-  // (Z.AI ahora va al principio de la cadena, antes que Claude)
 
   const misKey = keys.mistral();
   if (misKey && isImage && (onlyMistral || tryAll)) {
@@ -538,10 +531,8 @@ export const scanBase64 = async (
   // genérico inútil.
   const errors: string[] = [];
 
-  // 🟣 Claude PRIMERO — preferido por la usuaria. Visión + PDFs nativos.
-  // 🟠 Z.AI GLM-5V PRIMERO (gratuito, OCR optimizado para documentos).
-  // Si el navegador bloquea CORS, circuit breaker 30 min → cae a Claude
-  // automáticamente sin penalización en sesiones siguientes.
+  // 🟠 Z.AI PRIMERO — gratuito, OCR optimizado para documentos.
+  // Si CORS falla, circuit breaker 30 min → cae a Claude automáticamente.
   const zaiKey = keys.zai();
   if (zaiKey && isImage && !isCircuitOpen('zai')) {
     try {
@@ -563,8 +554,7 @@ export const scanBase64 = async (
     errors.push('Z.AI: solo soporta imágenes, no PDFs');
   }
 
-  // 🟣 Claude — fallback principal cuando Z.AI no está o falla.
-  // 🆕 Circuit breaker: si Claude acaba de dar rate limit, saltamos directo a Gemini
+  // 🟣 Claude — fallback 1. Máxima precisión. Visión + PDFs nativos.
   const claudeKey = keys.claude();
   if (claudeKey && !isCircuitOpen('claude')) {
     const isRateLimit = (msg: string) =>
@@ -580,7 +570,6 @@ export const scanBase64 = async (
       } catch (e: any) {
         lastErr = e?.message || String(e);
         console.warn(`[aiProviders] Claude intento ${i + 1}/${delays.length}:`, lastErr);
-        // Rate limit → activar circuit breaker y saltar a Gemini YA
         if (isRateLimit(lastErr)) { tripCircuit('claude', 60_000); break; }
         if (!isTransientClaude(lastErr)) break;
       }
@@ -592,10 +581,9 @@ export const scanBase64 = async (
     errors.push('Claude: sin API key configurada');
   }
 
+  // 🔵 Gemini — fallback 2. Soporta multi-página y PDFs.
   const gemKey = keys.gemini();
   if (gemKey && !isCircuitOpen('gemini')) {
-    // Reintentar con backoff cuando Gemini devuelve "high demand" / 503 / 429.
-    // Son fallos transitorios del lado de Google, no de la app.
     const isRateLimit = (msg: string) =>
       /rate.?limit|429/i.test(msg);
     const isTransient = (msg: string) =>
@@ -619,8 +607,6 @@ export const scanBase64 = async (
   } else {
     errors.push('Gemini: sin API key configurada');
   }
-
-  // (Z.AI ahora va al principio de la cadena, antes que Claude)
 
   const misKey = keys.mistral();
   if (misKey && isImage) {
@@ -703,7 +689,7 @@ const _scanWithClaude = async (
 
   const body = {
     model,
-    max_tokens: 2048,
+    max_tokens: 4096,
     temperature: 0.1,
     messages: [{
       role: 'user',
@@ -730,7 +716,7 @@ const _scanWithClaude = async (
   const data = await res.json();
   if (data?.stop_reason && data.stop_reason !== 'end_turn' && data.stop_reason !== 'stop_sequence') {
     if (data.stop_reason === 'max_tokens') {
-      throw new Error('Claude se cortó (max_tokens). Documento demasiado complejo para 2048 tokens.');
+      throw new Error('Claude se cortó (max_tokens). Documento demasiado complejo para 4096 tokens. Prueba dividiéndolo en páginas.');
     }
     throw new Error(`Claude paró con stop_reason=${data.stop_reason}.`);
   }
@@ -746,7 +732,7 @@ const _scanBase64WithClaude = async (
   const model = VISION_MODELS.claude!;
   const body = {
     model,
-    max_tokens: 2048,
+    max_tokens: 4096,
     temperature: 0.1,
     messages: [{
       role: 'user',

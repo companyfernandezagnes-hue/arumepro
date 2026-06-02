@@ -15,9 +15,10 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Upload, Loader2, X, CheckCircle2, AlertTriangle, Copy, FileImage, FolderOpen, Clipboard, ChevronDown } from 'lucide-react';
-import { AppData, Albaran, BusinessUnit } from '../types';
+import { AppData, Albaran, BusinessUnit, PriceHistoryItem } from '../types';
 import { sha256OfFile } from '../services/hashFile';
 import { scanBase64, preprocessImageForOCR } from '../services/aiProviders';
+import { TrendingUp } from 'lucide-react';
 import { Num } from '../services/engine';
 import { basicNorm } from '../services/invoicing';
 import { advancedProvSimilarity } from '../services/invoiceMatcher';
@@ -153,6 +154,7 @@ interface FileEntry {
   hash: string;
   base64: string;
   status: FileStatus;
+  retryCount?: number;
 }
 
 interface BulkAlbaranesUploadProps {
@@ -269,10 +271,12 @@ const runWithLimit = async <T,>(items: T[], limit: number, worker: (item: T, i: 
   await Promise.all(runners);
 };
 
-const PROMPT = `Eres un OCR contable especializado en albaranes y facturas comerciales españoles para un restaurante japonés (Arume Sake Bar). En hostelería conviven en la MISMA factura productos con IVA distinto:
-  - 4%  → pan, leche, huevos, frutas/verduras frescas, productos de primera necesidad
-  - 10% → la mayoría de alimentos (carne, pescado, conservas) y bebidas no alcohólicas
-  - 21% → bebidas alcohólicas (vino, cerveza, sake, licores), refrescos azucarados, productos no alimentarios
+const PROMPT = `Eres un OCR contable EXPERTO en albaranes y facturas comerciales españoles para un restaurante japonés (Arume Sake Bar). Lee el documento DOS VECES antes de responder: una para entender la estructura, otra para extraer cifras exactas.
+
+En hostelería conviven en la MISMA factura productos con IVA distinto:
+  - 4%  → pan, leche, huevos, frutas/verduras frescas, harinas, cereales
+  - 10% → la mayoría de alimentos (carne, pescado, conservas, aceite, pasta), bebidas no alcohólicas, agua
+  - 21% → bebidas alcohólicas (vino, cerveza, sake, licores, destilados), refrescos azucarados, productos no alimentarios, material de limpieza, menaje
 
 Lee cada línea con su IVA correcto. NO asumas que toda la factura tiene un único tipo de IVA.
 
@@ -281,6 +285,7 @@ Analiza este documento y devuelve SOLO JSON sin markdown ni texto antes/después
 ESQUEMA EXACTO:
 {
   "proveedor": "string|null",
+  "nif": "string|null",
   "num": "string|null",
   "fecha": "YYYY-MM-DD|null",
   "lineas": [
@@ -293,7 +298,8 @@ ESQUEMA EXACTO:
       "rate": 4|10|21,              // tipo IVA aplicado a esta línea
       "iva": number,                // importe IVA de la línea = base × rate/100
       "t": number,                  // total línea con IVA = base + iva
-      "descuento": number           // 0 si no hay; si lo hay, importe en €
+      "descuento": number,          // 0 si no hay; si lo hay, importe en €
+      "incidencia": "string|null"   // null si OK. Si hay problema → texto breve (ver INCIDENCIAS)
     }
   ],
   "totales": {
@@ -301,24 +307,28 @@ ESQUEMA EXACTO:
     "iva":             number,       // suma de IVA
     "total":           number,       // base + iva = total con IVA del documento
     "descuento":       number,       // descuento global aplicado al pie (0 si no hay)
+    "irpf":            number,       // retención IRPF si aparece (negativo, p.ej. -15.00), 0 si no hay
     "by_rate": {                     // desglose por tipo de IVA
       "4":  { "base": number, "iva": number, "total": number },
       "10": { "base": number, "iva": number, "total": number },
       "21": { "base": number, "iva": number, "total": number }
     }
   },
+  "alertas": [],                     // array de strings con incidencias detectadas (ver INCIDENCIAS)
+  "tipo_documento": "albaran"|"factura"|"abono"|"nota_entrega",
   "confidence": "high"|"medium"|"low"
 }
 
 REGLAS — léelas TODAS antes de responder:
 
-═══ PROVEEDOR ═══
-El EMISOR (quien VENDE y emite el documento). El receptor SIEMPRE es "Arume Sake Bar" / "Arume" / "Agnès Company" / "AGNES COMPANY FERNANDEZ" / un CIF tipo X4XXXXXXXX que termina en letra de Agnès — NUNCA es el proveedor, es la receptora.
+═══ PROVEEDOR + NIF ═══
+El EMISOR (quien VENDE y emite el documento). El receptor SIEMPRE es "Arume Sake Bar" / "Arume" / "Agnès Company" / "AGNES COMPANY FERNANDEZ" / "CELOSO DE PALMA SL" / un CIF tipo X4XXXXXXXX — NUNCA es el proveedor, es la receptora.
 
 ✅ Cómo encontrarlo: busca en la CABECERA (parte superior izquierda normalmente) el nombre + CIF del emisor. En tickets/albaranes térmicos el emisor suele estar arriba con dirección. Devuelve el nombre legal completo, incluyendo "SL", "SA", "SLU", "CB" si los pone.
+✅ NIF/CIF: extrae el CIF/NIF del EMISOR (formato: B12345678, A12345678, etc.). Si no es visible → null.
 
-✅ Ejemplos: "MAKRO IBÉRICA SAU", "Llorenç Cerdà Obrador SL", "Pescaderías Chiringuito SL".
-❌ NUNCA devuelvas "Arume", "Agnès", "Sake Bar" como proveedor.
+✅ Ejemplos: "MAKRO IBÉRICA SAU", "Llorenç Cerdà Obrador SL", "Pescaderías Chiringuito SL", "TOKYO-YA, S.A.", "PESCADOS MAR ESTE SL".
+❌ NUNCA devuelvas "Arume", "Agnès", "Sake Bar", "Celoso de Palma" como proveedor.
 
 ═══ FECHA ═══
 Fecha de EMISIÓN del documento (NO pago, NI vencimiento, NI entrega).
@@ -363,51 +373,254 @@ Decide qué columna mira según las cabeceras del albarán ("Precio neto", "Prec
 ═══ POLÍTICA ANTI-INVENCIÓN ═══
 PREFERIBLE devolver null/0 que inventar. Si no ves la columna de IVA por línea, intenta deducirlo del producto (alcohol→21, alimentación→10) pero marca confidence="medium". Si dudas con varios IVAs en una factura mixta, marca "low".
 
-═══ EJEMPLOS REALES DE ALBARANES QUE VAS A VER ═══
+═══ PROVEEDORES HABITUALES — APRENDE SUS FORMATOS ═══
 
-EJEMPLO A — Carmen Peix i Marisc (pescadería, IVAs mixtos):
-- Cabecera: "CARMEN PEIX I MARISC S.L." CIF B57941379 (PROVEEDOR)
-- Cliente: ARUME SAKE BAR (NO usar como proveedor)
-- Líneas: GAMBA PEQUEÑA 2kg × 32€ (10%), PALILLOS 4ud × 3.80€ (21%), ANGUILA 6ud × 7.80€ (10%), CARNE VIEIRA 1kg × 38€ (10%)
-- Pie: Base 10% = 148.80, IVA 14.88 / Base 21% = 15.20, IVA 3.19 / TOTAL 182.07
-- En este formato: la columna "Importe" YA es el total línea con IVA y "Precio" es unitario sin IVA. unitPrice = Precio.
+PROVEEDOR 1 — HIJOS DE RAMÓN OLIVER SL (CIF B-07020134) — Distribuciones HR Oliver
+- Marca: "HR OLIVER DISTRIBUCIONES" con logo. También distribuye IL GROTTO, Natura Dolç, DISTNURA, La Casa Italiana.
+- Tipo: FACTURA (no albarán). Nº Factura tipo "YF-0003302".
+- Columnas: KG/Und, Mercancías, Formato-Und, Cajas, Artículo, Precio, %Dto %Dto, Neto %IVA, Importe.
+- Categorías: "02 - REFRIGERADO", "05 - ASIATICO SECO", "07 - ASIATICO CONGELADO".
+- "Neto" = unitPrice sin IVA. "%IVA" = tipo IVA (4.00, 10.00, 21.00). "Importe" = base línea.
+- Pie: "Total Bases → Base Imp. / IVA % / Imp. IVA → TOTAL €".
+- IVA mixto: ARROZ SUSHI 4%, PURE MARACUYA 10%, SUSHI YOKI 21%, YAKINORI 10%.
+- Forma pago: "30 DIAS FECHA FACTURA(TRANS)". Vencimiento separado de fecha emisión.
+- Ejemplo real: Base 10%=97.20 IVA=9.72 / Base 4%=82.89 IVA=3.32 / Base 21%=7.52 IVA=1.58 → TOTAL 202.23
 
-EJEMPLO B — Llorenç Cerdà (alimentación, mixto 4% + 10%):
-- Cabecera: "CERDA OBRADOR ALIMENTACIO, S.L." CIF B57836157 (PROVEEDOR)
-- Cliente: Arume Sake Bar
-- Líneas: PAN CARASATU 3 × 7.95 (IVA 4) = 23.85; PATO MUSLO 2 × 40.57 (IVA 10) = 81.14; FOIE MI-CUIT 1.095 × 58.50 (IVA 10) = 64.06; FOIE ESCALOPADO 1 × 43.50 (IVA 10) = 43.50
-- Pie: Importe bruto 212.55 / Base imponible 4%: 23.85, Cuota 0.95 / Base 10%: 188.70, Cuota 18.87 / Total Albarán 232.37
-- En este formato: "Importe" YA es total línea sin IVA (= base línea). unitPrice = Precio. base línea = Cant × Precio = Importe. Total = Importe + IVA.
+PROVEEDOR 2 — CERDÀ OBRADOR ALIMENTACIÓ SL (CIF B57836157) — Llorenç Cerdà
+- Tipo: ALBARÁN. Nº tipo "26118/64/3".
+- Columnas: Concepto (+ código), Cant., IVA (4 o 10), Precio, Dto, Importe.
+- Pie: Importe bruto, Descuentos, Importe neto, Base Imponible, %IVA, Cuota IVA, Recargo Equiv., Total Albarán.
+- Productos típicos: CAVIAROLI YUZU, EF. MOSTAZA DIJON, PATO MUSLO CONFITADO, FOIE MI-CUIT TARRINA, FOIE PATO ESCALOPADO, MEMBRILLO CODONYAT, COLORANTE LACA VERDE.
+- IVA mixto: alimentación=10%, colorantes/aditivos=10%.
+- Ejemplo real: Base 300.31 / IVA 10%=30.03 / Recargo Equiv.=0 → Total 330.34.
 
-EJEMPLO C — Chis! Cakes (un solo producto, IVA único):
-- Cabecera: "CHISLUGOJDBD S.C." CIF J55446843 (PROVEEDOR)
-- Cliente: Arume Sake Bar
-- Línea: TARTA Personalizada 1 × 38.00€ (10% IVA) = 38.00€
-- Pie: Base 38.00 / IVA 3.80 / Total 41.80
-- En este formato: "Precio" es unitario sin IVA, "Importe" = base línea sin IVA. unitPrice = Precio.
+PROVEEDOR 3 — CARMEN PEIX I MARISC SL (CIF B57941379) — Pescadería
+- Tipo: ALBARÁN. Nº tipo "CC-0056864".
+- Columnas: Ref., Cant., Unid. (KG/UND), Detalle, Precio, (IVA%), Importe.
+- ⚠️ El % IVA aparece EN la tabla de líneas (columna entre Precio e Importe).
+- Pie: Base Imp. / IVA % / Imp. IVA → TOTAL €.
+- Productos típicos: GAMBA PEQUEÑA, HUEVAS TRUCHA, SEPIA SUSHI, LECHE COCO, EDAMAME PREMIUM, PALILLOS BAMBU, ANGUILA KABAYAKI, KAISO SALAT.
+- IVA mixto: pescado/marisco=10%, edamame=4%, palillos bambú=21%.
+- Ejemplo real: Base 10%=111.00 IVA=11.10 / Base 4%=11.20 IVA=0.45 / Base 21%=11.40 IVA=2.39 → TOTAL 147.54.
 
-EJEMPLO D — Frutas Daniel Palma (RECARGO DE EQUIVALENCIA / albarán sin IVA aplicado):
-- Cabecera: "FRUTAS DANIEL PALMA, S.L." CIF B09857624 (PROVEEDOR)
-- Líneas: NARANJA 1.4kg × 1.21 = 1.69 (IVA 4); CEBOLLINO 2 × 2.16 = 4.32 (IVA 10); etc.
-- Pie: IMPORTE 76.32 / BASE IMPONIBLE 66.03 (al 4%) y 10.29 (al 10%) / TOTAL ALBARÁN 76.32
-- ATENCIÓN ESPECIAL: en este formato Total = Suma de bases (= IMPORTE). El IVA NO se suma al total porque se factura a parte por recargo de equivalencia (régimen especial de hortofrutícolas/comerciantes minoristas).
-- En estos casos: by_rate.4 = { base: 66.03, iva: 0 (NO incluido en total), total: 66.03 } y by_rate.10 igual. El total del albarán SIGUE siendo 76.32.
-- Marca el descuento con un comentario tipo "régimen especial sin IVA aplicado" en la 1ª línea, pero respeta los rates por línea para que cuadre con la factura mensual del proveedor.
+PROVEEDOR 4 — FRUTAS DANIEL PALMA SL (CIF B09857624) — Frutas y verduras
+- Tipo: ALBARÁN con marca de agua "COPIA" (es normal, es la versión del cliente).
+- Nº tipo "32139/1" ó "35638/1".
+- Columnas: Código, Trazabilidad, Descripción, Cantidad, Precio, IVA (4 o 10), Total.
+- ⚠️ RÉGIMEN ESPECIAL: TOTAL ALBARÁN = Suma de IMPORTE (= suma de bases). IVA NO sumado al total.
+- Pie: IMPORTE / BASE IMPONIBLE (desglosada por rate 4% y 10%) / TOTAL ALBARÁN = IMPORTE.
+- Productos típicos: PEPINO HOLANDES, GERMINADO ALFALFA, RABANITO, TOMATE CHERRY, COLIFLOR, TOMATE SECO, MANGO EXTRA, CEBOLLINO, LECHUGA FRANCESA, HUEVOS L, MICROBROTES LEMON BALM, GERMINADO RABANITO, CILANTRO, HIERBABUENA, ALBAHACA, PATATA AGRIA.
+- IVA: frutas/verduras=4%, hierbas aromáticas (cebollino, hierbabuena, albahaca)=10%.
+- Ejemplo real: Importe=54.65 / Base 4%=52.49 / Base 10%=2.16 → TOTAL ALBARÁN=54.65 (sin IVA).
 
-EJEMPLO E — Ticket manuscrito (caso edge):
-- Sin cabecera de proveedor formal. Texto a mano.
-- "Camarero: Arume / 5 Sellos 12 / 5 Picados 12 / Total 24"
-- En este caso: proveedor = null (no hay), num = null, fecha si está visible, IVA = 10 por defecto. confidence: "low" obligatorio. La usuaria lo aprobará manualmente.
+PROVEEDOR 5 — VOLDISTRIBUCION BALEARES SAU (CIF A07104524) — Voldis, bebidas
+- Tipo: ALBARÁN. Nº tipo "AP26-040935".
+- Columnas: Código, Descripción, Cant., Precio unitario, % Descuento, Identif. ic. IVA, Eco tasa, Importe.
+- ⚠️ DESCUENTOS EN % por línea: "40.7%", "59%", "100%". El Importe YA tiene descuento aplicado.
+- Pie: Base / RE% IVA / Imp. IVA / % RE / Imp. RE → TOTAL.
+- Sección "ABONOS / CARGOS" al final (puede tener notas manuscritas).
+- Línea "Servicio" = cargo de servicio (IVA 21%).
+- Productos típicos: AGUA SOLAN DE CABRAS, AGUA SIERRA NATURA, ALHAMBRA RESERVA 1925 BARRIL 30L, SAN MIGUEL 0.0 TOSTADA.
+- IVA: agua=10%, cerveza/alcohol=21%, servicio=21%.
+- Forma pago: "Crédito cliente mensual".
+- Ejemplo real: Base 10%=40.46 IVA=4.05 / Base 21%=100.76 IVA=21.16 → TOTAL 166.43.
+
+PROVEEDOR 6 — GOURMET Delicatessen y Complementos (CIF B02779494) — Productos gourmet
+- ⚠️ ALBARÁN MANUSCRITO en papel rosa/carbonado.
+- Escrito a mano: nombre cliente, producto, cantidad. Sin precios ni totales.
+- Ejemplo: "1 caja de ostras Gillardeau Nº3/480 Lot: 26/05"
+- En estos casos: proveedor="GOURMET DELICATESSEN Y COMPLEMENTOS", nif="B02779494", total=0 (no visible), confidence="low".
+- La usuaria completará el precio manualmente.
+
+═══ FOTOS ROTADAS — CUALQUIER PROVEEDOR ═══
+Cualquier albarán puede llegar rotado 90°, 180° o 270° (fotos de móvil). Si el texto aparece de lado o al revés, gira mentalmente y lee igualmente. La app intentará auto-rotar si la primera lectura falla.
+
+═══ RECEPTORES CONOCIDOS (NUNCA son el proveedor) ═══
+Todos pertenecen a la misma sociedad CELOSO DE PALMA SL (CIF B16554230), pero son DOS restaurantes distintos:
+- "ARUME SAKE BAR" / "ARUME" → Avda Argentina 6, 07013 Palma (restaurante japonés)
+- "SAKE BAR SHOP" / "OBRADOR" → C/ Cataluña 5, 07011 Palma (tienda de sakes y obrador)
+- "CELOSO DE PALMA SL" / "CELOSO DE PALMA S.L." (CIF B16554230) → sociedad titular de Arume y Sake Bar Shop
+- "RACOBLANQUERNA SL" / "RACO BLANQUERNA" / "RACO" / "RESTAURANTE RACO" (CIF B27538149) → C/ Blanquerna 12, 07003 Palma (segundo restaurante, otra SL)
+- "BURC HAMBURGUESERIA SL" / "BURC" (CIF B67807479) → Arenal 29, Palma (marca asociada, misma propiedad)
+- "AGNES COMPANY FERNANDEZ" / "AGNÈS COMPANY" → la propietaria de ambas sociedades
+- Otra dirección posible: "Jeroni Pl Weyler 2" (dirección alternativa de entrega)
+- Si ves CUALQUIERA de estos nombres, CIFs o direcciones → es el CLIENTE/RECEPTOR, busca el proveedor en otra parte del documento.
 
 ═══ FORMATO DE PRECIO POR PROVEEDOR — CÓMO INTERPRETARLO ═══
 
 Mira las cabeceras de columnas SIEMPRE. Patrones habituales:
-- "Precio + Importe" donde Importe = Cant × Precio + IVA → Precio es unitario sin IVA, Importe es total línea con IVA. Caso A.
-- "Precio + Importe" donde Importe = Cant × Precio (sin IVA añadido) → Precio es unitario sin IVA, Importe es base línea. Caso B, C.
-- Si en el pie ves "Base Imponible + Cuota IVA + Total" SEPARADOS → el IVA no estaba en línea, hay que sumarlo. Caso B, C.
-- Si en el pie ves SOLO "Importe + Base Imponible + Total" sin "Cuota IVA" → es régimen especial sin IVA. Caso D.
+- HR Oliver: "Neto %IVA + Importe" → Neto=unitPrice, %IVA=tipo, Importe=base línea.
+- Carmen Peix: "Precio + (IVA%) + Importe" → Precio=unitPrice, Importe=Cant×Precio (sin IVA). IVA en pie.
+- Llorenç Cerdà: "Precio + Dto + Importe" → Precio=unitPrice, Importe=base.
+- Frutas Daniel: "Precio + IVA + Total" → Precio=unitPrice, Total=Cant×Precio. RÉGIMEN ESPECIAL: total albarán = bases.
+- Voldis: "Precio unitario + %Descuento + Importe" → Importe ya con descuento aplicado. Descuentos en %.
+- Gourmet: MANUSCRITO → extraer lo que se pueda, confidence="low".
+- Consignaciones del Mar: "Bultos + Kilos + Descripción + Precio + DTO (manuscrito!) + Importe". DTO es descuento ESCRITO A MANO sobre el precio impreso.
+- García (Fernando y Tomas): "Origen + Descripción + Cantidad + Precio + Bultos + Importe + %IVA". Pie con B. Imponible desglosada + Imp.IVA + % REC (recargo equiv.).
+- Nota de entrega manuscrita (hielo, etc.): papel rosa/carbonado, todo a mano. Extraer lo visible, confidence="low".
+- Alvarez Equipment: cubertería/menaje — "Nota de entrega" SIN PRECIOS. Solo cantidades. No es factura, es albarán de entrega. total=0, confidence="low".
+- Coca-Cola: BILINGÜE catalán/español. "NOTA ENTR." con "Dto. Fijo" + "Punto Verde" + "SUBUNIDADES/NETO". Refrescos=21%. Pie: "BASE IMPOSABLE/BASE IMPONIBLE + % IMPOST + IMPORT → TOTAL".
 
-VERIFICA SIEMPRE: la suma de líneas debe igualar lo que muestra el pie. Si no cuadra al céntimo, mira si confundiste qué columna era unitPrice vs total. Si tras intentar sigue sin cuadrar, marca confidence="medium" o "low".`;
+═══ DOCUMENTOS MANCHADOS / DAÑADOS ═══
+Los albaranes llegan de la cocina: pueden tener manchas de agua, grasa, salpicaduras. Las marcas de agua "COPIA" son normales (es la copia del cliente). Ignora manchas y lee el texto que sea legible. Si un número es ilegible por mancha → marca confidence="medium" y pon tu mejor estimación.
+
+═══ PROVEEDORES ADICIONALES DE RACO BLANQUERNA ═══
+
+PROVEEDOR 7 — CONSIGNACIONES DEL MAR SA (CIF A08120149) — Pescado Mercabarna
+- Tipo: ALBARÁN DE ENTREGA. Nº tipo "00/26/9468".
+- Columnas: Bultos, Kilos, Código, Ref. Cliente, Descripción, Precio EUR, DTO, Importe EUR.
+- ⚠️ DESCUENTO MANUSCRITO: la columna DTO tiene valores ESCRITOS A MANO con bolígrafo sobre el papel impreso. Puede ser difícil de leer.
+- Pie: Base Imp. / IVA / Imp. IVA → Total. Luego "Total Albarán EUR".
+- Productos: BACALAO LOMOS 5KG, TARTAR GAMBA BCA 20X80G, ANILLA ENHARINADA 1.5KG.
+- IVA: todo pescado/marisco = 10%.
+- Ejemplo real: Base 157.50 / IVA 10% / Imp. IVA 15.75 → Total 173.25.
+
+PROVEEDOR 8 — FERNANDO Y TOMAS SL (CIF B97686364) — García Frutas & Verduras
+- Marca: "GARCÍA FRUTAS & VERDURAS" con logo. Razón social "FERNANDO Y TOMAS, S.L."
+- Tipo: ALBARÁN. Nº tipo "B/264298".
+- Columnas: Origen, Descripción, Cantidad, Precio, Bultos, Importe, %IVA.
+- Pie: Importe Neto / B. Imponible desglosada (% IVA + Imp.IVA + % REC + Imp.REC) → Total Albarán.
+- ⚠️ Cantidades con peso real: "0,990k" = 0.99 kg, "0,440k" = 0.44 kg.
+- Productos: JENGIBRE, FRUTA DE LA PASION.
+- IVA: jengibre=10%, fruta de la pasión=4%.
+- Ejemplo real: Base 10%=3.94 IVA=0.39 / Base 4%=6.38 IVA=0.26 → Total 10.97.
+
+PROVEEDOR 9 — ALVAREZ EQUIPMENT & SOLUTIONS SA (CIF A07145881) — Menaje/cubertería
+- Tipo: NOTA DE ENTREGA (no albarán contable). Nº tipo "67511".
+- ⚠️ SIN PRECIOS: solo lista de productos con cantidades. No hay columna de precio ni total.
+- Columnas: Pos., Referencia, Producto, Cantidad, Peso, Volumen, Notas.
+- Productos: cubertería BCN COLORS (cuchillo, cuchara, tenedor mesa/postre/pescado/café/moka) NEGRO INOX.
+- En estos casos: total=0, confidence="low". La factura llegará por separado.
+
+PROVEEDOR 10 — HIELO / NOTA MANUSCRITA (sin razón social)
+- Tipo: NOTA DE ENTREGA manuscrita en papel rosa/carbonado.
+- Fecha escrita a mano: "30 de 5 de 26" = 2026-05-30.
+- Cliente escrito: "RACO".
+- Líneas ejemplo: "5 SACOS HIELO → 22.00", "1 SACO PICADO → 5.50", "IVA", total "27.50".
+- ⚠️ Sin proveedor formal (no hay nombre empresa ni CIF). proveedor="HIELO" o null.
+- IVA: hielo=10%. El "IVA" escrito a mano indica que el total INCLUYE IVA.
+- confidence="low" obligatorio.
+
+PROVEEDOR 11 — COCA-COLA EUROPACIFIC PARTNERS (Esplugues de Llobregat, Barcelona)
+- Tipo: NOTA ENTR. (Nota de Entrega). Nº tipo "4529975289".
+- BILINGÜE CATALÁN/ESPAÑOL: cabeceras en ambos idiomas ("DOCUMENT/DOCUMENTO", "QUANTITAT/CANTIDAD", "PREU/PRECIO", "IMPORT/IMPORTE").
+- Columnas: Código EAN, Art., Descripción, Cantidad, Preu/Precio, Base Dto., Import/Importe.
+- DESCUENTOS COMPLEJOS: "Dto. Fijo" (descuento fijo en €) + "Punto Verde" (ecotasa 0.02€/ud) + "SUBUNIDADES/NETO" (precio neto por subunidad).
+- Pie: "BASE IMPOSABLE/BASE IMPONIBLE" + "% IMPOST/% IMPUESTOS" + "IMPORT/IMPORTE" → "TOTAL: XX,XX Euros".
+- Productos: COCACOLA VR237 C24, COCACOLA ZERO, FANTA, AQUARIUS, etc.
+- IVA: TODOS los refrescos Coca-Cola = 21% (bebidas azucaradas/edulcoradas).
+- Ejemplo real: Base 35.94 / IVA 21%=7.55 → TOTAL 43.49.
+
+PROVEEDOR 12 — LICORS MOYÀ 1890 SL (CIF B07126550) — Licorería Artà, Mallorca
+- Tipo: FACTURA. Nº tipo "012600010632".
+- Cabeceras en CATALÁN: "CD/AR", "ARTICLE", "UNIT.", "PVP", "IVA", "R.EQV", "IMPORT".
+- Productos: vinos (ÀNIMA NEGRA AN/2, TERRAS GAUDA), ginebra (HENDRICKS, SEAGRAMS), ron (BARCELÓ, AMAZONA), grappa, whisky.
+- ARTÍCULOS EN PROMOCIÓN: líneas con importe NEGATIVO (descuento).
+- IVA: TODO alcohol = 21%. Columna R.EQV = recargo equivalencia.
+- Cliente: RACOBLANQUERA SL / NOM COMERCIAL: RTE. ES RACO.
+
+PROVEEDOR 13 — CAN XISCO ORDINAS DISTRIBUCIONS SA (CIF A82725853) — Distribución bebidas
+- Tipo: FACTURA. Formato puede llegar ROTADO 180° (al revés).
+- Productos: whisky (Japanese Harmony, Monkey Shoulder), gin (Hendrix), vodka (Absolut), ron (Matusalem), Cointreau, Amaretto.
+- Descuentos en % por línea + RE (recargo equivalencia).
+- IVA: TODO 21% (alcohol).
+- Pie: "Total EUR excl." + IVA + RE → "Total EUR IVA incl."
+
+PROVEEDOR 14 — ECOMÓN HIGIENE PROFESSIONAL / GRUPO GENA (Polígon Son Rossinyol, Palma)
+- Tipo: FACTURA. En CATALÁN: "COD", "CAIXES", "DESCRIPCIÓ", "FORMAT", "PREU UD", "UNITATS", "Preu €", "P. TOTAL €".
+- Productos: limpieza/higiene — fregona, palo titanio, recogedor, cepillo, cubo fregona, roll omap, limpiacristales, bolsa basura, contenedor basura, estropajo, bayeta, dosificador.
+- IVA: TODO 21% (productos no alimentarios/limpieza).
+- Puede tener sello "NUEVA RAZÓN SOCIAL".
+- Cliente: RACO BLANQUERNA SL / TOLO.
+
+PROVEEDOR 15 — TOKYO-YA SA — Alimentación japonesa al por mayor
+- Tipo: ALBARÁN. Nº tipo "E2026P/21000989".
+- Columnas: REF, Descripción, CANT., UM, PRECIO, % DTO, IMPORTE.
+- ⚠️ "TOTAL(s/IVA)" = total SIN IVA. El IVA se factura aparte.
+- Productos: Kimuchi Congelado, Sushi Su De Uk Mizkan, sake Daishichi Junmai Kimoto, Gekkeikan.
+- IVA: kimuchi/vinagre=10%, sake=21%.
+- Peso Bruto indicado. Transporte = 0,00 si incluido.
+- Forma de pago: TRANSFERENCIA CLIENTES.
+
+PROVEEDOR 16 — AGROMART BALEAR SL (CIF B57853419) — Huevos km0, Porreres
+- Tipo: FACTURA rotada 90°. Nº tipo "2600038/191F".
+- Producto típico: OUS FRESCS M KM0 (huevos frescos).
+- IVA: huevos = 4%. Descuento 5%.
+- Forma de pago: "EFECTIU C/CATALUNYA" (pago efectivo en Sake Bar Shop).
+
+═══ INCIDENCIAS — DETECCIÓN CRÍTICA ═══
+BUSCA en el documento CUALQUIERA de estas señales y repórtalas en "alertas" y en lineas[].incidencia:
+
+1. DEVOLUCIONES / ABONOS:
+   - Cantidad NEGATIVA (ej: Cant. = -1.00) → es una devolución/retorno. Pon q negativo.
+   - Importe NEGATIVO → es un abono. El total del albarán se reduce.
+   - Documento tipo "ABONO" o "NOTA DE CRÉDITO" → tipo_documento="abono".
+   - Ejemplo real (Voldis): "SCHWEPPES NARANJA ZERO -1.00 → -15.29€"
+
+2. PRODUCTOS NO ENTREGADOS:
+   - "PEDIDO PENDIENTE SERVICIO" (HR Oliver) → producto pedido pero NO llegó.
+   - "NO TRAÍDO", "FALTA", "PENDIENTE", "NO SERVIDO", "AGOTADO", "SIN STOCK"
+   - Líneas tachadas con bolígrafo.
+   - Si detectas esto → incidencia="NO ENTREGADO" en la línea + alerta global.
+
+3. PESO INCORRECTO:
+   - Anotación manuscrita tipo "PESO REAL: 1.2kg" junto a un peso impreso diferente.
+   - Tachón sobre la cantidad impresa con otro número escrito a mano.
+   - "DIFERENCIA PESO", "PESO MAL", "RECTIFICADO"
+   - Si detectas → incidencia="PESO RECTIFICADO: [valor manuscrito]" + alerta.
+
+4. PRECIO EQUIVOCADO:
+   - Precio impreso tachado con otro precio escrito a mano.
+   - "PRECIO INCORRECTO", "PRECIO MAL", "RECTIFICAR PRECIO"
+   - Si un precio manuscrito sobreescribe uno impreso → USA EL MANUSCRITO y marca incidencia="PRECIO RECTIFICADO: impreso [X] → manuscrito [Y]".
+
+5. DESCUENTOS MANUSCRITOS:
+   - "DTO" escrito a boli (Consignaciones del Mar escribe descuentos a mano).
+   - Porcentajes o importes escritos a mano en la columna DTO.
+   - Si detectas → aplica el descuento y marca incidencia="DTO MANUSCRITO: [valor]".
+
+6. NOTAS Y OBSERVACIONES:
+   - "DEBE" escrito a mano → pendiente de pago. Alerta: "PENDIENTE DE PAGO".
+   - "PAGADO", "COBRADO" → ya pagado. Alerta: "PAGADO EN EFECTIVO" o similar.
+   - "URGENTE", "RECLAMAR", "LLAMAR" → alerta con el texto.
+   - Cualquier nota a boli que no sea una firma → transcríbela en alertas.
+
+7. TOTAL SIN IVA (s/IVA):
+   - "TOTAL(s/IVA)" o "Total sin IVA" → el total NO incluye IVA. Alerta: "TOTAL SIN IVA - factura pendiente".
+   - Esto pasa con Tokyo-Ya y algunos distribuidores.
+
+REGLA DE ORO: Si ves CUALQUIER anotación manuscrita que no sea la firma de "Conforme Cliente", REPÓRTALA en alertas. Es mejor avisar de más que perder una incidencia. La dueña revisa estas alertas para reclamar a proveedores.
+
+DOCUMENTOS MANCHADOS / DAÑADOS:
+Los albaranes llegan de la cocina: pueden tener manchas de agua, grasa, salpicaduras. Las marcas de agua "COPIA" son normales (es la copia del cliente). Ignora manchas y lee el texto legible. Si un número es ilegible → marca confidence="medium".
+
+VERIFICA SIEMPRE: la suma de líneas debe igualar lo que muestra el pie. Si no cuadra al céntimo, mira si confundiste qué columna era unitPrice vs total. Si tras intentar sigue sin cuadrar, marca confidence="medium" o "low".
+
+═══ IRPF / RETENCIONES ═══
+Algunas facturas de profesionales (asesores, freelancers) incluyen retención IRPF:
+- "IRPF -15%", "Retención 15%", "Ret. IRPF"
+- El importe es NEGATIVO y se resta del total a pagar.
+- Ejemplo: Base 500 + IVA 105 - IRPF 75 = Total a pagar 530
+- Extrae el valor como número negativo en totales.irpf (ej: -75.00)
+- Si NO hay retención IRPF → irpf = 0
+
+═══ ERRORES FRECUENTES A EVITAR ═══
+1. NO confundir "cantidad servida" con "cantidad pedida" — usa la SERVIDA.
+2. NO confundir decimales: "1.234,56" es mil doscientos treinta y cuatro con 56 céntimos (formato español). "1,234.56" es formato inglés — muy raro en España.
+3. Los precios en albaranes españoles SIEMPRE usan coma decimal: 12,50€ = doce euros con cincuenta.
+4. Si ves "dto" o "desc" en una línea, es descuento — calcula la base DESPUÉS del descuento.
+5. Si una factura tiene "Portes" o "Transporte" como línea, es un servicio al 21%.
+6. "Embalajes" o "Envases retornables" al 21%.
+7. Hielo, cubitos: 10% (alimentación).
+
+═══ VALIDACIÓN FINAL ═══
+Antes de responder, verifica:
+✅ Σ(lineas.base) ≈ totales.base (±0.02€ por redondeo)
+✅ Σ(lineas.iva) ≈ totales.iva (±0.02€)
+✅ totales.total ≈ totales.base + totales.iva - |totales.irpf| (±0.05€)
+✅ by_rate totales cuadran con la suma de líneas de cada rate
+✅ Cada linea.t ≈ linea.base + linea.iva (±0.01€)
+Si algo no cuadra, RE-LEE el documento y ajusta. Si sigue sin cuadrar → confidence="medium".`;
 
 // ── Componente ─────────────────────────────────────────────────────────────
 
@@ -529,10 +742,10 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
     // a la primera del lote.
     const batchSeen = new Map<string, { id: string; parsed: ParsedAlbaran }>();
 
-    // 🆕 Concurrencia 2: Claude tiene rate limit de 30K tokens/min.
-    // Con 5 en paralelo se satura al instante. Con 2, Claude procesa
-    // las primeras y si peta, el circuit breaker salta a Gemini automáticamente.
-    await runWithLimit(pendientes, 2, async (entry) => {
+    // Concurrencia 3: Z.AI (gratis) absorbe la primera oleada. Si falla CORS,
+    // el circuit breaker lo desactiva 30min y el resto va por Claude/Gemini.
+    // Con 3 en paralelo + circuit breaker no se satura.
+    await runWithLimit(pendientes, 3, async (entry) => {
       setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: { kind: 'scanning' } } : e));
       try {
         // mimeType siempre image/jpeg porque preprocessImageForOCR lo convierte
@@ -724,7 +937,40 @@ Si no lo ves claramente, devuelve null. NO inventes.`;
         ));
       } catch (err: any) {
         const msg = err?.message || 'IA falló';
-        setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: { kind: 'failed', reason: msg } } : e));
+        // Si es rate limit, esperar y reintentar UNA vez
+        const isRateLimit = /rate.?limit|429|en pausa|ningún proveedor/i.test(msg);
+        if (isRateLimit && entry.retryCount === undefined) {
+          entry.retryCount = 1;
+          setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: { kind: 'scanning' } } : e));
+          // Esperar 30s para que el circuit breaker se resetee
+          await new Promise(r => setTimeout(r, 30_000));
+          try {
+            const retryResult = await scanBase64(entry.base64, 'image/jpeg', PROMPT);
+            const retryRaw = retryResult.raw as any;
+            // Procesamiento mínimo del retry
+            const normL: ParsedLinea[] = Array.isArray(retryRaw.lineas) ? retryRaw.lineas.map((l: any) => ({
+              q: Number(l?.q ?? 1), n: String(l?.n ?? ''), u: String(l?.u ?? 'uds'),
+              unitPrice: Number(l?.unitPrice ?? 0), base: Number(l?.base ?? 0),
+              rate: [4,10,21].includes(Number(l?.rate)) ? Number(l?.rate) : 10,
+              iva: Number(l?.iva ?? 0), t: Number(l?.t ?? 0), descuento: Number(l?.descuento ?? 0),
+            })) : [];
+            const sumT = normL.reduce((s,l) => s + l.t, 0);
+            const parsed: ParsedAlbaran = {
+              proveedor: String(retryRaw.proveedor || '').trim(), num: String(retryRaw.num || 'S/N'),
+              fecha: String(retryRaw.fecha || ''), total: Number(retryRaw.totales?.total ?? retryRaw.total ?? sumT),
+              totales: retryRaw.totales || { base: 0, iva: 0, total: sumT, descuento: 0 },
+              lineas: normL, confidence: retryRaw.confidence, aiProvider: retryResult.provider, aiModel: retryResult.model,
+            };
+            parsed.reviewReasons = validateParsed(parsed);
+            const isReliable = (parsed.reviewReasons || []).length === 0 && parsed.confidence !== 'low';
+            setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: { kind: 'new', parsed }, selected: isReliable } : e));
+            toast.info(`🔄 ${entry.file.name} procesado tras espera de rate limit.`);
+          } catch {
+            setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: { kind: 'failed', reason: `${msg} (reintento también falló)` } } : e));
+          }
+        } else {
+          setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: { kind: 'failed', reason: msg } } : e));
+        }
       } finally {
         done += 1;
         setProgress({ done, total: initial.length });
@@ -773,6 +1019,32 @@ Si no lo ves claramente, devuelve null. NO inventes.`;
     try {
       const newData: AppData = JSON.parse(JSON.stringify(data));
       if (!newData.albaranes) newData.albaranes = [];
+      if (!newData.priceHistory) newData.priceHistory = [];
+
+      // ── Detección de subida de precios ─────────────────────────────
+      const getDynThreshold = (itemName: string) => {
+        const n = basicNorm(itemName || '');
+        if (n.match(/tomate|lechuga|cebolla|patata|pimiento|verdura|fruta|limon|naranja|pepino|mango|aguacate/)) return 25;
+        if (n.match(/pescado|salmon|lubina|pulpo|calamar|gamba|langostino|sepia|anguila|bacalao|trucha/)) return 15;
+        if (n.match(/carne|ternera|pollo|cerdo|pato|foie|muslo/)) return 8;
+        if (n.match(/vino|cerveza|agua|refresco|cafe|azucar|harina|sake|gin|ron|whisky|vodka/)) return 5;
+        return 10;
+      };
+      const singularize = (s: string) => basicNorm(s).replace(/s$/, '');
+      const detectPriceInc = (prov: string, item: string, price: number) => {
+        const pN = basicNorm(prov);
+        const iN = singularize(item);
+        const prev = [...(newData.priceHistory || [])].filter(h =>
+          basicNorm(h.prov || '') === pN && singularize(h.item || '').includes(iN)
+        ).sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
+        if (!prev || (prev as any).unitPrice <= 0) return null;
+        const prevPrice = (prev as any).unitPrice;
+        const pct = Num.round2(((price - prevPrice) / prevPrice) * 100);
+        const threshold = getDynThreshold(item);
+        if (pct >= threshold) return { pct, prevPrice, threshold };
+        return null;
+      };
+      const priceAlerts: string[] = [];
 
       for (const e of seleccionados) {
         if (e.status.kind !== 'new') continue;
@@ -880,10 +1152,43 @@ Si no lo ves claramente, devuelve null. NO inventes.`;
             ai_confidence: p.confidence || 'unknown',
           } : {}),
         } as any;
+        // ── Registrar precios y detectar subidas ──────────────────────
+        for (const it of items) {
+          const provN = (p.proveedor || '').trim().toUpperCase();
+          const itemN = (it.n || '').trim().toUpperCase();
+          const up = Number(it.unitPrice) || 0;
+          if (up > 0 && itemN) {
+            // Normalizar unidades pequeñas a kg/l
+            let normalizedPrice = up;
+            const uLow = (it.u || '').toLowerCase();
+            if (uLow === 'g' || uLow === 'gr' || uLow === 'grs') normalizedPrice = Num.round2(up * 1000);
+            if (uLow === 'ml') normalizedPrice = Num.round2(up * 1000);
+
+            const inc = detectPriceInc(provN, itemN, normalizedPrice);
+            if (inc) {
+              priceAlerts.push(`📈 ${provN} → ${itemN}: +${inc.pct}% (${inc.prevPrice}€ → ${normalizedPrice}€)`);
+            }
+            newData.priceHistory!.push({
+              id: `price-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              prov: provN, item: itemN, unitPrice: normalizedPrice,
+              date: fecha, albaranId: robustId,
+            } as any);
+          }
+        }
+
         newData.albaranes.unshift(newAlbaran);
       }
+
+      // ── Mostrar alertas de precio ──────────────────────────────────
+      if (priceAlerts.length > 0) {
+        const msg = `⚠️ SUBIDAS DE PRECIO DETECTADAS:\n\n${priceAlerts.join('\n')}`;
+        toast.warning(msg);
+        // Disparar evento para el asistente IA
+        window.dispatchEvent(new CustomEvent('arume-bot-alert', { detail: msg }));
+      }
+
       await onSave(newData);
-      toast.success(`✅ ${newOnes.length} albaranes guardados.`);
+      toast.success(`✅ ${seleccionados.length} albaranes guardados.${priceAlerts.length > 0 ? ` ⚠️ ${priceAlerts.length} subida(s) de precio.` : ''}`);
       reset();
       onClose();
     } catch (err: any) {

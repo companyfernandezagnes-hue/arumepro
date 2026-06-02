@@ -21,6 +21,7 @@
         "date-fns": "^4.1.0",
         "jspdf": "^2.5.1",
         "jspdf-autotable": "^3.8.2",
+        "jszip": "^3.10.1",
         "lucide-react": "^0.546.0",
         "motion": "^12.23.24",
         "pdfjs-dist": "^3.11.174",

@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { 
-  Truck, CheckCircle2, Clock, Link as LinkIcon, Package, 
-  ChevronDown, ChevronUp, Edit2, Loader2, Lock,
+  Truck, CheckCircle2, Clock, Link as LinkIcon, Package,
+  ChevronDown, ChevronUp, Edit2, Loader2, Lock, Trash2,
   ArrowUp, ArrowDown, Sparkles // 🛡️ FIX: ¡Añadio Sparkles para evitar el pantallazo rojo!
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -16,6 +16,7 @@ interface AlbaranesListProps {
   selectedUnit: BusinessUnit | 'ALL';
   businessUnits: any[];
   onOpenEdit: (albaran: Albaran) => void;
+  onDelete?: (id: string) => void;
 }
 
 /* ----------------------- HELPERS PRO ------------------------------- */
@@ -62,8 +63,8 @@ const getSafeTotal = (a: any) => {
 };
 
 // 🚀 REACT.MEMO: Evita re-renders innecesarios
-export const AlbaranesList = React.memo(({ 
-  albaranes, searchQ, selectedUnit, businessUnits, onOpenEdit 
+export const AlbaranesList = React.memo(({
+  albaranes, searchQ, selectedUnit, businessUnits, onOpenEdit, onDelete
 }: AlbaranesListProps) => {
   
   const safeAlbaranes = Array.isArray(albaranes) ? albaranes : [];
@@ -321,9 +322,16 @@ export const AlbaranesList = React.memo(({
                               {a.reconciled ? (
                                  <button type="button" disabled className="p-2 rounded-lg bg-slate-50 text-slate-300 cursor-not-allowed border border-slate-100" title="Bloqueado por Banco"><Lock className="w-4 h-4"/></button>
                               ) : (
+                                <>
                                  <button type="button" onClick={(e) => { e.stopPropagation(); onOpenEdit(a); }} className="p-2 rounded-lg bg-white text-indigo-500 hover:bg-indigo-50 hover:text-indigo-700 border border-slate-200 shadow-sm transition-all hover:shadow" title="Editar Documento">
                                    <Edit2 className="w-4 h-4" />
                                  </button>
+                                 {onDelete && (
+                                   <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(a.id); }} className="p-2 rounded-lg bg-white text-red-400 hover:bg-red-50 hover:text-red-600 border border-slate-200 shadow-sm transition-all hover:shadow" title="Eliminar albarán">
+                                     <Trash2 className="w-4 h-4" />
+                                   </button>
+                                 )}
+                                </>
                               )}
                             </div>
                           </td>
