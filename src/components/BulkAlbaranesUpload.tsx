@@ -1184,7 +1184,6 @@ Si no lo ves claramente, devuelve null. NO inventes.`;
         const msg = `⚠️ SUBIDAS DE PRECIO DETECTADAS:\n\n${priceAlerts.join('\n')}`;
         toast.warning(msg);
         // Disparar evento para el asistente IA
-        window.dispatchEvent(new CustomEvent('arume-bot-alert', { detail: msg }));
       }
 
       await onSave(newData);

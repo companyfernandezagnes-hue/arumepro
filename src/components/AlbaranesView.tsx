@@ -458,7 +458,6 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     })),
   });
   const fileInputRef     = useRef<HTMLInputElement>(null);
-  const [isSyncingTelegram, setIsSyncingTelegram] = useState(false);
   const [isSaving,       setIsSaving]       = useState(false);
   const [isBulkOpen,     setIsBulkOpen]     = useState(false);
 
@@ -511,29 +510,7 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
     setForm(prev => ({ ...prev, text: lastPurchaseFromProv.items!.map((it:any)=>`${it.q} ${it.u||'uds'} ${it.n} ${it.rate||10}% ${it.t}`).join('\n') }));
   };
 
-  // ── Sync Telegram ─────────────────────────────────────────────────────────
-  const handleTelegramSync = async () => {
-    setIsSyncingTelegram(true);
-    try {
-      const { data:correos, error } = await supabase.from('inbox_general').select('*').ilike('remitente','📸%').order('created_at',{ascending:false}).limit(1);
-      if (error) throw error;
-      if (correos && correos.length > 0) {
-        const doc     = correos[0];
-        const prov    = doc.remitente.match(/📸\s*(.*?)\s*\(/)?.[1]?.trim() ?? 'Desconocido';
-        const dateStr = doc.asunto.match(/Fecha:\s*([\d-]+)/)?.[1] ?? DateUtil.today();
-        const totalNum= parseFloat(doc.asunto.match(/Importe:\s*([\d.]+)/)?.[1] ?? '0') || 0;
-        setForm(prev => ({ ...prev, prov:prov.toUpperCase(), date:dateStr, num:`TG-${Date.now().toString().slice(-4)}`, expectedTotal:totalNum, text:`1x GASTOS VARIOS ${prov} 10% ${totalNum}`, _telegramDocId: doc.id }));
-        // 🆕 FIX: no borramos el ticket aquí — se borra al guardar el albarán
-        toast.success('Ticket importado desde Telegram. Revisa el formulario.');
-      } else {
-        // 🆕 FIX: toast.warning en vez de toast.info
-        toast.warning('No hay nuevos tickets pendientes desde Telegram.');
-      }
-    } catch {
-      // 🆕 FIX: toast.error en vez de toast.info
-      toast.error('Error al conectar con Telegram. Comprueba la configuración.');
-    } finally { setIsSyncingTelegram(false); }
-  };
+  // Telegram sync eliminado — ya no se usa
 
   // ── Escanear archivo con Gemini ────────────────────────────────────────────
   const processLocalFile = async (file: File) => {
@@ -625,7 +602,7 @@ REGLAS:
         const np    = normalizeUnitPrice(it.q, it.u, it.unitPrice);
         if (np > 0) {
           const inc = detectPriceIncrease(newData.priceHistory, provN, itemN, np);
-          if (inc.isIncrease) { const msg=`📈 [${provN}] ${itemN} +${inc.pct}% (lím:${inc.threshold}%). Antes:${inc.previous?.unitPrice}€ → Ahora:${np}€`; alerts.push(msg); window.dispatchEvent(new CustomEvent('arume-bot-alert',{detail:msg})); }
+          if (inc.isIncrease) { const msg=`📈 [${provN}] ${itemN} +${inc.pct}% (lím:${inc.threshold}%). Antes:${inc.previous?.unitPrice}€ → Ahora:${np}€`; alerts.push(msg); }
           newData.priceHistory.push({ id:`price-${Date.now()}-${Math.random().toString(36).slice(2)}`, prov:provN, item:itemN, unitPrice:np, date:form.date, albaranId:robustId } as any);
         }
       }
@@ -640,13 +617,8 @@ REGLAS:
       await onSave(newData);
       // 🆕 FIX: toast.warning en vez de toast.info para alertas de costes
       if (alerts.length) toast.warning('⚠️ ALERTA DE COSTES\n\n'+alerts.join('\n\n'));
-      // 🆕 Confirmación de guardado
       else toast.success('Albarán guardado correctamente.');
-      // 🆕 FIX: borrar ticket de Telegram SÓLO después de guardar el albarán
-      if ((form as any)._telegramDocId) {
-        try { await supabase.from('inbox_general').delete().eq('id', (form as any)._telegramDocId); } catch {}
-      }
-      setForm(prev => ({ ...prev, prov:'', num:'', text:'', paid:false, expectedTotal:null, _telegramDocId: undefined }));
+      setForm(prev => ({ ...prev, prov:'', num:'', text:'', paid:false, expectedTotal:null }));
     } finally { setIsSaving(false); }
   };
 
@@ -676,7 +648,7 @@ REGLAS:
         const np=normalizeUnitPrice(Number(it.q),it.u,up);
         if (np>0) {
           const inc=detectPriceIncrease(newData.priceHistory,provN,itemN,np);
-          if (inc.isIncrease) { const msg=`📈 [${provN}] ${itemN} +${inc.pct}%`; alerts.push(msg); window.dispatchEvent(new CustomEvent('arume-bot-alert',{detail:msg})); }
+          if (inc.isIncrease) { const msg=`📈 [${provN}] ${itemN} +${inc.pct}%`; alerts.push(msg); }
           newData.priceHistory.push({ id:`price-${Date.now()}-${Math.random().toString(36).slice(2)}`, prov:provN, item:itemN, unitPrice:np, date:san.date, albaranId:editForm.id } as any);
         }
       }
@@ -776,9 +748,6 @@ REGLAS:
           <p className="text-[10px] text-indigo-500 font-bold uppercase tracking-widest">Recepción y Análisis</p>
         </div>
         <div className="flex flex-wrap gap-1.5">
-          <button onClick={handleTelegramSync} disabled={isSyncingTelegram} className="px-3 py-1.5 rounded-lg font-black text-[10px] uppercase bg-[#229ED9] text-white hover:bg-[#1E8CC0] transition flex items-center gap-1.5 disabled:opacity-50">
-            {isSyncingTelegram ? <Loader2 className="w-3 h-3 animate-spin"/> : <Smartphone className="w-3 h-3"/>} Telegram
-          </button>
           <button onClick={()=>setShowInspector(!showInspector)} className={cn('px-3 py-1.5 rounded-lg font-black text-[10px] uppercase transition flex items-center gap-1.5', showInspector?'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)]':'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50')}>
             <LineChartIcon className="w-3 h-3"/> Precios
           </button>

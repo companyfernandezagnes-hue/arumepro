@@ -7,7 +7,7 @@ import {
   Eye, Save, MailCheck, FileText, Inbox, AlertCircle, Bot,
   ChevronLeft, ChevronRight, Users, Loader2, Smartphone, Merge,
   // 🆕 NUEVOS para vista de proveedores
-  AlertTriangle, ChevronDown, ChevronUp, Plus
+  AlertTriangle, ChevronDown, ChevronUp, Plus, Camera
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
@@ -251,6 +251,63 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
   const [expandedProv,     setExpandedProv]     = useState<string | null>(null);
+
+  // 📷 OCR rápido "Albarán que falta" — estado del mini-scan por proveedor
+  const [scanningProv,     setScanningProv]     = useState<string | null>(null); // qué proveedor está escaneando
+  const quickScanRef       = useRef<HTMLInputElement>(null);
+  const [quickScanTarget,  setQuickScanTarget]  = useState<string | null>(null); // proveedor al que va el albarán
+
+  const handleQuickScan = (provNombre: string) => {
+    setQuickScanTarget(provNombre);
+    quickScanRef.current?.click();
+  };
+
+  const handleQuickScanFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !quickScanTarget) return;
+    e.target.value = '';
+    setScanningProv(quickScanTarget);
+    try {
+      // Preprocesar y escanear
+      const { preprocessImageForOCR } = await import('../services/aiProviders');
+      const { base64, mimeType } = file.type.startsWith('image/')
+        ? await preprocessImageForOCR(file)
+        : { base64: await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res((r.result as string).split(',')[1]); r.onerror = rej; r.readAsDataURL(file); }), mimeType: file.type };
+
+      const QUICK_PROMPT = `Eres un OCR contable para albaranes/facturas españoles de hostelería.
+Proveedor esperado: ${quickScanTarget}. Cliente: Arume Sake Bar / Celoso de Palma SL.
+Devuelve SOLO JSON:
+{"proveedor":"nombre emisor","nif":"CIF o null","num":"número o S/N","fecha":"YYYY-MM-DD","total":0.00,"base":0.00,"iva":0.00}`;
+
+      const result = await scanBase64(base64, mimeType, QUICK_PROMPT);
+      const raw = result.raw as any;
+      const fecha = String(raw.fecha || new Date().toISOString().slice(0,10));
+      const total = Number(raw.total) || 0;
+      const base  = Number(raw.base)  || 0;
+      const iva   = Number(raw.iva)   || 0;
+      const prov  = String(raw.proveedor || quickScanTarget).toUpperCase();
+      const num   = String(raw.num || 'S/N');
+
+      // Crear el albarán y guardarlo
+      const newAlbaran: any = {
+        id: `alb-${fecha.replace(/-/g,'')}-${Date.now()}-REST`,
+        prov, date: fecha, num,
+        total: String(total), base: String(base), taxes: String(iva), iva: String(iva),
+        items: [], invoiced: false, paid: false, reconciled: false,
+        unitId: 'REST', status: 'ok', created_at: new Date().toISOString(), source: 'quick-scan',
+      };
+      const newData = JSON.parse(JSON.stringify(data));
+      if (!newData.albaranes) newData.albaranes = [];
+      newData.albaranes.unshift(newAlbaran);
+      await onSave(newData);
+      toast.success(`✅ Albarán de ${prov} añadido: ${num} — ${Num.fmt(total)}`);
+    } catch (err: any) {
+      toast.error(`❌ Error OCR: ${err?.message || 'Inténtalo de nuevo'}`);
+    } finally {
+      setScanningProv(null);
+      setQuickScanTarget(null);
+    }
+  };
 
   // 📤 Estado para previsualización de PDF en la pestaña Gestoría
   const [previewFactura,   setPreviewFactura]   = useState<FacturaExtended | null>(null);
@@ -1414,6 +1471,13 @@ REGLAS:
   // ============================================================================
   return (
     <div className="animate-fade-in space-y-4 pb-32 relative max-w-[1600px] mx-auto text-xs">
+      {/* Input oculto para OCR rápido "Albarán que falta" — acepta cámara y archivos */}
+      <input
+        ref={quickScanRef} type="file" className="hidden"
+        accept="image/*,application/pdf"
+        capture="environment"
+        onChange={handleQuickScanFile}
+      />
 
       {/* ── HEADER EDITORIAL ─────────────────────────────────────────────── */}
       <header className="bg-white rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm p-5 md:p-6 flex flex-col xl:flex-row justify-between gap-5 relative z-40 sticky top-4">
@@ -2134,6 +2198,20 @@ REGLAS:
                                     </div>
                                   </div>
                                 )}
+
+                                {/* ── Botón añadir albarán que falta ── */}
+                                <div className="pt-1 border-t border-slate-100">
+                                  <button
+                                    onClick={() => handleQuickScan(prov.nombre)}
+                                    disabled={scanningProv === prov.nombre}
+                                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 border-dashed border-indigo-200 text-indigo-600 text-[11px] font-black uppercase tracking-widest hover:bg-indigo-50 hover:border-indigo-400 transition-all disabled:opacity-60"
+                                  >
+                                    {scanningProv === prov.nombre
+                                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin"/> Procesando con IA...</>
+                                      : <><Camera className="w-3.5 h-3.5"/> Foto / Subir albarán que falta</>
+                                    }
+                                  </button>
+                                </div>
 
                               </div>
                             </motion.div>
