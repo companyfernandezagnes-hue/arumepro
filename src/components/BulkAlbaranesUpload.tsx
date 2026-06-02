@@ -271,7 +271,19 @@ const runWithLimit = async <T,>(items: T[], limit: number, worker: (item: T, i: 
   await Promise.all(runners);
 };
 
-const PROMPT = `Eres un OCR contable EXPERTO en albaranes y facturas comerciales españoles para un restaurante japonés (Arume Sake Bar). Lee el documento DOS VECES antes de responder: una para entender la estructura, otra para extraer cifras exactas.
+const PROMPT = `Eres un OCR contable EXPERTO en albaranes y facturas comerciales españoles para un restaurante japonés (Arume Sake Bar). Lee el documento TRES VECES:
+1. Para entender la estructura general
+2. Para extraer todos los datos impresos (cifras, texto)
+3. Para BUSCAR ESPECÍFICAMENTE anotaciones escritas a mano con bolígrafo/lápiz sobre el documento impreso — ESTAS SON CRÍTICAS para la contabilidad
+
+⚠️ ATENCIÓN ESPECIAL A TEXTO MANUSCRITO: Las anotaciones a boli sobre el documento impreso son información contable IMPRESCINDIBLE. Pueden ser:
+- Cantidades o precios CORREGIDOS (tachado impreso + nuevo valor a mano)
+- Productos NOT TRAÍDOS (tachados, cruces, "NO", "FALTA", "NE" = no entregado)
+- Descuentos negociados en el momento (escritos en la columna DTO)
+- Devoluciones ("DEV", "DEVOLVER", número negativo)
+- Notas del proveedor ("pendiente", "se trae mañana", "abono próxima")
+- Firma de conformidad o disconformidad
+- Cualquier número, palabra o símbolo escritos a mano DIFERENTE al texto impreso
 
 En hostelería conviven en la MISMA factura productos con IVA distinto:
   - 4%  → pan, leche, huevos, frutas/verduras frescas, harinas, cereales
@@ -299,7 +311,8 @@ ESQUEMA EXACTO:
       "iva": number,                // importe IVA de la línea = base × rate/100
       "t": number,                  // total línea con IVA = base + iva
       "descuento": number,          // 0 si no hay; si lo hay, importe en €
-      "incidencia": "string|null"   // null si OK. Si hay problema → texto breve (ver INCIDENCIAS)
+      "incidencia": "string|null",  // null si OK. Si hay problema → texto breve (ver INCIDENCIAS)
+      "manuscrito": "string|null"   // TRANSCRIPCIÓN LITERAL de cualquier texto escrito a mano EN esta línea
     }
   ],
   "totales": {
@@ -315,6 +328,7 @@ ESQUEMA EXACTO:
     }
   },
   "alertas": [],                     // array de strings con incidencias detectadas (ver INCIDENCIAS)
+  "notas_manuscritas": "string|null", // TRANSCRIPCIÓN COMPLETA de TODO el texto escrito a mano en el documento (cabecera, márgenes, pie, observaciones). Si no hay nada manuscrito → null.
   "tipo_documento": "albaran"|"factura"|"abono"|"nota_entrega",
   "confidence": "high"|"medium"|"low"
 }
@@ -589,7 +603,22 @@ BUSCA en el documento CUALQUIERA de estas señales y repórtalas en "alertas" y 
    - "TOTAL(s/IVA)" o "Total sin IVA" → el total NO incluye IVA. Alerta: "TOTAL SIN IVA - factura pendiente".
    - Esto pasa con Tokyo-Ya y algunos distribuidores.
 
-REGLA DE ORO: Si ves CUALQUIER anotación manuscrita que no sea la firma de "Conforme Cliente", REPÓRTALA en alertas. Es mejor avisar de más que perder una incidencia. La dueña revisa estas alertas para reclamar a proveedores.
+REGLA DE ORO ANOTACIONES MANUSCRITAS:
+Si ves CUALQUIER texto escrito a boli/lápiz (diferente al texto impreso), tienes que:
+1. Transcribirlo LITERALMENTE en el campo "notas_manuscritas" del JSON
+2. Si está junto a una línea de producto → también en lineas[].manuscrito
+3. Si implica una corrección de precio/cantidad → USAR EL VALOR MANUSCRITO y reflejar el impreso en la incidencia
+4. Reportarlo en "alertas" con contexto
+
+Ejemplos de anotaciones típicas que VAS A VER en estos albaranes:
+- Un precio tachado con otro escrito encima: "8,72 → 9,50" (usar 9.50, alerta "PRECIO CAMBIADO de 8.72 a 9.50")
+- "NE" o "N/E" junto a un producto = No Entregado (marcar incidencia "NO ENTREGADO")
+- Un número escrito en la columna DTO = descuento negociado (aplicarlo)
+- "ABONO" o "-" con número = devolución (cantidad negativa)
+- Texto al margen: "falta 1 caja", "se cambia por X", "devolver próxima entrega"
+- Sello o texto "PAGADO", "COBRADO", fecha de pago
+- Corrección de cantidad: "2" tachado y "1" escrito = solo 1 unidad entregada
+- Firma del receptor con fecha diferente a la del documento
 
 DOCUMENTOS MANCHADOS / DAÑADOS:
 Los albaranes llegan de la cocina: pueden tener manchas de agua, grasa, salpicaduras. Las marcas de agua "COPIA" son normales (es la copia del cliente). Ignora manchas y lee el texto legible. Si un número es ilegible → marca confidence="medium".
@@ -815,6 +844,14 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
           })(),
         };
 
+        // Recoger anotaciones manuscritas + alertas de la IA
+        const notasManuscritas = raw.notas_manuscritas
+          ? String(raw.notas_manuscritas).trim()
+          : null;
+        const alertasIA: string[] = Array.isArray(raw.alertas)
+          ? raw.alertas.map((a: any) => String(a)).filter(Boolean)
+          : [];
+
         const parsed: ParsedAlbaran = {
           proveedor: String(raw.proveedor || '').trim(),
           num: String(raw.num || '').trim() || 'S/N',
@@ -827,6 +864,9 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
             ? raw.confidence : undefined,
           aiProvider: result.provider,
           aiModel: result.model,
+          // Anotaciones manuscritas detectadas por la IA
+          ...(notasManuscritas ? { notas_manuscritas: notasManuscritas } : {}),
+          ...(alertasIA.length > 0 ? { alertas_ia: alertasIA } : {}),
         };
 
         // 🔄 Re-prompt automático: si la IA devolvió fecha o proveedor vacíos,
@@ -1152,8 +1192,10 @@ Si no lo ves claramente, devuelve null. NO inventes.`;
             ai_confidence: p.confidence || 'unknown',
           } : {}),
           // 🖼️ Thumbnail para ver la imagen desde la vista de facturas por proveedor
-          // Solo guardamos si es imagen (no PDF) y el base64 existe
           ...(e.base64 && !e.file.type.includes('pdf') ? { thumb_b64: e.base64, thumb_mime: 'image/jpeg' } : {}),
+          // 📝 Anotaciones manuscritas detectadas por la IA — críticas para contabilidad
+          ...((p as any).notas_manuscritas ? { notas_manuscritas: (p as any).notas_manuscritas } : {}),
+          ...((p as any).alertas_ia?.length > 0 ? { alertas_ia: (p as any).alertas_ia } : {}),
         } as any;
         // ── Registrar precios y detectar subidas ──────────────────────
         for (const it of items) {
@@ -1882,6 +1924,26 @@ const ReviewCard: React.FC<ReviewCardProps> = ({ entry, kind, onToggleSelected, 
                     className="w-full py-2 text-[10px] font-black uppercase tracking-widest text-indigo-600 border-2 border-dashed border-indigo-200 rounded-xl hover:bg-indigo-50 transition">
                     + Añadir línea manualmente
                   </button>
+                )}
+                {/* 📝 Anotaciones manuscritas — PRIMERO, son lo más importante */}
+                {(parsed as any)?.notas_manuscritas && (
+                  <div className="bg-indigo-50 border-2 border-indigo-300 rounded-xl p-3">
+                    <p className="text-[10px] font-black uppercase text-indigo-800 mb-1.5 flex items-center gap-1.5">
+                      ✍️ Anotaciones manuscritas detectadas
+                    </p>
+                    <p className="text-xs font-bold text-indigo-900 whitespace-pre-wrap leading-relaxed">
+                      {(parsed as any).notas_manuscritas}
+                    </p>
+                  </div>
+                )}
+                {/* Alertas de la IA */}
+                {(parsed as any)?.alertas_ia?.length > 0 && (
+                  <div className="bg-orange-50 border border-orange-200 rounded-xl p-3">
+                    <p className="text-[10px] font-black uppercase text-orange-800 mb-1">🚨 Alertas IA</p>
+                    <ul className="text-[10px] font-bold text-orange-700 list-disc list-inside space-y-0.5">
+                      {(parsed as any).alertas_ia.map((a: string, i: number) => <li key={i}>{a}</li>)}
+                    </ul>
+                  </div>
                 )}
                 {reasons.length > 0 && (
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">

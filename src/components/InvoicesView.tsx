@@ -2017,14 +2017,14 @@ REGLAS:
               </div>
 
               {/* ── Lista de proveedores ── */}
-              {proveedoresEstado.length === 0 ? (
+              {proveedorEstados.length === 0 ? (
                 <div className="bg-white rounded-2xl border border-slate-100 p-12 text-center">
                   <Package className="w-10 h-10 text-slate-300 mx-auto mb-3" />
                   <p className="text-slate-400 font-bold">Sin albaranes ni facturas este mes</p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {proveedoresEstado.map(prov => {
+                  {proveedorEstados.map(prov => {
                     // Todas las facturas del proveedor este mes
                     const todasFacturas = [...prov.facturasPendientes, ...prov.facturasPagadas];
                     // Total de albaranes sueltos
@@ -2063,7 +2063,8 @@ REGLAS:
                           {prov.albaranesSueltos.length > 0 && (
                             <div className="space-y-1.5">
                               {prov.albaranesSueltos.map((a: any) => (
-                                <div key={a.id} className="flex items-center justify-between bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+                                <div key={a.id} className="bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 space-y-1">
+                                  <div className="flex items-center justify-between">
                                   <p className="text-xs text-slate-700 font-bold">{a.date} · {a.num || 'S/N'}</p>
                                   <div className="flex items-center gap-2 shrink-0">
                                     <p className="font-black text-amber-700 text-xs">{Num.fmt(Math.abs(Num.parse(a.total) || 0))}</p>
@@ -2084,6 +2085,23 @@ REGLAS:
                                       <X className="w-3 h-3" />
                                     </button>
                                   </div>
+                                  </div>
+                                  {/* ✍️ Notas manuscritas — siempre visibles si existen */}
+                                  {(a as any).notas_manuscritas && (
+                                    <div className="bg-indigo-100 border border-indigo-200 rounded-lg px-2.5 py-1.5">
+                                      <p className="text-[9px] font-black text-indigo-700 uppercase tracking-wider mb-0.5">✍️ Anotación manuscrita</p>
+                                      <p className="text-[11px] text-indigo-900 font-medium whitespace-pre-wrap">{(a as any).notas_manuscritas}</p>
+                                    </div>
+                                  )}
+                                  {/* 🚨 Alertas IA */}
+                                  {(a as any).alertas_ia?.length > 0 && (
+                                    <div className="bg-orange-100 border border-orange-200 rounded-lg px-2.5 py-1.5">
+                                      <p className="text-[9px] font-black text-orange-700 uppercase tracking-wider mb-0.5">🚨 Alertas</p>
+                                      {(a as any).alertas_ia.map((al: string, i: number) => (
+                                        <p key={i} className="text-[11px] text-orange-900 font-medium">{al}</p>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
                               ))}
                             </div>
@@ -2144,7 +2162,6 @@ REGLAS:
                               {/* Nota de problema si no está pagada */}
                               {!f.paid && (
                                 <ProveedorNota
-                                  facturaId={f.id}
                                   nota={(f as any).nota_problema || ''}
                                   onSave={async (nota) => {
                                     const nd = JSON.parse(JSON.stringify(safeData));
