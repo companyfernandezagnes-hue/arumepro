@@ -1151,6 +1151,9 @@ Si no lo ves claramente, devuelve null. NO inventes.`;
             review_reasons: reasons,
             ai_confidence: p.confidence || 'unknown',
           } : {}),
+          // 🖼️ Thumbnail para ver la imagen desde la vista de facturas por proveedor
+          // Solo guardamos si es imagen (no PDF) y el base64 existe
+          ...(e.base64 && !e.file.type.includes('pdf') ? { thumb_b64: e.base64, thumb_mime: 'image/jpeg' } : {}),
         } as any;
         // ── Registrar precios y detectar subidas ──────────────────────
         for (const it of items) {

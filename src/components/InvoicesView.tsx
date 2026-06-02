@@ -185,6 +185,38 @@ const buildProveedorEstado = (
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ── Nota de problema en factura pendiente ────────────────────────────────
+const ProveedorNota = ({ nota, onSave }: { nota: string; onSave: (nota: string) => Promise<void> }) => {
+  const [editing, setEditing] = React.useState(false);
+  const [val, setVal] = React.useState(nota);
+  const [saving, setSaving] = React.useState(false);
+  React.useEffect(() => { setVal(nota); }, [nota]);
+  if (!editing && !nota) return (
+    <button onClick={() => setEditing(true)} className="text-[10px] text-rose-400 hover:text-rose-600 font-bold flex items-center gap-1 transition">
+      <Plus className="w-3 h-3"/> Añadir nota del problema
+    </button>
+  );
+  if (!editing) return (
+    <div className="flex items-start justify-between gap-2">
+      <p className="text-[11px] text-rose-700 font-medium flex-1">⚠️ {nota}</p>
+      <button onClick={() => setEditing(true)} className="text-[9px] text-slate-400 hover:text-slate-600 shrink-0">✏️</button>
+    </div>
+  );
+  return (
+    <div className="flex gap-2">
+      <input autoFocus value={val} onChange={e => setVal(e.target.value)}
+        placeholder="Ej: precio incorrecto, falta abono, esperando corrección..."
+        className="flex-1 text-[11px] bg-white border border-rose-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-rose-400"
+      />
+      <button disabled={saving} onClick={async () => { setSaving(true); await onSave(val); setSaving(false); setEditing(false); }}
+        className="text-[10px] font-black bg-rose-600 text-white px-3 py-1.5 rounded-lg hover:bg-rose-700 disabled:opacity-50 transition">
+        {saving ? '...' : 'OK'}
+      </button>
+      <button onClick={() => { setVal(nota); setEditing(false); }} className="text-[10px] text-slate-400 px-2">✕</button>
+    </div>
+  );
+};
+
 // 🏦 COMPONENTE PRINCIPAL
 // ─────────────────────────────────────────────────────────────────────────────
 export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
@@ -253,9 +285,11 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [expandedProv,     setExpandedProv]     = useState<string | null>(null);
 
   // 📷 OCR rápido "Albarán que falta" — estado del mini-scan por proveedor
-  const [scanningProv,     setScanningProv]     = useState<string | null>(null); // qué proveedor está escaneando
+  const [scanningProv,     setScanningProv]     = useState<string | null>(null);
   const quickScanRef       = useRef<HTMLInputElement>(null);
-  const [quickScanTarget,  setQuickScanTarget]  = useState<string | null>(null); // proveedor al que va el albarán
+  const [quickScanTarget,  setQuickScanTarget]  = useState<string | null>(null);
+  // 🖼️ Preview de imagen de albarán al hacer clic
+  const [previewAlbImg,    setPreviewAlbImg]    = useState<{src: string; prov: string; num: string} | null>(null);
 
   const handleQuickScan = (provNombre: string) => {
     setQuickScanTarget(provNombre);
@@ -288,13 +322,31 @@ Devuelve SOLO JSON:
       const prov  = String(raw.proveedor || quickScanTarget).toUpperCase();
       const num   = String(raw.num || 'S/N');
 
-      // Crear el albarán y guardarlo
+      // Crear el albarán y guardarlo (con thumbnail para preview)
+      // Generar thumbnail pequeño (~40KB) para poder verlo después
+      let thumb_b64: string | undefined;
+      if (mimeType.startsWith('image/') && base64) {
+        try {
+          const img = await createImageBitmap(new Blob([Uint8Array.from(atob(base64), c => c.charCodeAt(0))], { type: mimeType }));
+          const scale = Math.min(400 / img.width, 400 / img.height, 1);
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
+          thumb_b64 = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
+        } catch { /* sin thumbnail */ }
+      } else if (mimeType === 'application/pdf') {
+        // Para PDFs usamos el base64 directamente (se mostrará en iframe)
+        thumb_b64 = base64;
+      }
+
       const newAlbaran: any = {
         id: `alb-${fecha.replace(/-/g,'')}-${Date.now()}-REST`,
         prov, date: fecha, num,
         total: String(total), base: String(base), taxes: String(iva), iva: String(iva),
         items: [], invoiced: false, paid: false, reconciled: false,
         unitId: 'REST', status: 'ok', created_at: new Date().toISOString(), source: 'quick-scan',
+        ...(thumb_b64 ? { thumb_b64, thumb_mime: mimeType } : {}),
       };
       const newData = JSON.parse(JSON.stringify(data));
       if (!newData.albaranes) newData.albaranes = [];
@@ -1936,294 +1988,184 @@ REGLAS:
 
           {/* ════════ PESTAÑA: PROVEEDORES 🆕 ════════ */}
           {activeTab === 'proveedores' && (
-            <motion.div key="proveedores" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ type: 'spring', damping: 25 }}>
+            <motion.div key="proveedores" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
 
-              {/* ── Zona de subida masiva de facturas PDF ── */}
-              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border-2 border-dashed border-blue-300 p-6 mb-6 text-center relative">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf,.jpg,.jpeg,.png,.webp"
-                  multiple
-                  onChange={handleBulkPDFUpload}
-                  className="hidden"
-                />
-                <div className="flex flex-col md:flex-row items-center gap-4">
-                  <div className="flex items-center gap-3 flex-1">
-                    <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shrink-0">
-                      <UploadCloud className="w-6 h-6 text-white" />
-                    </div>
-                    <div className="text-left">
-                      <h3 className="text-sm font-black text-blue-900">Subir facturas del correo</h3>
-                      <p className="text-[10px] text-blue-500 font-bold mt-0.5">
-                        Sube varios PDFs a la vez. La IA los lee, los cruza con tus albaranes y los adjunta automáticamente.
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isUploading}
-                    className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition shadow-lg flex items-center gap-2 active:scale-95 disabled:opacity-50 shrink-0"
-                  >
-                    {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <UploadCloud className="w-4 h-4" />}
-                    {isUploading ? 'Procesando…' : 'Seleccionar PDFs'}
-                  </button>
-                </div>
+              {/* Input oculto para OCR rápido por proveedor */}
+              <input ref={quickScanRef} type="file" className="hidden"
+                accept="image/*,application/pdf" capture="environment"
+                onChange={handleQuickScanFile} />
 
-                {/* Resultados de la subida */}
-                {uploadResults.length > 0 && (
-                  <div className="mt-4 bg-white rounded-2xl border border-blue-100 p-4 text-left">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Resultados</p>
-                    <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                      {uploadResults.map((r, i) => (
-                        <div key={i} className={cn(
-                          'flex items-center gap-2 text-xs px-3 py-2 rounded-xl',
-                          r.status === 'ok' ? 'bg-emerald-50 text-emerald-700' :
-                          r.status === 'no-match' ? 'bg-amber-50 text-amber-700' :
-                          'bg-red-50 text-red-700'
-                        )}>
-                          <span className="font-black shrink-0">{r.status === 'ok' ? '✅' : r.status === 'no-match' ? '🆕' : '❌'}</span>
-                          <span className="font-bold truncate">{r.name}</span>
-                          <span className="text-[10px] ml-auto shrink-0">{r.msg}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <button onClick={() => setUploadResults([])} className="mt-2 text-[9px] font-black text-blue-500 hover:text-blue-700 uppercase tracking-widest">Cerrar resultados</button>
-                  </div>
-                )}
+              {/* ── Selector de mes ── */}
+              <div className="flex items-center justify-between bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-3">
+                <button onClick={() => {
+                  const [y, m] = provMesFilter.split('-').map(Number);
+                  const d = new Date(y, m - 2, 1);
+                  setProvMesFilter(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+                }} className="w-9 h-9 rounded-xl hover:bg-slate-100 flex items-center justify-center transition">
+                  <ChevronLeft className="w-5 h-5 text-slate-500" />
+                </button>
+                <span className="font-black text-slate-800 uppercase tracking-widest text-sm">
+                  {new Date(provMesFilter + '-01').toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
+                </span>
+                <button onClick={() => {
+                  const [y, m] = provMesFilter.split('-').map(Number);
+                  const d = new Date(y, m, 1);
+                  setProvMesFilter(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+                }} className="w-9 h-9 rounded-xl hover:bg-slate-100 flex items-center justify-center transition">
+                  <ChevronRight className="w-5 h-5 text-slate-500" />
+                </button>
               </div>
 
-              {/* Selector de mes + leyenda */}
-              <div className="flex items-center gap-3 mb-5 flex-wrap">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Mes:</span>
-                <select
-                  value={provMesFilter}
-                  onChange={e => setProvMesFilter(e.target.value)}
-                  className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs font-black text-slate-700 outline-none focus:border-indigo-400 cursor-pointer"
-                >
-                  <option value="">Todos los meses</option>
-                  {mesesDisponibles.map(m => {
-                    const [y, mo] = m.split('-');
-                    const names = ['', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-                      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-                    return <option key={m} value={m}>{names[parseInt(mo)] || mo} {y}</option>;
-                  })}
-                </select>
-
-                {/* Leyenda de colores */}
-                <div className="flex items-center gap-4 ml-auto flex-wrap">
-                  <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-amber-400"/><span className="text-[10px] font-bold text-slate-500">Albaranes sueltos</span></div>
-                  <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-rose-400"/><span className="text-[10px] font-bold text-slate-500">Factura pendiente</span></div>
-                  <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-emerald-400"/><span className="text-[10px] font-bold text-slate-500">Pagado</span></div>
-                </div>
-              </div>
-
-              {/* Lista de proveedores */}
-              {proveedorEstados.length === 0 ? (
-                <div className="py-24 text-center bg-white rounded-[3rem] border border-slate-100 shadow-sm flex flex-col items-center">
-                  <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-4 border border-slate-100">
-                    <Users className="w-10 h-10 text-slate-300" />
-                  </div>
-                  <p className="text-slate-800 font-black text-base uppercase tracking-widest">Sin datos para este periodo</p>
-                  <p className="text-sm font-medium text-slate-400 mt-2">Cambia el filtro de mes o importa albaranes primero.</p>
+              {/* ── Lista de proveedores ── */}
+              {proveedoresEstado.length === 0 ? (
+                <div className="bg-white rounded-2xl border border-slate-100 p-12 text-center">
+                  <Package className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                  <p className="text-slate-400 font-bold">Sin albaranes ni facturas este mes</p>
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {proveedorEstados.map(prov => {
-                    const isExpanded = expandedProv === prov.nombre;
-                    const tieneProblemas = prov.albaranesSueltos.length > 0 || prov.facturasPendientes.length > 0;
+                <div className="space-y-3">
+                  {proveedoresEstado.map(prov => {
+                    // Todas las facturas del proveedor este mes
+                    const todasFacturas = [...prov.facturasPendientes, ...prov.facturasPagadas];
+                    // Total de albaranes sueltos
+                    const totalSuelto = prov.totalSuelto;
+                    // ¿Hay algún problema guardado? Guardamos nota en la factura pendiente más reciente
+                    const factPendiente = prov.facturasPendientes[0];
+                    const factPagada   = prov.facturasPagadas[0];
+                    const facturaMes   = factPendiente || factPagada;
 
                     return (
-                      <motion.div
-                        key={prov.nombre}
-                        layout
-                        className={cn(
-                          'bg-white rounded-2xl border overflow-hidden',
-                          tieneProblemas ? 'border-amber-200 shadow-sm' : 'border-slate-100'
-                        )}
-                      >
-                        {/* Fila resumen — clic para expandir/colapsar */}
-                        <button
-                          onClick={() => setExpandedProv(isExpanded ? null : prov.nombre)}
-                          className="w-full flex items-center gap-4 p-4 text-left hover:bg-slate-50/80 transition-colors"
-                        >
-                          {/* Avatar inicial del proveedor */}
-                          <div className={cn(
-                            'w-10 h-10 rounded-xl flex items-center justify-center text-sm font-black shrink-0',
-                            tieneProblemas ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'
-                          )}>
-                            {prov.nombre.charAt(0).toUpperCase()}
-                          </div>
+                      <div key={prov.nombre} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
 
-                          {/* Nombre + badges de estado */}
-                          <div className="flex-1 min-w-0">
-                            <p className="font-black text-slate-800 text-sm truncate">{prov.nombre}</p>
-                            <div className="flex items-center gap-2 mt-1 flex-wrap">
-                              {prov.albaranesSueltos.length > 0 && (
-                                <span className="text-[9px] font-black text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
-                                  {prov.albaranesSueltos.length} alb. sueltos
-                                </span>
-                              )}
-                              {prov.facturasPendientes.length > 0 && (
-                                <span className="text-[9px] font-black text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
-                                  {prov.facturasPendientes.length} pendientes de pago
-                                </span>
-                              )}
-                              {prov.facturasPagadas.length > 0 && (
-                                <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                                  {prov.facturasPagadas.length} pagadas ✓
-                                </span>
-                              )}
+                        {/* ── Cabecera del proveedor ── */}
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-50">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 font-black text-sm flex items-center justify-center shrink-0">
+                              {prov.nombre.charAt(0)}
+                            </div>
+                            <div>
+                              <p className="font-black text-slate-800 text-sm">{prov.nombre}</p>
+                              <p className="text-[10px] text-slate-400 font-bold">
+                                {prov.albaranesSueltos.length > 0 && <span className="text-amber-600">{prov.albaranesSueltos.length} sin factura · </span>}
+                                {todasFacturas.length > 0 && <span>{todasFacturas.length} factura(s)</span>}
+                              </p>
                             </div>
                           </div>
-
-                          {/* Totales en columnas — solo en pantallas medianas+ */}
-                          <div className="hidden md:flex items-center gap-6 shrink-0 mr-2">
-                            {prov.totalSuelto > 0 && (
-                              <div className="text-right">
-                                <p className="text-[9px] font-black text-amber-500 uppercase tracking-widest">Suelto</p>
-                                <p className="font-black text-amber-600 text-sm">{Num.fmt(prov.totalSuelto)}</p>
-                              </div>
-                            )}
-                            {prov.totalPendiente > 0 && (
-                              <div className="text-right">
-                                <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest">Pendiente</p>
-                                <p className="font-black text-rose-600 text-sm">{Num.fmt(prov.totalPendiente)}</p>
-                              </div>
-                            )}
-                            {prov.totalPagado > 0 && (
-                              <div className="text-right">
-                                <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Pagado</p>
-                                <p className="font-black text-emerald-600 text-sm">{Num.fmt(prov.totalPagado)}</p>
-                              </div>
-                            )}
-                            <div className="text-right pl-4 border-l border-slate-100">
-                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Total</p>
-                              <p className="font-black text-slate-800 text-base">{Num.fmt(prov.totalSuelto + prov.totalPendiente + prov.totalPagado)}</p>
-                            </div>
+                          <div className="text-right shrink-0">
+                            {totalSuelto > 0 && <p className="font-black text-amber-600 text-base">{Num.fmt(totalSuelto)}</p>}
+                            {facturaMes && <p className={cn('text-xs font-bold', facturaMes.paid ? 'text-emerald-600' : 'text-rose-500')}>{facturaMes.paid ? '✓ Pagada' : '⏳ Pendiente'} {Num.fmt(Math.abs(Num.parse(facturaMes.total)))}</p>}
                           </div>
+                        </div>
 
-                          {/* Chevron */}
-                          {isExpanded
-                            ? <ChevronUp   className="w-4 h-4 text-slate-400 shrink-0" />
-                            : <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
-                          }
-                        </button>
+                        <div className="px-5 py-4 space-y-3">
 
-                        {/* Panel de detalle expandido */}
-                        <AnimatePresence>
-                          {isExpanded && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: 'auto', opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              className="overflow-hidden border-t border-slate-100"
-                            >
-                              <div className="p-4 space-y-4 bg-slate-50/40">
-
-                                {/* ── Albaranes sueltos ── */}
-                                {prov.albaranesSueltos.length > 0 && (
-                                  <div>
-                                    <p className="text-[9px] font-black text-amber-600 uppercase tracking-widest mb-2 flex items-center gap-1.5">
-                                      <AlertTriangle className="w-3 h-3" /> Sin agrupar en factura — {Num.fmt(prov.totalSuelto)}
-                                    </p>
-                                    <div className="space-y-1.5">
-                                      {prov.albaranesSueltos.map((a: any) => (
-                                        <div key={a.id} className="flex items-center justify-between bg-amber-50 border border-amber-100 rounded-xl px-3 py-2.5">
-                                          <div>
-                                            <p className="font-bold text-slate-700 text-xs">{String(a.date || 'S/F')} · Ref: {String(a.num || 'S/N')}</p>
-                                            {a.notes && <p className="text-[10px] text-slate-400 mt-0.5 truncate max-w-xs">{a.notes}</p>}
-                                          </div>
-                                          <p className="font-black text-amber-700 text-sm shrink-0 ml-3">{Num.fmt(Math.abs(Num.parse(a.total) || 0))}</p>
-                                        </div>
-                                      ))}
-                                    </div>
+                          {/* ── Albaranes sueltos ── */}
+                          {prov.albaranesSueltos.length > 0 && (
+                            <div className="space-y-1.5">
+                              {prov.albaranesSueltos.map((a: any) => (
+                                <div key={a.id} className="flex items-center justify-between bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+                                  <p className="text-xs text-slate-700 font-bold">{a.date} · {a.num || 'S/N'}</p>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <p className="font-black text-amber-700 text-xs">{Num.fmt(Math.abs(Num.parse(a.total) || 0))}</p>
+                                    {/* Ver imagen si tiene thumbnail guardado */}
+                                    {(a as any).thumb_b64 && (
+                                      <button onClick={() => setPreviewAlbImg({ src: (a as any).thumb_b64, prov: a.prov, num: a.num || 'S/N' })}
+                                        className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-600 hover:bg-indigo-200 flex items-center justify-center transition text-[10px]" title="Ver imagen">
+                                        🖼️
+                                      </button>
+                                    )}
+                                    <button onClick={async () => {
+                                      if (!await confirm({ title:'¿Eliminar albarán?', message:`Eliminar "${a.num || 'S/N'}" de ${a.prov}?`, danger:true, confirmLabel:'Eliminar' })) return;
+                                      const nd = JSON.parse(JSON.stringify(safeData));
+                                      nd.albaranes = nd.albaranes.filter((x:any) => x.id !== a.id);
+                                      await onSave(nd);
+                                      toast.success('Albarán eliminado.');
+                                    }} className="w-6 h-6 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-red-500 hover:border-red-200 flex items-center justify-center transition">
+                                      <X className="w-3 h-3" />
+                                    </button>
                                   </div>
-                                )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
 
-                                {/* ── Facturas pendientes de pago ── */}
-                                {prov.facturasPendientes.length > 0 && (
-                                  <div>
-                                    <p className="text-[9px] font-black text-rose-600 uppercase tracking-widest mb-2 flex items-center gap-1.5">
-                                      <Clock className="w-3 h-3" /> Pendientes de pago — {Num.fmt(prov.totalPendiente)}
-                                    </p>
-                                    <div className="space-y-1.5">
-                                      {prov.facturasPendientes.map(f => (
-                                        <div
-                                          key={f.id}
-                                          className="flex items-center justify-between bg-rose-50 border border-rose-100 rounded-xl px-3 py-2.5 cursor-pointer hover:border-rose-300 transition-colors"
-                                          onClick={() => setSelectedInvoice(f)}
-                                        >
-                                          <div>
-                                            <p className="font-bold text-slate-700 text-xs">{f.date} · {f.num || 'S/N'}</p>
-                                            <p className="text-[10px] text-slate-400 mt-0.5">{(f.albaranIdsArr || []).length} albaranes vinculados</p>
-                                          </div>
-                                          <div className="flex items-center gap-2 shrink-0 ml-3">
-                                            <p className="font-black text-rose-700 text-sm">{Num.fmt(Math.abs(Num.parse(f.total) || 0))}</p>
-                                            <button
-                                              onClick={e => { e.stopPropagation(); handleTogglePago(f.id); }}
-                                              className="text-[9px] font-black bg-rose-600 text-white px-2.5 py-1 rounded-lg hover:bg-rose-700 transition"
-                                            >
-                                              ✓ Marcar pagada
-                                            </button>
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
+                          {/* ── Botón añadir albarán ── */}
+                          <button onClick={() => handleQuickScan(prov.nombre)}
+                            disabled={scanningProv === prov.nombre}
+                            className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border-2 border-dashed border-slate-200 text-slate-400 text-[11px] font-black uppercase tracking-widest hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50 transition-all disabled:opacity-50">
+                            {scanningProv === prov.nombre
+                              ? <><Loader2 className="w-3 h-3 animate-spin"/>Procesando...</>
+                              : <><Camera className="w-3 h-3"/>Añadir albarán que falta</>}
+                          </button>
 
-                                {/* ── Facturas pagadas ── */}
-                                {prov.facturasPagadas.length > 0 && (
-                                  <div>
-                                    <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-2 flex items-center gap-1.5">
-                                      <CheckCircle2 className="w-3 h-3" /> Pagadas — {Num.fmt(prov.totalPagado)}
-                                    </p>
-                                    <div className="space-y-1.5">
-                                      {prov.facturasPagadas.map(f => (
-                                        <div
-                                          key={f.id}
-                                          className="flex items-center justify-between bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2.5 cursor-pointer hover:border-emerald-300 transition-colors"
-                                          onClick={() => setSelectedInvoice(f)}
-                                        >
-                                          <div>
-                                            <p className="font-bold text-slate-700 text-xs">{f.date} · {f.num || 'S/N'}</p>
-                                            <p className="text-[10px] text-slate-400 mt-0.5">
-                                              {f.reconciled ? '✓ Conciliada banco' : 'Pagada manualmente'}
-                                            </p>
-                                          </div>
-                                          <p className="font-black text-emerald-700 text-sm shrink-0 ml-3">{Num.fmt(Math.abs(Num.parse(f.total) || 0))}</p>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
+                          {/* ── Factura del mes ── */}
+                          {prov.albaranesSueltos.length > 0 && todasFacturas.length === 0 && (
+                            <button onClick={async () => {
+                              const ids = prov.albaranesSueltos.map((a:any) => a.id);
+                              const total = prov.totalSuelto;
+                              const nd = JSON.parse(JSON.stringify(safeData));
+                              const newFac: any = {
+                                id: `fac-${Date.now()}`, tipo: 'compra',
+                                prov: prov.nombre, cliente: prov.nombre,
+                                date: provMesFilter + '-01', num: `F-${prov.nombre.slice(0,4).toUpperCase()}-${provMesFilter.replace('-','')}`,
+                                total: String(total), base: String(total), taxes: '0',
+                                paid: false, status: 'approved', reconciled: false,
+                                albaranIdsArr: ids, created_at: new Date().toISOString(),
+                              };
+                              if (!nd.facturas) nd.facturas = [];
+                              nd.facturas.unshift(newFac);
+                              nd.albaranes = nd.albaranes.map((a:any) => ids.includes(a.id) ? {...a, invoiced:true} : a);
+                              await onSave(nd);
+                              toast.success(`✅ Factura creada: ${Num.fmt(total)}`);
+                            }} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs py-2.5 rounded-xl transition flex items-center justify-center gap-2">
+                              <Plus className="w-3.5 h-3.5"/>Crear factura · {Num.fmt(prov.totalSuelto)}
+                            </button>
+                          )}
 
-                                {/* ── Botón añadir albarán que falta ── */}
-                                <div className="pt-1 border-t border-slate-100">
-                                  <button
-                                    onClick={() => handleQuickScan(prov.nombre)}
-                                    disabled={scanningProv === prov.nombre}
-                                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 border-dashed border-indigo-200 text-indigo-600 text-[11px] font-black uppercase tracking-widest hover:bg-indigo-50 hover:border-indigo-400 transition-all disabled:opacity-60"
-                                  >
-                                    {scanningProv === prov.nombre
-                                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin"/> Procesando con IA...</>
-                                      : <><Camera className="w-3.5 h-3.5"/> Foto / Subir albarán que falta</>
-                                    }
+                          {/* ── Estado de facturas existentes ── */}
+                          {todasFacturas.map(f => (
+                            <div key={f.id} className={cn('rounded-xl border p-3 space-y-2', f.paid ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100')}>
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="font-black text-xs text-slate-700">{f.num || 'Sin número'} · {f.date}</p>
+                                  <p className="text-[10px] text-slate-400">{(f.albaranIdsArr||[]).length} albaranes · {Num.fmt(Math.abs(Num.parse(f.total)))}</p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {/* Toggle pagada / pendiente */}
+                                  <button onClick={() => handleTogglePago(f.id)}
+                                    className={cn('text-[10px] font-black px-3 py-1.5 rounded-lg transition', f.paid
+                                      ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                      : 'bg-white border border-rose-200 text-rose-600 hover:bg-rose-100')}>
+                                    {f.paid ? '✓ Pagada' : '⏳ Pendiente'}
                                   </button>
                                 </div>
-
                               </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </motion.div>
+
+                              {/* Nota de problema si no está pagada */}
+                              {!f.paid && (
+                                <ProveedorNota
+                                  facturaId={f.id}
+                                  nota={(f as any).nota_problema || ''}
+                                  onSave={async (nota) => {
+                                    const nd = JSON.parse(JSON.stringify(safeData));
+                                    const idx = nd.facturas.findIndex((x:any) => x.id === f.id);
+                                    if (idx !== -1) { nd.facturas[idx].nota_problema = nota; await onSave(nd); }
+                                  }}
+                                />
+                              )}
+                            </div>
+                          ))}
+
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
               )}
+
             </motion.div>
           )}
+
 
           {/* ════════ PESTAÑA: PARA GESTORÍA / BILKY 📤 ════════ */}
           {activeTab === 'gestoria' && (
@@ -2935,6 +2877,37 @@ REGLAS:
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── MODAL PREVIEW IMAGEN ALBARÁN ─────────────────────────────────── */}
+      {previewAlbImg && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={() => setPreviewAlbImg(null)}>
+          <div className="relative max-w-2xl w-full max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between bg-white rounded-t-2xl px-4 py-3">
+              <div>
+                <p className="font-black text-slate-800 text-sm">{previewAlbImg.prov}</p>
+                <p className="text-[10px] text-slate-400 font-bold">{previewAlbImg.num}</p>
+              </div>
+              <button onClick={() => setPreviewAlbImg(null)} className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center transition">
+                <X className="w-4 h-4 text-slate-600" />
+              </button>
+            </div>
+            {previewAlbImg.src.startsWith('data:application/pdf') || previewAlbImg.src.startsWith('JVB') ? (
+              <iframe
+                src={`data:application/pdf;base64,${previewAlbImg.src.replace('data:application/pdf;base64,','')}`}
+                className="w-full flex-1 rounded-b-2xl bg-white"
+                style={{ minHeight: '70vh' }}
+                title="Albarán PDF"
+              />
+            ) : (
+              <img
+                src={`data:image/jpeg;base64,${previewAlbImg.src}`}
+                alt="Albarán"
+                className="w-full rounded-b-2xl object-contain bg-white max-h-[80vh]"
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── MODAL DETALLE FACTURA ─────────────────────────────────────────── */}
       {selectedInvoice && typeof selectedInvoice === 'object' && selectedInvoice.id && (

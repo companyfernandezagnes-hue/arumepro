@@ -323,6 +323,25 @@ export const AlbaranesList = React.memo(({
                                  <button type="button" disabled className="p-2 rounded-lg bg-slate-50 text-slate-300 cursor-not-allowed border border-slate-100" title="Bloqueado por Banco"><Lock className="w-4 h-4"/></button>
                               ) : (
                                 <>
+                                 {/* Ver imagen si tiene thumbnail */}
+                                 {(a as any).thumb_b64 && (
+                                   <button type="button" onClick={(e) => {
+                                     e.stopPropagation();
+                                     const src = (a as any).thumb_b64;
+                                     const mime = (a as any).thumb_mime || 'image/jpeg';
+                                     // Abrir en nueva ventana para no depender del modal de InvoicesView
+                                     const w = window.open('');
+                                     if (w) {
+                                       if (mime.includes('pdf')) {
+                                         w.document.write(`<iframe src="data:application/pdf;base64,${src}" style="width:100%;height:100vh;border:none"></iframe>`);
+                                       } else {
+                                         w.document.write(`<img src="data:image/jpeg;base64,${src}" style="max-width:100%;height:auto">`);
+                                       }
+                                     }
+                                   }} className="p-2 rounded-lg bg-white text-amber-500 hover:bg-amber-50 hover:text-amber-700 border border-slate-200 shadow-sm transition-all hover:shadow" title="Ver imagen del albarán">
+                                     <span className="text-sm">🖼️</span>
+                                   </button>
+                                 )}
                                  <button type="button" onClick={(e) => { e.stopPropagation(); onOpenEdit(a); }} className="p-2 rounded-lg bg-white text-indigo-500 hover:bg-indigo-50 hover:text-indigo-700 border border-slate-200 shadow-sm transition-all hover:shadow" title="Editar Documento">
                                    <Edit2 className="w-4 h-4" />
                                  </button>
