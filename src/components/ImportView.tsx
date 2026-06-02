@@ -1210,13 +1210,13 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden p-6 md:p-8">
 
-        {/* Selector de modo */}
+        {/* Selector de modo — en móvil solo Foto + WhatsApp */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-8">
-          <ModuleButton active={importMode === 'ia_auto'}         onClick={() => { setImportMode('ia_auto');         setProcessedData(null); }} icon={Sparkles}       title="IA Batch (Lotes)"  subtitle="Facturas/Albaranes" color="indigo"  />
+          <ModuleButton active={importMode === 'ia_auto'}         onClick={() => { setImportMode('ia_auto');         setProcessedData(null); }} icon={Sparkles}       title="Foto / PDF"        subtitle="Albaranes"           color="indigo"  />
           <ModuleButton active={importMode === 'whatsapp'}        onClick={() => { setImportMode('whatsapp');        setProcessedData(null); }} icon={MessageCircle}  title="WhatsApp"          subtitle="ZIP Export"          color="green"   />
-          <ModuleButton active={importMode === 'banco_excel'}     onClick={() => { setImportMode('banco_excel');     setProcessedData(null); }} icon={Building2}      title="Banco CSV"          subtitle="Extracto"           color="blue"    />
-          <ModuleButton active={importMode === 'tpv'}             onClick={() => { setImportMode('tpv');             setProcessedData(null); }} icon={Grid}           title="TPV Madis"          subtitle="Excel Cajas"        color="amber"   />
-          <ModuleButton active={importMode === 'albaranes_excel'} onClick={() => { setImportMode('albaranes_excel'); setProcessedData(null); }} icon={Truck}          title="Albaranes Excel"    subtitle="Madis / CSV"        color="emerald" />
+          <div className="hidden md:block"><ModuleButton active={importMode === 'banco_excel'}     onClick={() => { setImportMode('banco_excel');     setProcessedData(null); }} icon={Building2}      title="Banco CSV"          subtitle="Extracto"           color="blue"    /></div>
+          <div className="hidden md:block"><ModuleButton active={importMode === 'tpv'}             onClick={() => { setImportMode('tpv');             setProcessedData(null); }} icon={Grid}           title="TPV Madis"          subtitle="Excel Cajas"        color="amber"   /></div>
+          <div className="hidden md:block"><ModuleButton active={importMode === 'albaranes_excel'} onClick={() => { setImportMode('albaranes_excel'); setProcessedData(null); }} icon={Truck}          title="Albaranes Excel"    subtitle="Madis / CSV"        color="emerald" /></div>
         </div>
 
         {/* Zona IA */}

@@ -313,6 +313,34 @@ function MobileTabBar<T extends string>({ items, activeKey, onChange }: { items:
     scrollRef.current?.scrollBy({ left: dir * 200, behavior: 'smooth' });
   };
 
+  // 📱 Modo simplificado: si hay ≤4 items (móvil), mostrar grande y centrado
+  const isSimplified = items.length <= 4;
+
+  if (isSimplified) {
+    return (
+      <nav className="fixed bottom-0 left-0 right-0 z-[120] bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe shadow-[0_-5px_15px_rgba(0,0,0,0.05)]">
+        <div className="flex items-center justify-center gap-2 py-2 px-4">
+          {items.map(it => {
+            const Icon = it.icon;
+            const active = it.key === activeKey;
+            return (
+              <button key={it.key} type="button" onClick={() => onChange(it.key)}
+                className={cn(
+                  "flex-1 max-w-[120px] h-14 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all",
+                  active
+                    ? "bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] shadow-lg"
+                    : "text-slate-500 hover:bg-slate-100 active:scale-95"
+                )}>
+                <Icon className={cn("w-6 h-6", active && "text-white")} />
+                <span className={cn("text-[10px] font-black uppercase tracking-wider", active && "text-white/90")}>{it.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+    );
+  }
+
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-[120] bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe shadow-[0_-5px_15px_rgba(0,0,0,0.05)]">
       <div className="relative flex items-center">
@@ -694,6 +722,16 @@ function AppContent() {
     return () => document.removeEventListener('keydown', onKey);
   }, [handleTabChange]);
 
+  // 📱 Detectar si es móvil (pantalla < 768px)
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' && window.innerWidth < 768
+  );
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   const navItems = useMemo<DockItemDef<TabKey>[]>(() => {
     const all: DockItemDef<TabKey>[] = [
       { key: 'dashboard',   label: 'Dash',       icon: LayoutDashboard, group: 'inicio', shortcut: '⌘1' },
@@ -719,8 +757,13 @@ function AppContent() {
       { key: 'agente',         label: 'Agente',   icon: Bot,             group: 'sistema'  },
       { key: 'notificaciones', label: 'Alertas',  icon: Bell,            group: 'sistema'  },
     ];
-    return all.filter(item => modulosPermitidos.has(item.key));
-  }, [modulosPermitidos]);
+    // 📱 En móvil: solo Dashboard + Caja + Subir (simplificado para cocina)
+    const MOBILE_TABS: TabKey[] = ['dashboard', 'diario', 'importador'];
+    const filtered = isMobile
+      ? all.filter(item => MOBILE_TABS.includes(item.key))
+      : all;
+    return filtered.filter(item => modulosPermitidos.has(item.key));
+  }, [modulosPermitidos, isMobile]);
 
   const cmdItems = useMemo<CmdItem<string>[]>(() => [
     ...navItems.map(n => ({ key: n.key, label: TAB_LABELS[n.key as TabKey], group: n.group, icon: n.icon, shortcut: n.shortcut })),
