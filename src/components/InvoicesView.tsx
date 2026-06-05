@@ -241,7 +241,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
   // ── Estado ────────────────────────────────────────────────────────────────
   // 🆕 'proveedores' añadido al tipo de la pestaña activa
-  const [activeTab,        setActiveTab]        = useState<'pend' | 'hist' | 'proveedores' | 'gestoria'>('pend');
+  const [activeTab,        setActiveTab]        = useState<'proveedores' | 'hist' | 'gestoria'>('proveedores');
   const [mode,             setMode]             = useState<'proveedor' | 'socio'>('proveedor');
   const [year,             setYear]             = useState(new Date().getFullYear());
   const [searchQ,          setSearchQ]          = useState('');
@@ -283,6 +283,40 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
   const [expandedProv,     setExpandedProv]     = useState<string | null>(null);
+  const [provSearchQ,      setProvSearchQ]      = useState('');
+
+  // ✍️ Mini-form para añadir albarán manual rápido desde la vista de proveedores
+  const [quickManualProv,  setQuickManualProv]  = useState<string | null>(null);
+  const [qmForm,           setQmForm]           = useState({ total: '', date: '', num: '' });
+  const [qmBusy,           setQmBusy]           = useState(false);
+
+  const handleQuickManualSave = async (provNombre: string) => {
+    const totalNum = parseFloat(String(qmForm.total).replace(',', '.'));
+    if (!Number.isFinite(totalNum) || totalNum <= 0) { toast.warning('Escribe el total del albarán.'); return; }
+    setQmBusy(true);
+    try {
+      const fecha = qmForm.date || DateUtil.today();
+      const newAlb: any = {
+        id: `alb-manual-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,
+        prov: provNombre.toUpperCase(),
+        date: fecha,
+        num: qmForm.num.trim() || 'S/N',
+        total: String(Num.round2(totalNum)),
+        items: [], invoiced: false, paid: false, reconciled: false,
+        unitId: 'REST', status: 'ok', source: 'manual-quick',
+        created_at: new Date().toISOString(),
+      };
+      const nd = JSON.parse(JSON.stringify(safeData));
+      if (!nd.albaranes) nd.albaranes = [];
+      nd.albaranes.unshift(newAlb);
+      await onSave(nd);
+      toast.success(`Albarán añadido: ${provNombre} · ${Num.fmt(totalNum)}`);
+      setQmForm({ total: '', date: '', num: '' });
+      setQuickManualProv(null);
+    } catch (err: any) {
+      toast.error(`Error: ${err?.message || 'desconocido'}`);
+    } finally { setQmBusy(false); }
+  };
 
   // 📷 OCR rápido "Albarán que falta" — estado del mini-scan por proveedor
   const [scanningProv,     setScanningProv]     = useState<string | null>(null);
@@ -395,7 +429,7 @@ Devuelve SOLO JSON:
       const active = document.activeElement as HTMLElement;
       const isTyping = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
       if (!isTyping && e.key === '/') { e.preventDefault(); document.querySelector<HTMLInputElement>('input[placeholder^="Buscar"]')?.focus(); }
-      if (!isTyping && e.key.toLowerCase() === 'g') { e.preventDefault(); setActiveTab(t => t === 'pend' ? 'hist' : 'pend'); }
+      if (!isTyping && e.key.toLowerCase() === 'g') { e.preventDefault(); setActiveTab(t => t === 'proveedores' ? 'hist' : 'proveedores'); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -498,6 +532,12 @@ Devuelve SOLO JSON:
     () => buildProveedorEstado(albaranesSeguros, facturasBoveda, provMesFilter),
     [albaranesSeguros, facturasBoveda, provMesFilter]
   );
+
+  const filteredProvEstados = useMemo(() => {
+    if (!provSearchQ.trim()) return proveedorEstados;
+    const q = normProv(provSearchQ);
+    return proveedorEstados.filter(p => normProv(p.nombre).includes(q));
+  }, [proveedorEstados, provSearchQ]);
 
   // 🆕 Lista de meses disponibles para el selector de la pestaña proveedores
   const mesesDisponibles = useMemo(() => {
@@ -1535,23 +1575,13 @@ REGLAS:
       <header className="bg-white rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm p-5 md:p-6 flex flex-col xl:flex-row justify-between gap-5 relative z-40 sticky top-4">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Compras</p>
-          <h2 className="font-serif text-2xl md:text-3xl font-semibold tracking-tight mt-1">Facturación</h2>
-          <p className="text-sm text-[color:var(--arume-gray-500)] mt-1">Agrupa albaranes, crea facturas y prepara la gestoría</p>
+          <h2 className="font-serif text-2xl md:text-3xl font-semibold tracking-tight mt-1">Proveedores y Facturas</h2>
+          <p className="text-sm text-[color:var(--arume-gray-500)] mt-1">Gestiona proveedores, crea facturas y prepara la gestoría</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
           {/* Pestañas — pills minimalistas */}
           <div className="flex items-center bg-[color:var(--arume-gray-50)] p-1 rounded-full border border-[color:var(--arume-gray-100)] w-full md:w-auto">
-            <button onClick={() => setActiveTab('pend')}
-              className={cn('flex-1 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] transition',
-                activeTab === 'pend' ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] shadow-sm' : 'text-[color:var(--arume-gray-500)] hover:text-[color:var(--arume-ink)]')}>
-              Agrupar
-            </button>
-            <button onClick={() => setActiveTab('hist')}
-              className={cn('flex-1 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] transition',
-                activeTab === 'hist' ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] shadow-sm' : 'text-[color:var(--arume-gray-500)] hover:text-[color:var(--arume-ink)]')}>
-              Bóveda
-            </button>
             <button onClick={() => setActiveTab('proveedores')}
               className={cn('flex-1 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] transition flex items-center justify-center gap-1.5',
                 activeTab === 'proveedores' ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] shadow-sm' : 'text-[color:var(--arume-gray-500)] hover:text-[color:var(--arume-ink)]')}>
@@ -1562,6 +1592,11 @@ REGLAS:
                   {albsSueltosTotales}
                 </span>
               )}
+            </button>
+            <button onClick={() => setActiveTab('hist')}
+              className={cn('flex-1 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] transition',
+                activeTab === 'hist' ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] shadow-sm' : 'text-[color:var(--arume-gray-500)] hover:text-[color:var(--arume-ink)]')}>
+              Historial
             </button>
             <button onClick={() => setActiveTab('gestoria')}
               className={cn('flex-1 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] transition flex items-center justify-center gap-1.5',
@@ -1629,7 +1664,7 @@ REGLAS:
       </AnimatePresence>
 
       {/* ── FILTROS — solo visibles en pend e hist, no en proveedores ─────── */}
-      {activeTab !== 'proveedores' && (
+      {activeTab === 'hist' && (
         <div className="bg-white px-5 py-3 rounded-2xl shadow-sm border border-[color:var(--arume-gray-100)] flex flex-col lg:flex-row items-center justify-between gap-3 relative z-30">
           <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
             {/* Modo proveedor/socio — pills */}
@@ -1670,310 +1705,7 @@ REGLAS:
       <div className="space-y-4">
         <AnimatePresence mode="wait">
 
-          {/* ════════ PESTAÑA: AGRUPAR ALBARANES ════════ */}
-          {activeTab === 'pend' && (
-            <motion.div key="pend" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ type: 'spring', damping: 25 }}>
-
-              {/* Botón principal de auto-agrupación */}
-              {pendingGroups.length > 0 && !autoGroupPreview && (
-                <div className="mb-4 flex items-center justify-between">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                    {pendingGroups.reduce((acc, [, dg]) => acc + Object.keys(dg.groups).length, 0)} grupos detectados
-                    {' '}· <span className="text-indigo-500">Fuzzy matching activo</span>
-                  </p>
-                  <button onClick={handlePrepareAutoGroup} disabled={isProcessing} className="bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] font-black text-[10px] uppercase tracking-widest px-6 py-3 rounded-xl shadow-lg hover:bg-[color:var(--arume-gray-700)] transition-all flex items-center gap-2 active:scale-95 disabled:opacity-50">
-                    {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Eye className="w-4 h-4" />}
-                    Revisar Auto-Agrupación
-                  </button>
-                </div>
-              )}
-
-              {/* ── PANEL DE PREVISUALIZACIÓN Y EDICIÓN ── */}
-              <AnimatePresence>
-                {autoGroupPreview && (
-                  <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }} className="mb-6 bg-white border-2 border-indigo-200 rounded-2xl p-6 shadow-xl overflow-hidden">
-
-                    <div className="flex justify-between items-start mb-4">
-                      <div>
-                        <h3 className="text-xl font-black text-indigo-700 flex items-center gap-2"><Sparkles className="w-5 h-5"/> Borradores Listos</h3>
-                        <p className="text-xs font-bold text-slate-500 mt-1">
-                          Revisa cada borrador. Pulsa <strong>✏️ Editar</strong> para cambiar qué albaranes incluye. Puedes fusionar dos grupos o eliminar los que no quieras agrupar aún.
-                        </p>
-                      </div>
-                      <button onClick={() => { setAutoGroupPreview(null); setEditingDraftIdx(-1); }} className="p-2 bg-slate-100 rounded-full text-slate-400 hover:bg-rose-100 hover:text-rose-600 transition shrink-0 ml-4">
-                        <X className="w-5 h-5"/>
-                      </button>
-                    </div>
-
-                    <div className="space-y-3 max-h-[60vh] overflow-y-auto custom-scrollbar pr-1 mb-6">
-                      {autoGroupPreview.map((draft, idx) => {
-                        // Total real calculado desde los albaranes seleccionados (no el campo .total del draft)
-                        const draftTotal = (draft.albaranIdsArr || []).reduce((acc, id) => {
-                          const alb = albaranesSeguros.find(a => a && a.id === id);
-                          return acc + Math.abs(Num.parse(alb?.total || 0));
-                        }, 0);
-                        const isEditingThis  = editingDraftIdx === idx;
-                        const availableAlbs  = getAlbsForDraftMonth(draft);
-                        const selectedCount  = (draft.albaranIdsArr || []).length;
-
-                        return (
-                          <div key={draft.id} className={cn('flex flex-col gap-0 rounded-2xl border transition-all overflow-hidden', isEditingThis ? 'border-indigo-400 shadow-md' : 'border-slate-200 bg-slate-50')}>
-
-                            {/* Fila principal del borrador */}
-                            <div className="flex flex-col md:flex-row items-center gap-3 p-4 bg-white">
-                              {/* Info proveedor */}
-                              <div className="flex-1 min-w-0">
-                                <p className="font-black text-slate-800 text-sm truncate">{draft.prov}</p>
-                                <p className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">
-                                  {selectedCount} albarán{selectedCount !== 1 ? 'es' : ''} · <span className="text-indigo-500 font-black">{Num.fmt(draftTotal)}</span>
-                                </p>
-                              </div>
-
-                              {/* Input número factura */}
-                              <input
-                                type="text"
-                                placeholder="Nº Factura Oficial..."
-                                value={draft.num}
-                                onChange={(e) => {
-                                  const newDrafts = [...autoGroupPreview];
-                                  newDrafts[idx] = { ...newDrafts[idx], num: e.target.value };
-                                  setAutoGroupPreview(newDrafts);
-                                }}
-                                className={cn('w-full md:w-52 p-3 rounded-xl text-xs font-bold outline-none border transition-colors', draft.num.trim() ? 'bg-white border-emerald-300 focus:border-emerald-400' : 'bg-rose-50 border-rose-200 focus:border-rose-400 placeholder:text-rose-300')}
-                              />
-
-                              {/* Total */}
-                              <p className="font-black text-indigo-600 text-lg w-24 text-right shrink-0">{Num.fmt(draftTotal)}</p>
-
-                              {/* Botones de acción */}
-                              <div className="flex items-center gap-2 shrink-0">
-                                {/* ✏️ Editar albaranes */}
-                                <button
-                                  onClick={() => setEditingDraftIdx(isEditingThis ? -1 : idx)}
-                                  title="Editar qué albaranes van en esta factura"
-                                  className={cn('p-2.5 rounded-xl border text-xs font-black transition flex items-center gap-1.5', isEditingThis ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] border-indigo-600' : 'bg-white border-slate-200 text-slate-500 hover:border-indigo-300 hover:text-indigo-600')}
-                                >
-                                  <Wand2 className="w-3.5 h-3.5" />
-                                  <span className="hidden sm:inline">{isEditingThis ? 'Cerrar' : 'Editar'}</span>
-                                </button>
-
-                                {/* 🔗 Fusionar con otro borrador del mismo mes */}
-                                {autoGroupPreview.length > 1 && (
-                                  <select
-                                    defaultValue=""
-                                    onChange={(e) => {
-                                      const targetIdx = parseInt(e.target.value);
-                                      if (!isNaN(targetIdx)) handleMergeDrafts(idx, targetIdx);
-                                      e.target.value = '';
-                                    }}
-                                    className="p-2.5 rounded-xl border border-slate-200 bg-white text-[9px] font-black text-slate-500 outline-none hover:border-amber-300 cursor-pointer transition"
-                                    title="Fusionar con otro borrador"
-                                  >
-                                    <option value="" disabled>⊕ Fusionar</option>
-                                    {autoGroupPreview.map((d, i) => i !== idx ? (
-                                      <option key={d.id} value={i}>{d.prov?.substring(0, 20)}</option>
-                                    ) : null)}
-                                  </select>
-                                )}
-
-                                {/* 🗑️ Eliminar borrador */}
-                                <button
-                                  onClick={() => { setAutoGroupPreview(autoGroupPreview.filter((_, i) => i !== idx)); if (editingDraftIdx === idx) setEditingDraftIdx(-1); }}
-                                  title="Descartar esta agrupación"
-                                  className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-400 hover:bg-rose-50 hover:text-rose-500 hover:border-rose-200 transition"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* ── Panel edición inline de albaranes ── */}
-                            {isEditingThis && (
-                              <div className="border-t border-indigo-100 bg-indigo-50/40 p-4 space-y-2">
-                                <div className="flex items-center justify-between mb-2">
-                                  <p className="text-[9px] font-black text-indigo-600 uppercase tracking-widest">
-                                    Albaranes disponibles en {(draft.date || '').substring(0, 7)} — marca los que van en esta factura
-                                  </p>
-                                  <div className="flex gap-2">
-                                    <button
-                                      onClick={() => {
-                                        const validIds = availableAlbs.filter(a => Math.abs(Num.parse(a.total)) > 0).map(a => a.id);
-                                        const newDrafts = [...autoGroupPreview];
-                                        newDrafts[idx] = { ...newDrafts[idx], albaranIdsArr: validIds };
-                                        setAutoGroupPreview(newDrafts);
-                                      }}
-                                      className="text-[9px] font-black uppercase text-amber-600 bg-white px-2 py-1.5 rounded-lg border border-amber-200 hover:bg-amber-50 transition flex items-center gap-1"
-                                    >
-                                      <Wand2 className="w-3 h-3"/> Seleccionar válidos
-                                    </button>
-                                    <button
-                                      onClick={() => {
-                                        const allIds = availableAlbs.map(a => a.id);
-                                        const current = draft.albaranIdsArr || [];
-                                        const newDrafts = [...autoGroupPreview];
-                                        newDrafts[idx] = { ...newDrafts[idx], albaranIdsArr: current.length === allIds.length ? [] : allIds };
-                                        setAutoGroupPreview(newDrafts);
-                                      }}
-                                      className="text-[9px] font-black uppercase text-indigo-600 bg-white px-2 py-1.5 rounded-lg border border-indigo-200 hover:bg-indigo-50 transition"
-                                    >
-                                      {(draft.albaranIdsArr || []).length === availableAlbs.length ? 'Desmarcar todos' : 'Marcar todos'}
-                                    </button>
-                                  </div>
-                                </div>
-
-                                {/* ── ➕ Añadir albarán manual ──────────────────────────
-                                    Para cuando la usuaria detecta que falta un albarán y
-                                    quiere crearlo y vincularlo en el momento, sin salir
-                                    del flujo de agrupación. */}
-                                <details className="bg-emerald-50 rounded-xl border-2 border-dashed border-emerald-300 mb-2">
-                                  <summary className="cursor-pointer px-3 py-2 text-[10px] font-black text-emerald-700 uppercase tracking-widest hover:bg-emerald-100/50 rounded-xl transition flex items-center gap-1.5">
-                                    <Plus className="w-3.5 h-3.5" />
-                                    Añadir albarán manual a esta factura
-                                  </summary>
-                                  <div className="p-3 space-y-2 border-t border-emerald-200">
-                                    <p className="text-[9px] font-bold text-emerald-600">¿Te falta un albarán para cuadrar el total? Créalo aquí y se vincula al instante.</p>
-                                    <div className="grid grid-cols-2 gap-2">
-                                      <input
-                                        type="text" placeholder="Proveedor"
-                                        value={manualAlbForm.prov}
-                                        onChange={e => setManualAlbForm(f => ({ ...f, prov: e.target.value }))}
-                                        className="px-2 py-1.5 text-xs font-bold border border-emerald-200 rounded-lg outline-none focus:border-emerald-500 col-span-2"
-                                      />
-                                      <input
-                                        type="date"
-                                        value={manualAlbForm.date || (draft.date || '').substring(0, 10)}
-                                        onChange={e => setManualAlbForm(f => ({ ...f, date: e.target.value }))}
-                                        className="px-2 py-1.5 text-xs font-bold border border-emerald-200 rounded-lg outline-none focus:border-emerald-500"
-                                      />
-                                      <input
-                                        type="text" placeholder="Nº (opcional)"
-                                        value={manualAlbForm.num}
-                                        onChange={e => setManualAlbForm(f => ({ ...f, num: e.target.value }))}
-                                        className="px-2 py-1.5 text-xs font-bold border border-emerald-200 rounded-lg outline-none focus:border-emerald-500"
-                                      />
-                                      <input
-                                        type="number" step="0.01" placeholder="Total (€)"
-                                        value={manualAlbForm.total}
-                                        onChange={e => setManualAlbForm(f => ({ ...f, total: e.target.value }))}
-                                        className="px-2 py-1.5 text-xs font-mono font-black text-right border border-emerald-200 rounded-lg outline-none focus:border-emerald-500 col-span-2"
-                                      />
-                                    </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleAddManualAlbaranToDraft(idx)}
-                                      disabled={manualAlbBusy}
-                                      className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition disabled:opacity-50 flex items-center justify-center gap-1.5"
-                                    >
-                                      {manualAlbBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin"/> : <Plus className="w-3.5 h-3.5"/>}
-                                      Crear y vincular
-                                    </button>
-                                  </div>
-                                </details>
-
-                                {availableAlbs.length === 0 && (
-                                  <p className="text-[10px] text-slate-400 text-center py-4">No hay más albaranes disponibles en este mes</p>
-                                )}
-
-                                <div className="space-y-1.5 max-h-52 overflow-y-auto custom-scrollbar">
-                                  {availableAlbs.map(a => {
-                                    const isSelected = (draft.albaranIdsArr || []).includes(a.id);
-                                    return (
-                                      <label
-                                        key={a.id}
-                                        onClick={(e) => {
-                                          e.preventDefault();
-                                          const newDrafts = [...autoGroupPreview];
-                                          const current = newDrafts[idx].albaranIdsArr || [];
-                                          newDrafts[idx] = {
-                                            ...newDrafts[idx],
-                                            albaranIdsArr: isSelected ? current.filter(id => id !== a.id) : [...current, a.id],
-                                          };
-                                          setAutoGroupPreview(newDrafts);
-                                        }}
-                                        className={cn('flex justify-between items-center p-3 rounded-xl cursor-pointer border transition-all', isSelected ? 'bg-white border-indigo-400 shadow-sm' : 'bg-white/60 border-transparent hover:bg-white hover:border-slate-200')}
-                                      >
-                                        <div className="flex items-center gap-3">
-                                          <div className={cn('w-5 h-5 rounded flex items-center justify-center border', isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300')}>
-                                            {isSelected && <Check className="w-3.5 h-3.5" />}
-                                          </div>
-                                          <div>
-                                            <p className="font-black text-slate-800 text-xs">{String(a.prov || 'S/P')} · {String(a.date || 'S/F')}</p>
-                                            <p className="text-[10px] text-slate-400 font-mono mt-0.5">Ref: {String(a.num || 'S/N')}</p>
-                                          </div>
-                                        </div>
-                                        <p className="font-black text-slate-900 text-sm">{Num.fmt(Math.abs(Num.parse(a.total || 0)))}</p>
-                                      </label>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Botones de acción globales */}
-                    <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
-                      <button onClick={() => { setAutoGroupPreview(null); setEditingDraftIdx(-1); }} className="px-6 py-3 rounded-xl font-black text-xs text-slate-500 hover:bg-slate-100 transition uppercase">
-                        Cancelar
-                      </button>
-                      <button
-                        onClick={handleConfirmAutoGroupAll}
-                        disabled={isProcessing || autoGroupPreview.every(f => (f.albaranIdsArr || []).length === 0)}
-                        className="bg-emerald-600 text-white font-black text-xs uppercase tracking-widest px-8 py-3 rounded-xl shadow-lg hover:bg-emerald-700 transition-all flex items-center gap-2 disabled:opacity-50"
-                      >
-                        {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                        Confirmar {autoGroupPreview.filter(f => (f.albaranIdsArr || []).length > 0).length} Facturas
-                      </button>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* ── TARJETAS DE GRUPOS (sala de espera) ── */}
-              {!autoGroupPreview && (
-                <>
-                  {pendingGroups.length > 0 ? pendingGroups.map(([mk, dataGroup]) => (
-                    <div key={mk} className="mb-6 bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-                      <h3 className="text-xs font-black text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2 px-2">
-                        <Calendar className="w-4 h-4 text-indigo-500" /> {dataGroup.name}
-                      </h3>
-                      <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-4">
-                        {Object.values(dataGroup.groups || {}).map((g: any) => {
-                          const unitConfig = BUSINESS_UNITS.find(u => u.id === g.unitId);
-                          return (
-                            <div
-                              key={g.label + g.unitId}
-                              onClick={() => { setSelectedGroup({ label: String(g.label), ids: g.ids, unitId: g.unitId }); setModalForm({ num: '', date: DateUtil.today(), selectedAlbs: [...g.ids], unitId: g.unitId }); }}
-                              className="flex flex-col p-5 bg-slate-50 rounded-2xl border border-slate-200 hover:border-indigo-400 hover:bg-white hover:shadow-md transition-all cursor-pointer group"
-                            >
-                              <div className="flex justify-between items-start mb-4">
-                                {unitConfig && <span className={cn('text-[8px] px-2 py-1 rounded-md font-black uppercase tracking-wider', unitConfig.bg, unitConfig.color)}>{unitConfig.name.split(' ')[0]}</span>}
-                                <span className="text-[10px] font-bold text-slate-400 bg-white px-2 py-1 rounded-md border border-slate-100 shadow-sm">{g.count} albaranes</span>
-                              </div>
-                              <p className="font-black text-slate-800 text-sm truncate mb-1">{String(g.label)}</p>
-                              <p className="font-black text-indigo-600 text-2xl group-hover:text-indigo-700 transition-colors">{Num.fmt(g.t)}</p>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )) : (
-                    <div className="py-24 text-center bg-white rounded-[3rem] border border-slate-100 shadow-sm flex flex-col items-center">
-                      <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mb-4 border border-slate-100">
-                        <Package className="w-10 h-10 text-slate-300" />
-                      </div>
-                      <p className="text-slate-800 font-black text-base uppercase tracking-widest">Todo al día</p>
-                      <p className="text-sm font-medium text-slate-400 mt-2">No hay albaranes sueltos esperando en la sala.</p>
-                    </div>
-                  )}
-                </>
-              )}
-            </motion.div>
-          )}
-
-          {/* ════════ PESTAÑA: BÓVEDA ════════ */}
+          {/* ════════ PESTAÑA: HISTORIAL (BÓVEDA) ════════ */}
           {activeTab === 'hist' && (
             <motion.div key="hist" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ type: 'spring', damping: 25 }}>
               <InvoicesList
@@ -1986,7 +1718,7 @@ REGLAS:
             </motion.div>
           )}
 
-          {/* ════════ PESTAÑA: PROVEEDORES 🆕 ════════ */}
+          {/* ════════ PESTAÑA: PROVEEDORES (PRINCIPAL) ════════ */}
           {activeTab === 'proveedores' && (
             <motion.div key="proveedores" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
 
@@ -1995,185 +1727,335 @@ REGLAS:
                 accept="image/*,application/pdf" capture="environment"
                 onChange={handleQuickScanFile} />
 
-              {/* ── Selector de mes ── */}
-              <div className="flex items-center justify-between bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-3">
-                <button onClick={() => {
-                  const [y, m] = provMesFilter.split('-').map(Number);
-                  const d = new Date(y, m - 2, 1);
-                  setProvMesFilter(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
-                }} className="w-9 h-9 rounded-xl hover:bg-slate-100 flex items-center justify-center transition">
-                  <ChevronLeft className="w-5 h-5 text-slate-500" />
-                </button>
-                <span className="font-black text-slate-800 uppercase tracking-widest text-sm">
-                  {new Date(provMesFilter + '-01').toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
-                </span>
-                <button onClick={() => {
-                  const [y, m] = provMesFilter.split('-').map(Number);
-                  const d = new Date(y, m, 1);
-                  setProvMesFilter(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
-                }} className="w-9 h-9 rounded-xl hover:bg-slate-100 flex items-center justify-center transition">
-                  <ChevronRight className="w-5 h-5 text-slate-500" />
-                </button>
+              {/* ── Barra: buscar + mes ── */}
+              <div className="flex flex-col sm:flex-row items-center gap-3 bg-white rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm px-5 py-3">
+                <div className="relative flex-1 w-full">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[color:var(--arume-gray-400)]" />
+                  <input value={provSearchQ} onChange={e => setProvSearchQ(e.target.value)}
+                    placeholder="Buscar proveedor…"
+                    className="w-full pl-9 pr-4 py-2 rounded-xl bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)] text-xs outline-none focus:bg-white focus:border-[color:var(--arume-ink)] transition" />
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button onClick={() => setProvMesFilter('')}
+                    className={cn('px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition',
+                      !provMesFilter ? 'bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)]' : 'text-[color:var(--arume-gray-400)] hover:bg-[color:var(--arume-gray-50)]')}>
+                    Todo
+                  </button>
+                  <div className="flex items-center bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)] rounded-xl p-0.5">
+                    <button onClick={() => {
+                      const cur = provMesFilter || `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
+                      const [y, m] = cur.split('-').map(Number);
+                      const d = new Date(y, m - 2, 1);
+                      setProvMesFilter(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+                    }} className="p-2 text-[color:var(--arume-gray-500)] hover:text-[color:var(--arume-ink)] rounded-lg hover:bg-white transition">
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <span className="px-3 text-[11px] font-black text-[color:var(--arume-ink)] uppercase tracking-wider min-w-[130px] text-center">
+                      {provMesFilter
+                        ? new Date(provMesFilter + '-01').toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
+                        : 'Todos'}
+                    </span>
+                    <button onClick={() => {
+                      const cur = provMesFilter || `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
+                      const [y, m] = cur.split('-').map(Number);
+                      const d = new Date(y, m, 1);
+                      setProvMesFilter(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+                    }} className="p-2 text-[color:var(--arume-gray-500)] hover:text-[color:var(--arume-ink)] rounded-lg hover:bg-white transition">
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
               </div>
 
+              {/* ── Resumen del periodo ── */}
+              {(() => {
+                const tSuelto = filteredProvEstados.reduce((s, p) => s + p.totalSuelto, 0);
+                const tPend   = filteredProvEstados.reduce((s, p) => s + p.totalPendiente, 0);
+                const tPag    = filteredProvEstados.reduce((s, p) => s + p.totalPagado, 0);
+                return (
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 hover-lift">
+                      <p className="text-[9px] font-black text-amber-500 uppercase tracking-widest">Sin facturar</p>
+                      <p className="font-serif text-xl font-bold text-amber-700 mt-1 tabular-nums"><AnimatedNumber value={tSuelto} format={Num.fmt}/></p>
+                    </div>
+                    <div className="bg-rose-50 border border-rose-100 rounded-2xl p-4 hover-lift">
+                      <p className="text-[9px] font-black text-rose-500 uppercase tracking-widest">Pte. pago</p>
+                      <p className="font-serif text-xl font-bold text-rose-700 mt-1 tabular-nums"><AnimatedNumber value={tPend} format={Num.fmt}/></p>
+                    </div>
+                    <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 hover-lift">
+                      <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">Pagado</p>
+                      <p className="font-serif text-xl font-bold text-emerald-700 mt-1 tabular-nums"><AnimatedNumber value={tPag} format={Num.fmt}/></p>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* ── Lista de proveedores ── */}
-              {proveedorEstados.length === 0 ? (
-                <div className="bg-white rounded-2xl border border-slate-100 p-12 text-center">
-                  <Package className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-                  <p className="text-slate-400 font-bold">Sin albaranes ni facturas este mes</p>
+              {filteredProvEstados.length === 0 ? (
+                <div className="bg-white rounded-2xl border border-[color:var(--arume-gray-100)] p-12 text-center">
+                  <Building2 className="w-10 h-10 text-[color:var(--arume-gray-300)] mx-auto mb-3" />
+                  <p className="text-[color:var(--arume-gray-500)] font-black uppercase tracking-widest text-sm">
+                    {provSearchQ ? 'Sin resultados' : 'Sin movimientos este periodo'}
+                  </p>
+                  <p className="text-[color:var(--arume-gray-400)] text-xs mt-1">
+                    {provSearchQ ? 'Prueba con otro nombre de proveedor' : 'Registra albaranes en la pestaña Albaranes'}
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {proveedorEstados.map(prov => {
-                    // Todas las facturas del proveedor este mes
+                  {filteredProvEstados.map(prov => {
                     const todasFacturas = [...prov.facturasPendientes, ...prov.facturasPagadas];
-                    // Total de albaranes sueltos
-                    const totalSuelto = prov.totalSuelto;
-                    // ¿Hay algún problema guardado? Guardamos nota en la factura pendiente más reciente
-                    const factPendiente = prov.facturasPendientes[0];
-                    const factPagada   = prov.facturasPagadas[0];
-                    const facturaMes   = factPendiente || factPagada;
+                    const isExpanded = expandedProv === prov.nombre;
+                    const totalGlobal = prov.totalSuelto + prov.totalPendiente + prov.totalPagado;
 
                     return (
-                      <div key={prov.nombre} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                      <div key={prov.nombre} className="bg-white rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm overflow-hidden">
 
-                        {/* ── Cabecera del proveedor ── */}
-                        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-50">
-                          <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 font-black text-sm flex items-center justify-center shrink-0">
-                              {prov.nombre.charAt(0)}
+                        {/* ── Cabecera clickable ── */}
+                        <button
+                          onClick={() => setExpandedProv(isExpanded ? null : prov.nombre)}
+                          className="w-full flex items-center justify-between px-5 py-4 hover:bg-[color:var(--arume-gray-50)]/50 transition text-left"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={cn(
+                              'w-10 h-10 rounded-xl font-black text-sm flex items-center justify-center shrink-0',
+                              prov.albaranesSueltos.length > 0 ? 'bg-amber-100 text-amber-700' :
+                              prov.facturasPendientes.length > 0 ? 'bg-rose-100 text-rose-700' :
+                              'bg-emerald-100 text-emerald-700'
+                            )}>
+                              {prov.nombre.charAt(0).toUpperCase()}
                             </div>
-                            <div>
-                              <p className="font-black text-slate-800 text-sm">{prov.nombre}</p>
-                              <p className="text-[10px] text-slate-400 font-bold">
-                                {prov.albaranesSueltos.length > 0 && <span className="text-amber-600">{prov.albaranesSueltos.length} sin factura · </span>}
-                                {todasFacturas.length > 0 && <span>{todasFacturas.length} factura(s)</span>}
-                              </p>
+                            <div className="min-w-0">
+                              <p className="font-black text-[color:var(--arume-ink)] text-sm truncate">{prov.nombre}</p>
+                              <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                {prov.albaranesSueltos.length > 0 && (
+                                  <span className="text-[9px] font-black text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100">
+                                    {prov.albaranesSueltos.length} sin facturar
+                                  </span>
+                                )}
+                                {prov.facturasPendientes.length > 0 && (
+                                  <span className="text-[9px] font-black text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-100">
+                                    {prov.facturasPendientes.length} pte. pago
+                                  </span>
+                                )}
+                                {prov.facturasPagadas.length > 0 && (
+                                  <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+                                    {prov.facturasPagadas.length} pagada(s)
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
-                          <div className="text-right shrink-0">
-                            {totalSuelto > 0 && <p className="font-black text-amber-600 text-base">{Num.fmt(totalSuelto)}</p>}
-                            {facturaMes && <p className={cn('text-xs font-bold', facturaMes.paid ? 'text-emerald-600' : 'text-rose-500')}>{facturaMes.paid ? '✓ Pagada' : '⏳ Pendiente'} {Num.fmt(Math.abs(Num.parse(facturaMes.total)))}</p>}
+                          <div className="flex items-center gap-4 shrink-0">
+                            <p className="font-black text-[color:var(--arume-ink)] text-base tabular-nums">{Num.fmt(totalGlobal)}</p>
+                            <ChevronDown className={cn('w-4 h-4 text-[color:var(--arume-gray-400)] transition-transform duration-200', isExpanded && 'rotate-180')} />
                           </div>
-                        </div>
+                        </button>
 
-                        <div className="px-5 py-4 space-y-3">
+                        {/* ── Contenido expandido ── */}
+                        <AnimatePresence>
+                          {isExpanded && (
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: 'auto', opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.2 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="border-t border-[color:var(--arume-gray-100)] px-5 py-4 space-y-4">
 
-                          {/* ── Albaranes sueltos ── */}
-                          {prov.albaranesSueltos.length > 0 && (
-                            <div className="space-y-1.5">
-                              {prov.albaranesSueltos.map((a: any) => (
-                                <div key={a.id} className="bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 space-y-1">
-                                  <div className="flex items-center justify-between">
-                                  <p className="text-xs text-slate-700 font-bold">{a.date} · {a.num || 'S/N'}</p>
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    <p className="font-black text-amber-700 text-xs">{Num.fmt(Math.abs(Num.parse(a.total) || 0))}</p>
-                                    {/* Ver imagen si tiene thumbnail guardado */}
-                                    {(a as any).thumb_b64 && (
-                                      <button onClick={() => setPreviewAlbImg({ src: (a as any).thumb_b64, prov: a.prov, num: a.num || 'S/N' })}
-                                        className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-600 hover:bg-indigo-200 flex items-center justify-center transition text-[10px]" title="Ver imagen">
-                                        🖼️
-                                      </button>
-                                    )}
-                                    <button onClick={async () => {
-                                      if (!await confirm({ title:'¿Eliminar albarán?', message:`Eliminar "${a.num || 'S/N'}" de ${a.prov}?`, danger:true, confirmLabel:'Eliminar' })) return;
-                                      const nd = JSON.parse(JSON.stringify(safeData));
-                                      nd.albaranes = nd.albaranes.filter((x:any) => x.id !== a.id);
-                                      await onSave(nd);
-                                      toast.success('Albarán eliminado.');
-                                    }} className="w-6 h-6 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-red-500 hover:border-red-200 flex items-center justify-center transition">
-                                      <X className="w-3 h-3" />
-                                    </button>
-                                  </div>
-                                  </div>
-                                  {/* ✍️ Notas manuscritas — siempre visibles si existen */}
-                                  {(a as any).notas_manuscritas && (
-                                    <div className="bg-indigo-100 border border-indigo-200 rounded-lg px-2.5 py-1.5">
-                                      <p className="text-[9px] font-black text-indigo-700 uppercase tracking-wider mb-0.5">✍️ Anotación manuscrita</p>
-                                      <p className="text-[11px] text-indigo-900 font-medium whitespace-pre-wrap">{(a as any).notas_manuscritas}</p>
-                                    </div>
-                                  )}
-                                  {/* 🚨 Alertas IA */}
-                                  {(a as any).alertas_ia?.length > 0 && (
-                                    <div className="bg-orange-100 border border-orange-200 rounded-lg px-2.5 py-1.5">
-                                      <p className="text-[9px] font-black text-orange-700 uppercase tracking-wider mb-0.5">🚨 Alertas</p>
-                                      {(a as any).alertas_ia.map((al: string, i: number) => (
-                                        <p key={i} className="text-[11px] text-orange-900 font-medium">{al}</p>
+                                {/* ── Albaranes sueltos ── */}
+                                {prov.albaranesSueltos.length > 0 && (
+                                  <div>
+                                    <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                                      <Package className="w-3.5 h-3.5"/> Albaranes sin facturar · {Num.fmt(prov.totalSuelto)}
+                                    </p>
+                                    <div className="space-y-1.5">
+                                      {prov.albaranesSueltos.map((a: any) => (
+                                        <div key={a.id} className="bg-amber-50/60 border border-amber-100 rounded-xl px-3 py-2 space-y-1">
+                                          <div className="flex items-center justify-between">
+                                            <p className="text-xs text-slate-700 font-bold truncate">{a.date} · <span className="text-slate-500">{a.num || 'S/N'}</span></p>
+                                            <div className="flex items-center gap-2 shrink-0">
+                                              <p className="font-black text-amber-700 text-xs tabular-nums">{Num.fmt(Math.abs(Num.parse(a.total) || 0))}</p>
+                                              {(a as any).thumb_b64 && (
+                                                <button onClick={(e) => { e.stopPropagation(); setPreviewAlbImg({ src: (a as any).thumb_b64, prov: a.prov, num: a.num || 'S/N' }); }}
+                                                  className="w-6 h-6 rounded-lg bg-indigo-100 text-indigo-600 hover:bg-indigo-200 flex items-center justify-center transition text-[10px]" title="Ver imagen">
+                                                  🖼️
+                                                </button>
+                                              )}
+                                              <button onClick={async (e) => {
+                                                e.stopPropagation();
+                                                if (!await confirm({ title:'¿Eliminar albarán?', message:`Eliminar "${a.num || 'S/N'}" de ${a.prov}?`, danger:true, confirmLabel:'Eliminar' })) return;
+                                                const nd = JSON.parse(JSON.stringify(safeData));
+                                                nd.albaranes = nd.albaranes.filter((x:any) => x.id !== a.id);
+                                                await onSave(nd);
+                                                toast.success('Albarán eliminado.');
+                                              }} className="w-6 h-6 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-red-500 hover:border-red-200 flex items-center justify-center transition">
+                                                <X className="w-3 h-3" />
+                                              </button>
+                                            </div>
+                                          </div>
+                                          {(a as any).notas_manuscritas && (
+                                            <div className="bg-indigo-100 border border-indigo-200 rounded-lg px-2.5 py-1.5">
+                                              <p className="text-[9px] font-black text-indigo-700 uppercase tracking-wider mb-0.5">✍️ Anotación</p>
+                                              <p className="text-[11px] text-indigo-900 font-medium whitespace-pre-wrap">{(a as any).notas_manuscritas}</p>
+                                            </div>
+                                          )}
+                                          {(a as any).alertas_ia?.length > 0 && (
+                                            <div className="bg-orange-100 border border-orange-200 rounded-lg px-2.5 py-1.5">
+                                              {(a as any).alertas_ia.map((al: string, i: number) => (
+                                                <p key={i} className="text-[11px] text-orange-900 font-medium">{al}</p>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
                                       ))}
                                     </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          )}
 
-                          {/* ── Botón añadir albarán ── */}
-                          <button onClick={() => handleQuickScan(prov.nombre)}
-                            disabled={scanningProv === prov.nombre}
-                            className="w-full flex items-center justify-center gap-2 py-2 rounded-xl border-2 border-dashed border-slate-200 text-slate-400 text-[11px] font-black uppercase tracking-widest hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50 transition-all disabled:opacity-50">
-                            {scanningProv === prov.nombre
-                              ? <><Loader2 className="w-3 h-3 animate-spin"/>Procesando...</>
-                              : <><Camera className="w-3 h-3"/>Añadir albarán que falta</>}
-                          </button>
+                                    {/* Crear factura con albaranes sueltos */}
+                                    <button onClick={async (e) => {
+                                      e.stopPropagation();
+                                      const ids = prov.albaranesSueltos.map((a:any) => a.id);
+                                      const total = prov.totalSuelto;
+                                      const nd = JSON.parse(JSON.stringify(safeData));
+                                      const newFac: any = {
+                                        id: `fac-${Date.now()}`, tipo: 'compra',
+                                        prov: prov.nombre, cliente: prov.nombre,
+                                        date: provMesFilter ? provMesFilter + '-01' : DateUtil.today(),
+                                        num: '',
+                                        total: String(total), base: String(total), taxes: '0',
+                                        paid: false, status: 'approved', reconciled: false,
+                                        albaranIdsArr: ids, created_at: new Date().toISOString(),
+                                      };
+                                      if (!nd.facturas) nd.facturas = [];
+                                      nd.facturas.unshift(newFac);
+                                      nd.albaranes = nd.albaranes.map((a:any) => ids.includes(a.id) ? {...a, invoiced:true} : a);
+                                      await onSave(nd);
+                                      toast.success(`Factura creada: ${prov.nombre} · ${Num.fmt(total)}`);
+                                    }} className="w-full mt-2 bg-[color:var(--arume-ink)] hover:bg-[color:var(--arume-gray-700)] text-[color:var(--arume-paper)] font-black text-[10px] uppercase tracking-widest py-2.5 rounded-xl transition flex items-center justify-center gap-2">
+                                      <FileText className="w-3.5 h-3.5"/>Crear factura · {Num.fmt(prov.totalSuelto)}
+                                    </button>
+                                  </div>
+                                )}
 
-                          {/* ── Factura del mes ── */}
-                          {prov.albaranesSueltos.length > 0 && todasFacturas.length === 0 && (
-                            <button onClick={async () => {
-                              const ids = prov.albaranesSueltos.map((a:any) => a.id);
-                              const total = prov.totalSuelto;
-                              const nd = JSON.parse(JSON.stringify(safeData));
-                              const newFac: any = {
-                                id: `fac-${Date.now()}`, tipo: 'compra',
-                                prov: prov.nombre, cliente: prov.nombre,
-                                date: provMesFilter + '-01', num: `F-${prov.nombre.slice(0,4).toUpperCase()}-${provMesFilter.replace('-','')}`,
-                                total: String(total), base: String(total), taxes: '0',
-                                paid: false, status: 'approved', reconciled: false,
-                                albaranIdsArr: ids, created_at: new Date().toISOString(),
-                              };
-                              if (!nd.facturas) nd.facturas = [];
-                              nd.facturas.unshift(newFac);
-                              nd.albaranes = nd.albaranes.map((a:any) => ids.includes(a.id) ? {...a, invoiced:true} : a);
-                              await onSave(nd);
-                              toast.success(`✅ Factura creada: ${Num.fmt(total)}`);
-                            }} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs py-2.5 rounded-xl transition flex items-center justify-center gap-2">
-                              <Plus className="w-3.5 h-3.5"/>Crear factura · {Num.fmt(prov.totalSuelto)}
-                            </button>
-                          )}
+                                {/* ── Facturas existentes con albaranes vinculados ── */}
+                                {todasFacturas.length > 0 && (
+                                  <div>
+                                    <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                                      <FileText className="w-3.5 h-3.5"/> Facturas
+                                    </p>
+                                    <div className="space-y-2">
+                                      {todasFacturas.map(f => {
+                                        const albsEnFactura = (f.albaranIdsArr || []).map(id =>
+                                          albaranesSeguros.find(a => a && a.id === id)
+                                        ).filter(Boolean);
 
-                          {/* ── Estado de facturas existentes ── */}
-                          {todasFacturas.map(f => (
-                            <div key={f.id} className={cn('rounded-xl border p-3 space-y-2', f.paid ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100')}>
-                              <div className="flex items-center justify-between">
-                                <div>
-                                  <p className="font-black text-xs text-slate-700">{f.num || 'Sin número'} · {f.date}</p>
-                                  <p className="text-[10px] text-slate-400">{(f.albaranIdsArr||[]).length} albaranes · {Num.fmt(Math.abs(Num.parse(f.total)))}</p>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  {/* Toggle pagada / pendiente */}
-                                  <button onClick={() => handleTogglePago(f.id)}
-                                    className={cn('text-[10px] font-black px-3 py-1.5 rounded-lg transition', f.paid
-                                      ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                                      : 'bg-white border border-rose-200 text-rose-600 hover:bg-rose-100')}>
-                                    {f.paid ? '✓ Pagada' : '⏳ Pendiente'}
-                                  </button>
-                                </div>
+                                        return (
+                                          <div key={f.id} className={cn('rounded-xl border p-3', f.paid ? 'bg-emerald-50/50 border-emerald-100' : 'bg-rose-50/50 border-rose-100')}>
+                                            <div className="flex items-center justify-between">
+                                              <div>
+                                                <p className="font-black text-xs text-slate-700">{f.num || 'Sin número'} · {f.date}</p>
+                                                <p className="text-[10px] text-slate-400 mt-0.5">{albsEnFactura.length} albaranes vinculados</p>
+                                              </div>
+                                              <div className="flex items-center gap-2 shrink-0">
+                                                <p className="font-black text-sm tabular-nums">{Num.fmt(Math.abs(Num.parse(f.total)))}</p>
+                                                <button onClick={(e) => { e.stopPropagation(); handleTogglePago(f.id); }}
+                                                  className={cn('text-[10px] font-black px-3 py-1.5 rounded-lg transition', f.paid
+                                                    ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                                    : 'bg-white border border-rose-200 text-rose-600 hover:bg-rose-100')}>
+                                                  {f.paid ? '✓ Pagada' : '⏳ Marcar pagada'}
+                                                </button>
+                                              </div>
+                                            </div>
+
+                                            {/* Albaranes vinculados a esta factura */}
+                                            {albsEnFactura.length > 0 && (
+                                              <div className="mt-2 pl-3 border-l-2 border-slate-200/60 space-y-0.5">
+                                                {albsEnFactura.map((a: any) => (
+                                                  <div key={a.id} className="flex items-center justify-between text-[10px] text-slate-500 py-0.5">
+                                                    <span className="truncate">{a.date} · {a.num || 'S/N'}</span>
+                                                    <span className="font-bold tabular-nums shrink-0 ml-2">{Num.fmt(Math.abs(Num.parse(a.total) || 0))}</span>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            )}
+
+                                            {/* Nota de problema */}
+                                            {!f.paid && (
+                                              <div className="mt-2">
+                                                <ProveedorNota
+                                                  nota={(f as any).nota_problema || ''}
+                                                  onSave={async (nota) => {
+                                                    const nd = JSON.parse(JSON.stringify(safeData));
+                                                    const idx = nd.facturas.findIndex((x:any) => x.id === f.id);
+                                                    if (idx !== -1) { nd.facturas[idx].nota_problema = nota; await onSave(nd); }
+                                                  }}
+                                                />
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* ── Añadir albarán: manual o foto ── */}
+                                {quickManualProv === prov.nombre ? (
+                                  <div className="bg-[color:var(--arume-gray-50)] border border-[color:var(--arume-gray-100)] rounded-xl p-3 space-y-2">
+                                    <p className="text-[10px] font-black text-[color:var(--arume-ink)] uppercase tracking-widest">Añadir albarán manual</p>
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        autoFocus type="text" inputMode="decimal" placeholder="Total €"
+                                        value={qmForm.total}
+                                        onChange={e => setQmForm(f => ({ ...f, total: e.target.value }))}
+                                        onKeyDown={e => { if (e.key === 'Enter') handleQuickManualSave(prov.nombre); }}
+                                        className="flex-1 px-3 py-2.5 text-sm font-black text-right bg-white border border-[color:var(--arume-gray-200)] rounded-xl outline-none focus:border-[color:var(--arume-ink)] tabular-nums"
+                                      />
+                                      <input
+                                        type="date" value={qmForm.date || DateUtil.today()}
+                                        onChange={e => setQmForm(f => ({ ...f, date: e.target.value }))}
+                                        className="w-[130px] px-2 py-2.5 text-[11px] font-bold bg-white border border-[color:var(--arume-gray-200)] rounded-xl outline-none focus:border-[color:var(--arume-ink)]"
+                                      />
+                                      <input
+                                        type="text" placeholder="Nº" value={qmForm.num}
+                                        onChange={e => setQmForm(f => ({ ...f, num: e.target.value }))}
+                                        className="w-20 px-2 py-2.5 text-[11px] font-bold bg-white border border-[color:var(--arume-gray-200)] rounded-xl outline-none focus:border-[color:var(--arume-ink)]"
+                                      />
+                                    </div>
+                                    <div className="flex gap-2">
+                                      <button onClick={(e) => { e.stopPropagation(); handleQuickManualSave(prov.nombre); }}
+                                        disabled={qmBusy}
+                                        className="flex-1 bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] font-black text-[10px] uppercase tracking-widest py-2.5 rounded-xl transition hover:bg-[color:var(--arume-gray-700)] disabled:opacity-50 flex items-center justify-center gap-1.5">
+                                        {qmBusy ? <Loader2 className="w-3 h-3 animate-spin"/> : <Plus className="w-3 h-3"/>} Guardar
+                                      </button>
+                                      <button onClick={(e) => { e.stopPropagation(); setQuickManualProv(null); setQmForm({ total: '', date: '', num: '' }); }}
+                                        className="px-4 py-2.5 rounded-xl text-[10px] font-black text-[color:var(--arume-gray-400)] hover:bg-white transition uppercase">
+                                        Cancelar
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="flex gap-2">
+                                    <button onClick={(e) => { e.stopPropagation(); setQuickManualProv(prov.nombre); setQmForm({ total: '', date: '', num: '' }); }}
+                                      className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 border-dashed border-[color:var(--arume-gray-200)] text-[color:var(--arume-gray-400)] text-[10px] font-black uppercase tracking-widest hover:border-[color:var(--arume-ink)] hover:text-[color:var(--arume-ink)] hover:bg-[color:var(--arume-gray-50)] transition-all">
+                                      <Plus className="w-3 h-3"/> Añadir albarán
+                                    </button>
+                                    <button onClick={(e) => { e.stopPropagation(); handleQuickScan(prov.nombre); }}
+                                      disabled={scanningProv === prov.nombre}
+                                      className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border-2 border-dashed border-[color:var(--arume-gray-200)] text-[color:var(--arume-gray-400)] text-[10px] font-black uppercase tracking-widest hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50/50 transition-all disabled:opacity-50">
+                                      {scanningProv === prov.nombre
+                                        ? <Loader2 className="w-3 h-3 animate-spin"/>
+                                        : <Camera className="w-3 h-3"/>}
+                                      Foto
+                                    </button>
+                                  </div>
+                                )}
+
                               </div>
-
-                              {/* Nota de problema si no está pagada */}
-                              {!f.paid && (
-                                <ProveedorNota
-                                  nota={(f as any).nota_problema || ''}
-                                  onSave={async (nota) => {
-                                    const nd = JSON.parse(JSON.stringify(safeData));
-                                    const idx = nd.facturas.findIndex((x:any) => x.id === f.id);
-                                    if (idx !== -1) { nd.facturas[idx].nota_problema = nota; await onSave(nd); }
-                                  }}
-                                />
-                              )}
-                            </div>
-                          ))}
-
-                        </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
                       </div>
                     );
                   })}
