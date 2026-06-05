@@ -2151,10 +2151,11 @@ REGLAS:
                             {imgSrc ? (
                               <img src={imgSrc} alt="Factura" className="w-full h-full object-contain" />
                             ) : isPdf ? (
-                              <div className="flex flex-col items-center gap-2">
-                                <FileText className="w-12 h-12 text-violet-300" />
-                                <span className="text-[9px] font-black text-violet-400 uppercase tracking-widest">PDF del proveedor</span>
-                              </div>
+                              <iframe
+                                src={b64.startsWith('data:') ? b64 : `data:application/pdf;base64,${b64}`}
+                                className="w-full h-full border-0 pointer-events-none"
+                                title="PDF"
+                              />
                             ) : (
                               <div className="flex flex-col items-center gap-2">
                                 <FileText className="w-12 h-12 text-slate-200" />

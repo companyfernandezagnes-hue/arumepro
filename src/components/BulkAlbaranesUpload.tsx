@@ -1192,7 +1192,7 @@ Si no lo ves claramente, devuelve null. NO inventes.`;
             ai_confidence: p.confidence || 'unknown',
           } : {}),
           // 🖼️ Thumbnail para ver la imagen desde la vista de facturas por proveedor
-          ...(e.base64 && !e.file.type.includes('pdf') ? { thumb_b64: e.base64, thumb_mime: 'image/jpeg' } : {}),
+          ...(e.base64 ? { thumb_b64: e.base64, thumb_mime: e.file.type.includes('pdf') ? 'application/pdf' : 'image/jpeg' } : {}),
           // 📝 Anotaciones manuscritas detectadas por la IA — críticas para contabilidad
           ...((p as any).notas_manuscritas ? { notas_manuscritas: (p as any).notas_manuscritas } : {}),
           ...((p as any).alertas_ia?.length > 0 ? { alertas_ia: (p as any).alertas_ia } : {}),

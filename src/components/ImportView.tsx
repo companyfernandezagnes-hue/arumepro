@@ -53,7 +53,7 @@ type FileStatus = 'pending' | 'processing' | 'success' | 'error' | 'skipped' | '
 
 interface QueueItem {
   id: string; file: File; name: string; status: FileStatus;
-  thumb: string | null; attempts: number; maxAttempts: number;
+  thumb: string | null; thumbType?: 'image' | 'pdf'; attempts: number; maxAttempts: number;
   error?: string; result?: any;
   // Páginas extra del mismo documento (solo hay `file` principal por defecto).
   // Si additionalPages está definido, el documento es multi-página y se envía
@@ -701,7 +701,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
   const addFilesToQueue = useCallback((files: File[]) => {
     const newItems: QueueItem[] = files.map((file, i) => ({
       id: `q-${crypto.randomUUID()}`, file, name: file.name || `Doc_${i + 1}`,
-      status: 'pending', thumb: file.type.startsWith('image/') ? URL.createObjectURL(file) : 'pdf',
+      status: 'pending', thumb: URL.createObjectURL(file), thumbType: file.type.startsWith('image/') ? 'image' : 'pdf',
       attempts: 0, maxAttempts: 4,
     }));
     setQueue(prev => [...prev, ...newItems]);
@@ -721,7 +721,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
       file: primary,
       name: `📎 ${primary.name || 'Factura'} (${files.length} páginas)`,
       status: 'pending',
-      thumb: primary.type.startsWith('image/') ? URL.createObjectURL(primary) : 'pdf',
+      thumb: URL.createObjectURL(primary), thumbType: primary.type.startsWith('image/') ? 'image' : 'pdf',
       attempts: 0, maxAttempts: 4,
       additionalPages: rest,
     };
@@ -1685,15 +1685,16 @@ const ReviewModal = ({ item, queuePosition, onConfirm, onSkip }: ReviewModalProp
 
         {/* Body */}
         <div className="flex flex-1 overflow-hidden">
-          {/* Panel izquierdo: imagen */}
-          <div className="w-2/5 bg-slate-50 border-r border-slate-100 flex items-center justify-center p-4 shrink-0">
-            {item.thumb && item.thumb !== 'pdf' ? (
-              <img src={item.thumb} alt="Preview" className="max-w-full max-h-full object-contain rounded-xl shadow-sm" />
+          {/* Panel izquierdo: documento (imagen o PDF) */}
+          <div className="w-2/5 bg-slate-50 border-r border-slate-100 flex items-center justify-center shrink-0 overflow-hidden">
+            {item.thumb && item.thumbType === 'pdf' ? (
+              <iframe src={item.thumb} className="w-full h-full border-0" title="PDF Preview" />
+            ) : item.thumb ? (
+              <img src={item.thumb} alt="Preview" className="max-w-full max-h-full object-contain rounded-xl shadow-sm p-4" />
             ) : (
-              <div className="flex flex-col items-center gap-3 text-slate-400">
+              <div className="flex flex-col items-center gap-3 text-slate-400 p-4">
                 <FileText className="w-20 h-20 text-slate-200" />
-                <p className="text-sm font-bold text-center">PDF — sin vista previa</p>
-                <p className="text-xs text-slate-400 text-center">Revisa los datos extraídos en el panel derecho</p>
+                <p className="text-sm font-bold text-center">Sin documento</p>
               </div>
             )}
           </div>
@@ -2122,7 +2123,11 @@ const QueueRow = ({ item, onSkip, onReview }: { item: QueueItem; onSkip: () => v
   return (
     <div className={cn('flex items-center gap-3 px-4 py-3 transition-colors', cfg.bg)}>
       <div className="w-9 h-9 rounded-lg overflow-hidden bg-white border border-slate-100 flex items-center justify-center shrink-0 shadow-sm">
-        {item.thumb && item.thumb !== 'pdf' ? (<img src={item.thumb} alt="" className="w-full h-full object-cover" />) : (<FileText className="w-5 h-5 text-rose-400" />)}
+        {item.thumb && item.thumbType === 'pdf' ? (
+          <iframe src={item.thumb} className="w-full h-full border-0 pointer-events-none scale-[0.5] origin-top-left" style={{width:'200%',height:'200%'}} title="PDF" />
+        ) : item.thumb ? (
+          <img src={item.thumb} alt="" className="w-full h-full object-cover" />
+        ) : (<FileText className="w-5 h-5 text-rose-400" />)}
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-xs font-bold text-slate-700 truncate">{item.name}</p>
