@@ -1856,6 +1856,23 @@ REGLAS:
                     const isExpanded = expandedProv === prov.nombre;
                     const totalGlobal = prov.totalSuelto + prov.totalPendiente + prov.totalPagado;
 
+                    // Detectar duplicados: albaranes con mismo num+total (ignorando S/N)
+                    const dupAlbIds = new Set<string>();
+                    if (isExpanded && prov.albaranesSueltos.length > 1) {
+                      const groups: Record<string, string[]> = {};
+                      prov.albaranesSueltos.forEach((a: any) => {
+                        const num = String(a.num || '').trim().toLowerCase();
+                        if (!num || num === 's/n') return;
+                        const total = Math.abs(Num.parse(a.total) || 0).toFixed(2);
+                        const key = `${num}__${total}`;
+                        if (!groups[key]) groups[key] = [];
+                        groups[key].push(a.id);
+                      });
+                      Object.values(groups).forEach(ids => {
+                        if (ids.length > 1) ids.forEach(id => dupAlbIds.add(id));
+                      });
+                    }
+
                     return (
                       <div key={prov.nombre} className="bg-white rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm overflow-hidden">
 
@@ -1918,11 +1935,27 @@ REGLAS:
                                     <p className="text-[10px] font-black text-amber-600 uppercase tracking-widest mb-2 flex items-center gap-1.5">
                                       <Package className="w-3.5 h-3.5"/> Albaranes sin facturar · {Num.fmt(prov.totalSuelto)}
                                     </p>
+                                    {dupAlbIds.size > 0 && (
+                                      <div className="flex items-center gap-2 px-3 py-2 bg-red-50 border border-red-200 rounded-xl mb-1">
+                                        <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                                        <p className="text-[10px] font-black text-red-600">
+                                          {dupAlbIds.size} albaranes duplicados detectados — elimina los que sobren
+                                        </p>
+                                      </div>
+                                    )}
                                     <div className="space-y-1.5">
-                                      {prov.albaranesSueltos.map((a: any) => (
-                                        <div key={a.id} className="bg-amber-50/60 border border-amber-100 rounded-xl px-3 py-2 space-y-1">
+                                      {prov.albaranesSueltos.map((a: any) => {
+                                        const isDup = dupAlbIds.has(a.id);
+                                        return (
+                                        <div key={a.id} className={cn(
+                                          'rounded-xl px-3 py-2 space-y-1',
+                                          isDup ? 'bg-red-50 border-2 border-red-300 ring-1 ring-red-200' : 'bg-amber-50/60 border border-amber-100'
+                                        )}>
                                           <div className="flex items-center justify-between">
-                                            <p className="text-xs text-slate-700 font-bold truncate">{a.date} · <span className="text-slate-500">{a.num || 'S/N'}</span></p>
+                                            <div className="flex items-center gap-2 min-w-0">
+                                              {isDup && <span className="text-[8px] font-black text-red-600 bg-red-100 px-1.5 py-0.5 rounded shrink-0 animate-pulse">DUPLICADO</span>}
+                                              <p className="text-xs text-slate-700 font-bold truncate">{a.date} · <span className="text-slate-500">{a.num || 'S/N'}</span></p>
+                                            </div>
                                             <div className="flex items-center gap-2 shrink-0">
                                               <p className="font-black text-amber-700 text-xs tabular-nums">{Num.fmt(Math.abs(Num.parse(a.total) || 0))}</p>
                                               {(a as any).thumb_b64 && (
@@ -1957,7 +1990,8 @@ REGLAS:
                                             </div>
                                           )}
                                         </div>
-                                      ))}
+                                        );
+                                      })}
                                     </div>
 
                                     {/* Crear factura con albaranes sueltos */}
