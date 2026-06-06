@@ -354,9 +354,22 @@ ANALIZA EL DOCUMENTO AL MÁXIMO DETALLE. Devuelve SOLO JSON:
   "total": 0.00,
   "base": 0.00,
   "iva": 0.00,
+  "lineas": [
+    {"qty": 1.0, "name": "Nombre producto", "unit": "kg", "unit_price": 0.00, "tax_rate": 10, "total": 0.00}
+  ],
   "notas_manuscritas": "string o null",
   "alertas": []
 }
+
+CAMPO "lineas" — EXTRAE TODAS LAS LÍNEAS DE PRODUCTO:
+Cada línea del documento es un item. Para cada una extrae:
+- "qty": cantidad (número, ej: 2.5). Si no hay → 1
+- "name": nombre del producto tal cual aparece
+- "unit": unidad (kg, l, ml, g, uds, cj, bot, pack). Si no hay → "uds"
+- "unit_price": precio unitario SIN IVA. Si solo ves precio con IVA, divide por (1 + tax_rate/100)
+- "tax_rate": tipo IVA (4 para pan/leche/fruta, 10 para alimentación general, 21 para alcohol/no alimentario)
+- "total": total de la línea CON IVA
+Si el documento no tiene líneas detalladas → [] (array vacío, no inventes)
 
 CAMPO "notas_manuscritas" — MUY IMPORTANTE:
 Transcribe LITERALMENTE todo lo que esté escrito A MANO (boli, rotulador, lápiz) y que sea diferente del texto impreso. Incluye:
@@ -400,6 +413,18 @@ REGLAS:
       const notasManuscritas = raw.notas_manuscritas ? String(raw.notas_manuscritas).trim() : undefined;
       const alertasIA: string[] = Array.isArray(raw.alertas) ? raw.alertas.map((a: any) => String(a)).filter(Boolean) : [];
 
+      // Parsear líneas de producto
+      const lineasIA: any[] = Array.isArray(raw.lineas) ? raw.lineas.map((l: any) => ({
+        q: Number(l.qty) || 1,
+        n: String(l.name || '').trim(),
+        u: String(l.unit || 'uds').toLowerCase(),
+        unitPrice: Number(l.unit_price) || 0,
+        rate: Number(l.tax_rate) || 10,
+        base: Num.round2((Number(l.unit_price) || 0) * (Number(l.qty) || 1)),
+        tax: Num.round2((Number(l.unit_price) || 0) * (Number(l.qty) || 1) * (Number(l.tax_rate) || 10) / 100),
+        t: Number(l.total) || 0,
+      })).filter((l: any) => l.n && l.n.length > 0) : [];
+
       // Crear el albarán y guardarlo (con thumbnail para preview)
       let thumb_b64: string | undefined;
       if (mimeType.startsWith('image/') && base64) {
@@ -420,7 +445,7 @@ REGLAS:
         id: `alb-${fecha.replace(/-/g,'')}-${Date.now()}-REST`,
         prov, date: fecha, num,
         total: String(total), base: String(base), taxes: String(iva), iva: String(iva),
-        items: [], invoiced: false, paid: false, reconciled: false,
+        items: lineasIA, invoiced: false, paid: false, reconciled: false,
         unitId: 'REST', status: 'ok', created_at: new Date().toISOString(), source: 'quick-scan',
         ...(thumb_b64 ? { thumb_b64, thumb_mime: mimeType } : {}),
         ...(notasManuscritas ? { notas_manuscritas: notasManuscritas } : {}),
