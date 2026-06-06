@@ -342,10 +342,52 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
         ? await preprocessImageForOCR(file)
         : { base64: await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res((r.result as string).split(',')[1]); r.onerror = rej; r.readAsDataURL(file); }), mimeType: file.type };
 
-      const QUICK_PROMPT = `Eres un OCR contable para albaranes/facturas españoles de hostelería.
+      const QUICK_PROMPT = `Eres un OCR contable EXPERTO para albaranes/facturas españoles de hostelería.
 Proveedor esperado: ${quickScanTarget}. Cliente: Arume Sake Bar / Celoso de Palma SL.
-Devuelve SOLO JSON:
-{"proveedor":"nombre emisor","nif":"CIF o null","num":"número o S/N","fecha":"YYYY-MM-DD","total":0.00,"base":0.00,"iva":0.00}`;
+
+ANALIZA EL DOCUMENTO AL MÁXIMO DETALLE. Devuelve SOLO JSON:
+{
+  "proveedor": "nombre emisor (NO Arume, eso es el cliente)",
+  "nif": "CIF o null",
+  "num": "número documento o S/N",
+  "fecha": "YYYY-MM-DD",
+  "total": 0.00,
+  "base": 0.00,
+  "iva": 0.00,
+  "notas_manuscritas": "string o null",
+  "alertas": []
+}
+
+CAMPO "notas_manuscritas" — MUY IMPORTANTE:
+Transcribe LITERALMENTE todo lo que esté escrito A MANO (boli, rotulador, lápiz) y que sea diferente del texto impreso. Incluye:
+- Abonos: "ABONO", "NOTA DE CRÉDITO", cantidades o importes negativos
+- Devoluciones: "DEV", "DEVOLVER", productos tachados con "NO", "FALTA", "NE", "NO TRAÍDO"
+- Envases: "ENVASES", "ENV", "RETORNO", cuentas de envases
+- Descuentos a mano: "DTO", porcentajes escritos con boli
+- Correcciones de precio: precio impreso tachado con nuevo precio escrito a mano
+- Correcciones de peso/cantidad: peso real vs impreso
+- Notas del repartidor: "PENDIENTE", "SE TRAE MAÑANA", "AGOTADO"
+- Estado de pago: "DEBE", "PAGADO", "COBRADO", "A CUENTA"
+- Cualquier otra anotación manuscrita, símbolo, flecha, círculo o marca
+Si no hay nada manuscrito → null.
+
+CAMPO "alertas" — array de strings:
+Reporta CUALQUIER incidencia detectada:
+- "ABONO: [detalle]" si hay abonos o créditos
+- "DEVOLUCIÓN: [producto] [cantidad]" si hay devoluciones
+- "PRECIO CAMBIADO: [producto] de X a Y" si hay correcciones de precio
+- "FALTA: [producto]" si algo no fue entregado
+- "ENVASES: [detalle]" si hay movimiento de envases
+- "DESCUENTO MANUAL: [detalle]" si hay descuentos escritos a mano
+- "TOTAL NO CUADRA: doc=X vs líneas=Y" si el total no coincide
+Si no hay incidencias → [].
+
+REGLAS:
+- PROVEEDOR = quien VENDE (emisor). NUNCA Arume/Agnès/Sake Bar (eso es el receptor)
+- FECHA = emisión. YYYY-MM-DD. Año entre 2024-2026. Si no la ves → null
+- TOTAL = importe final con IVA. Punto decimal
+- Prefiere el valor MANUSCRITO sobre el impreso si hay corrección
+- null para campos que no veas. NUNCA inventes datos`;
 
       const result = await scanBase64(base64, mimeType, QUICK_PROMPT);
       const raw = result.raw as any;
@@ -355,9 +397,10 @@ Devuelve SOLO JSON:
       const iva   = Number(raw.iva)   || 0;
       const prov  = String(raw.proveedor || quickScanTarget).toUpperCase();
       const num   = String(raw.num || 'S/N');
+      const notasManuscritas = raw.notas_manuscritas ? String(raw.notas_manuscritas).trim() : undefined;
+      const alertasIA: string[] = Array.isArray(raw.alertas) ? raw.alertas.map((a: any) => String(a)).filter(Boolean) : [];
 
       // Crear el albarán y guardarlo (con thumbnail para preview)
-      // Generar thumbnail pequeño (~40KB) para poder verlo después
       let thumb_b64: string | undefined;
       if (mimeType.startsWith('image/') && base64) {
         try {
@@ -370,7 +413,6 @@ Devuelve SOLO JSON:
           thumb_b64 = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
         } catch { /* sin thumbnail */ }
       } else if (mimeType === 'application/pdf') {
-        // Para PDFs usamos el base64 directamente (se mostrará en iframe)
         thumb_b64 = base64;
       }
 
@@ -381,12 +423,18 @@ Devuelve SOLO JSON:
         items: [], invoiced: false, paid: false, reconciled: false,
         unitId: 'REST', status: 'ok', created_at: new Date().toISOString(), source: 'quick-scan',
         ...(thumb_b64 ? { thumb_b64, thumb_mime: mimeType } : {}),
+        ...(notasManuscritas ? { notas_manuscritas: notasManuscritas } : {}),
+        ...(alertasIA.length > 0 ? { alertas_ia: alertasIA } : {}),
       };
       const newData = JSON.parse(JSON.stringify(data));
       if (!newData.albaranes) newData.albaranes = [];
       newData.albaranes.unshift(newAlbaran);
       await onSave(newData);
-      toast.success(`✅ Albarán de ${prov} añadido: ${num} — ${Num.fmt(total)}`);
+
+      // Toast con info de alertas si las hay
+      const alertaMsg = alertasIA.length > 0 ? ` ⚠️ ${alertasIA.length} alerta(s)` : '';
+      const notaMsg = notasManuscritas ? ' ✍️ Notas detectadas' : '';
+      toast.success(`✅ Albarán de ${prov} añadido: ${num} — ${Num.fmt(total)}${alertaMsg}${notaMsg}`);
     } catch (err: any) {
       toast.error(`❌ Error OCR: ${err?.message || 'Inténtalo de nuevo'}`);
     } finally {

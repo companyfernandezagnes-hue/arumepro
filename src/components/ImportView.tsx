@@ -300,6 +300,26 @@ REGLA IMPORTES: Sin símbolo €. Usa punto decimal (1500.50, no 1.500,50).
 REGLA IVA: En hostelería conviven 4% (pan, leche, fruta), 10% (carne, pescado, alimentación general), 21% (alcohol, no alimentario). Asigna el rate correcto a cada línea.
 REGLA IRPF: Si hay retención IRPF (profesionales), extráela como valor negativo en "irpf".
 
+REGLA NOTAS MANUSCRITAS (MUY IMPORTANTE):
+  Transcribe LITERALMENTE todo texto escrito A MANO (boli, rotulador, lápiz) diferente del texto impreso:
+  - Abonos: "ABONO", "NOTA DE CRÉDITO", importes negativos
+  - Devoluciones: "DEV", "DEVOLVER", productos tachados, "NO", "FALTA", "NE", "NO TRAÍDO"
+  - Envases: "ENVASES", "ENV", "RETORNO", cuentas de envases
+  - Descuentos a boli: "DTO", porcentajes manuscritos
+  - Correcciones de precio: precio tachado con nuevo valor a mano → USA EL MANUSCRITO
+  - Correcciones de peso/cantidad: peso real vs impreso
+  - Notas del repartidor: "PENDIENTE", "SE TRAE MAÑANA", "AGOTADO"
+  - Estado de pago: "DEBE", "PAGADO", "COBRADO", "A CUENTA"
+  - Cualquier marca, flecha, círculo, anotación manuscrita
+  Si no hay nada manuscrito → null.
+
+REGLA ALERTAS:
+  Reporta CUALQUIER incidencia como string en el array:
+  - "ABONO: [detalle]" / "DEVOLUCIÓN: [producto]" / "PRECIO CAMBIADO: de X a Y"
+  - "FALTA: [producto]" / "ENVASES: [detalle]" / "DESCUENTO MANUAL: [detalle]"
+  - "TOTAL NO CUADRA: doc=X vs líneas=Y"
+  Si no hay incidencias → [].
+
 Devuelve SOLO un JSON estricto sin comentarios ni markdown:
 {
   "tipo_documento": "factura|albaran|ticket_simplificado",
@@ -313,6 +333,8 @@ Devuelve SOLO un JSON estricto sin comentarios ni markdown:
   "irpf": 0.00,
   "metodo_pago": "efectivo|tarjeta|banco|pendiente",
   "referencias_albaranes": [],
+  "notas_manuscritas": "texto manuscrito detectado o null",
+  "alertas": [],
   "lineas": [
     {"qty": 1, "name": "Descripción producto", "unit": "ud", "unit_price": 0.00, "tax_rate": 10, "total": 0.00}
   ]
@@ -467,6 +489,8 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         lineas: datosIA.lineas || [],
         tipo_documento: datosIA.tipo_documento,
         metodo_pago: datosIA.metodo_pago,
+        ...((datosIA as any).notas_manuscritas ? { notas_manuscritas: String((datosIA as any).notas_manuscritas).trim() } : {}),
+        ...(Array.isArray((datosIA as any).alertas) && (datosIA as any).alertas.length > 0 ? { alertas_ia: (datosIA as any).alertas.map(String).filter(Boolean) } : {}),
       }};
     } else {
       const rec = reconcileAlbaran(datosIA);
@@ -485,6 +509,8 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         status: rec.cuadra ? 'ok' : 'warning', unitId: selectedUnit, by_rate: rec.by_rate,
         tipo_documento: 'albaran',
         metodo_pago: datosIA.metodo_pago,
+        ...((datosIA as any).notas_manuscritas ? { notas_manuscritas: String((datosIA as any).notas_manuscritas).trim() } : {}),
+        ...(Array.isArray((datosIA as any).alertas) && (datosIA as any).alertas.length > 0 ? { alertas_ia: (datosIA as any).alertas.map(String).filter(Boolean) } : {}),
       }};
     }
   };
@@ -2048,7 +2074,7 @@ const ReviewModal = ({ item, queuePosition, onConfirm, onSkip }: ReviewModalProp
                 <div className="flex-1">
                   <p className="text-xs font-bold text-amber-900">Notas manuscritas del albarán</p>
                   <p className="text-[11px] text-amber-700/80">
-                    Todo lo escrito a mano que la IA no leyó: envases, descuentos apuntados a boli, devoluciones, cosas que dejaron, etc.
+                    La IA detecta automáticamente: abonos, devoluciones, envases, descuentos a boli, correcciones de precio, notas del repartidor. Revisa y completa si falta algo.
                   </p>
                 </div>
               </div>
