@@ -289,9 +289,25 @@ REGLA FECHAS (CRÍTICO):
   - Si no hay fecha visible → usa ${TODAY_ISO_FOR_PROMPT}.
   - España usa DD/MM/YYYY (NO MM/DD/YYYY).
 REGLA TIPO:
+  - "informe_z" si es un Informe Z / Cierre de caja / Resumen de ventas TPV (contiene "Informe Z", "Cierre Z", "Resumen de ventas", "Total ventas", "Formas de pago", "Efectivo/Tarjeta")
   - "factura" si tiene número de factura oficial (F-XXX, FAC-XXX, FRA-, etc.) y desglose IVA
   - "ticket_simplificado" si es ticket de caja, recibo TPV, o documento sin NIF del receptor
   - "albaran" si es albarán o nota de entrega
+REGLA INFORME Z (si tipo_documento = "informe_z"):
+  Extrae estos campos adicionales:
+  - "total_ventas": ventas brutas totales
+  - "devoluciones": importe de devoluciones (negativo)
+  - "descuentos_total": importe total de descuentos (negativo)
+  - "efectivo": cobrado en efectivo
+  - "tarjeta": cobrado con tarjeta
+  - "otros_pagos": otros métodos de pago
+  - "total_cobrado": total neto cobrado (efectivo+tarjeta+otros)
+  - "num_tickets": número total de tickets
+  - "ticket_medio": importe medio por ticket
+  - "periodo_desde": fecha inicio periodo "YYYY-MM-DD"
+  - "periodo_hasta": fecha fin periodo "YYYY-MM-DD"
+  - "empresa_z": nombre de la empresa del TPV
+  - "nif_z": NIF/CIF de la empresa del TPV
 REGLA PROVEEDOR:
   - EMISOR = quien VENDE. Busca nombre + CIF en la cabecera.
   - NUNCA devuelvas "Arume", "Agnès Company", "Celoso de Palma", "Sake Bar" como proveedor — son el RECEPTOR.
@@ -472,9 +488,41 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     const fechaVencimiento = (datosIA as any).fecha_vencimiento ? String((datosIA as any).fecha_vencimiento).trim() : undefined;
     const tipoRaw = String(datosIA.tipo_documento ?? '').toLowerCase();
     datosIA.tipo_documento =
+      tipoRaw.includes('informe_z') || tipoRaw.includes('cierre') ? 'informe_z' :
       tipoRaw.includes('albaran') ? 'albaran' :
       tipoRaw.includes('ticket') || tipoRaw.includes('recibo') || tipoRaw.includes('simplif') || tipoRaw.includes('caja') ? 'ticket_simplificado' :
       'factura';
+
+    // ═══ INFORME Z — Cierre de caja TPV ═══
+    if (datosIA.tipo_documento === 'informe_z') {
+      const d = datosIA as any;
+      const totalVentas   = Num.parse(d.total_ventas);
+      const devoluciones  = Num.parse(d.devoluciones);
+      const descuentos    = Num.parse(d.descuentos_total);
+      const efectivoZ     = Num.parse(d.efectivo);
+      const tarjetaZ      = Num.parse(d.tarjeta);
+      const otrosPagos    = Num.parse(d.otros_pagos);
+      const totalCobrado  = Num.parse(d.total_cobrado) || (efectivoZ + tarjetaZ + otrosPagos);
+      const numTickets    = parseInt(d.num_tickets) || 0;
+      const ticketMedio   = Num.parse(d.ticket_medio);
+      const periodoDesde  = d.periodo_desde ? normalizeDate(String(d.periodo_desde)) : normalizeDate(String(datosIA.fecha ?? ''));
+      const periodoHasta  = d.periodo_hasta ? normalizeDate(String(d.periodo_hasta)) : periodoDesde;
+      const empresaZ      = String(d.empresa_z || datosIA.proveedor || 'TPV');
+      const nifZ          = String(d.nif_z || datosIA.nif || '');
+
+      return { tipo: 'informe_z', result: {
+        id: `z-${crypto.randomUUID()}`,
+        date: periodoDesde,
+        periodoDesde, periodoHasta,
+        empresa: empresaZ, nif: nifZ,
+        totalVentas, devoluciones, descuentos,
+        efectivo: efectivoZ, tarjeta: tarjetaZ, otrosPagos,
+        totalCobrado, numTickets, ticketMedio,
+        tipo_documento: 'informe_z',
+        notas_manuscritas: d.notas_manuscritas ? String(d.notas_manuscritas).trim() : undefined,
+        alertas: Array.isArray(d.alertas) ? d.alertas.map(String).filter(Boolean) : [],
+      }};
+    }
 
     if (datosIA.tipo_documento === 'factura' || datosIA.tipo_documento === 'ticket_simplificado') {
       let totalPdf = Num.parse(datosIA.total);
@@ -533,7 +581,10 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     const nuevosAlbaranes = completedQueue
       .filter(q => q.status === 'success' && q.result?.tipo === 'albaran')
       .map(q => q.result.result);
-    if (nuevasFacturas.length === 0 && nuevosAlbaranes.length === 0) return;
+    const nuevosInformesZ = completedQueue
+      .filter(q => q.status === 'success' && q.result?.tipo === 'informe_z')
+      .map(q => q.result.result);
+    if (nuevasFacturas.length === 0 && nuevosAlbaranes.length === 0 && nuevosInformesZ.length === 0) return;
     const newData = JSON.parse(JSON.stringify(safeData));
     const existingFactIds = new Set((safeFacturas as any[]).map((f: any) => f.id));
     const existingAlbIds = new Set((safeAlbaranes as any[]).map((a: any) => a.id));
@@ -567,6 +618,55 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     const albaranesUnicos = nuevosAlbaranes.filter((a: any) => !existingAlbIds.has(a.id));
     newData.facturas = [...facturasUnicas, ...safeFacturas];
     newData.albaranes = [...albaranesUnicos, ...safeAlbaranes];
+
+    // ═══ INFORMES Z → Cierres de caja + Facturas tipo 'caja' ═══
+    if (nuevosInformesZ.length > 0) {
+      if (!newData.cierres) newData.cierres = [];
+      for (const z of nuevosInformesZ) {
+        // Cierre diario/mensual
+        const cierre: any = {
+          id: z.id,
+          date: z.date,
+          totalVenta: z.totalCobrado || z.totalVentas,
+          efectivo: z.efectivo || 0,
+          tarjeta: z.tarjeta || 0,
+          apps: z.otrosPagos || 0,
+          descuadre: 0,
+          notas: [
+            `Informe Z · ${z.empresa || 'TPV'}${z.nif ? ` · ${z.nif}` : ''}`,
+            `Periodo: ${z.periodoDesde || '?'} a ${z.periodoHasta || '?'}`,
+            `Ventas brutas: ${Num.fmt(z.totalVentas)} · Devol: ${Num.fmt(z.devoluciones)} · Dto: ${Num.fmt(z.descuentos)}`,
+            `Tickets: ${z.numTickets || '?'} · Ticket medio: ${Num.fmt(z.ticketMedio)}`,
+            z.notas_manuscritas || '',
+          ].filter(Boolean).join('\n'),
+          unitId: 'REST',
+          // Datos extra del informe Z
+          informe_z: true,
+          total_ventas_bruto: z.totalVentas,
+          devoluciones: z.devoluciones,
+          descuentos: z.descuentos,
+          num_tickets: z.numTickets,
+          ticket_medio: z.ticketMedio,
+          periodo_desde: z.periodoDesde,
+          periodo_hasta: z.periodoHasta,
+          empresa_z: z.empresa,
+          nif_z: z.nif,
+        };
+        // Upsert: si ya hay un cierre de esa fecha, lo reemplaza
+        const existIdx = newData.cierres.findIndex((c: any) => c.date === z.date && c.informe_z);
+        if (existIdx >= 0) newData.cierres[existIdx] = cierre;
+        else newData.cierres.unshift(cierre);
+
+        // Factura tipo 'caja' para que aparezca en el registro de facturación
+        newData.facturas.unshift({
+          id: `f-z-${z.id}`, tipo: 'caja', num: `Z-${(z.date || '').replace(/-/g, '')}`,
+          date: z.date, prov: 'Z DIARIO', total: z.totalCobrado || z.totalVentas,
+          paid: false, reconciled: false, unidad_negocio: 'REST',
+          informe_z: true,
+        } as any);
+      }
+    }
+
     await onSave(newData);
 
     // Avisar de duplicados después de guardar (pero separado del toast de éxito)
@@ -589,7 +689,10 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     } else if (facturasUnicas.length > 0) {
       toast.success(`✅ ${facturasUnicas.length} factura${facturasUnicas.length>1?'s':''} guardada${facturasUnicas.length>1?'s':''}. Ve a Compras → Bóveda.`);
     } else if (albaranesUnicos.length > 0) {
-      toast.success(`✅ ${albaranesUnicos.length} albarán${albaranesUnicos.length>1?'es':''} guardado${albaranesUnicos.length>1?'s':''}. Ve a Compras → Albaranes (o Agrupar).`);
+      toast.success(`✅ ${albaranesUnicos.length} albarán${albaranesUnicos.length>1?'es':''} guardado${albaranesUnicos.length>1?'s':''}. Ve a Compras → Albaranes.`);
+    }
+    if (nuevosInformesZ.length > 0) {
+      toast.success(`🧾 ${nuevosInformesZ.length} Informe${nuevosInformesZ.length>1?'s':''} Z registrado${nuevosInformesZ.length>1?'s':''}. Ve a Caja para verlo.`);
     }
   }, [safeData, safeFacturas, safeAlbaranes, onSave]);
 
