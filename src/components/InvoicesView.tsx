@@ -1936,11 +1936,68 @@ REGLAS:
                                       <Package className="w-3.5 h-3.5"/> Albaranes sin facturar · {Num.fmt(prov.totalSuelto)}
                                     </p>
                                     {dupAlbIds.size > 0 && (
-                                      <div className="flex items-center gap-2 px-3 py-2 bg-red-50 border border-red-200 rounded-xl mb-1">
-                                        <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0" />
-                                        <p className="text-[10px] font-black text-red-600">
-                                          {dupAlbIds.size} albaranes duplicados detectados — elimina los que sobren
-                                        </p>
+                                      <div className="flex items-center justify-between gap-2 px-3 py-2 bg-red-50 border border-red-200 rounded-xl mb-1">
+                                        <div className="flex items-center gap-2">
+                                          <AlertTriangle className="w-3.5 h-3.5 text-red-500 shrink-0" />
+                                          <p className="text-[10px] font-black text-red-600">
+                                            {dupAlbIds.size} duplicados — elimina los que sobren o une las páginas
+                                          </p>
+                                        </div>
+                                        <button onClick={async (e) => {
+                                          e.stopPropagation();
+                                          // Agrupar duplicados por num+total
+                                          const mergeGroups: Record<string, any[]> = {};
+                                          prov.albaranesSueltos.forEach((a: any) => {
+                                            if (!dupAlbIds.has(a.id)) return;
+                                            const num = String(a.num || '').trim().toLowerCase();
+                                            const total = Math.abs(Num.parse(a.total) || 0).toFixed(2);
+                                            const key = `${num}__${total}`;
+                                            if (!mergeGroups[key]) mergeGroups[key] = [];
+                                            mergeGroups[key].push(a);
+                                          });
+                                          const groupsArr = Object.values(mergeGroups).filter(g => g.length > 1);
+                                          if (groupsArr.length === 0) return;
+                                          if (!await confirm({
+                                            title: '¿Unir albaranes duplicados?',
+                                            message: `Se unirán ${groupsArr.length} grupo(s) de páginas del mismo documento. Se conserva el primer albarán y se fusionan las notas de los demás.`,
+                                            confirmLabel: 'Unir',
+                                          })) return;
+                                          const nd = JSON.parse(JSON.stringify(safeData));
+                                          let merged = 0;
+                                          groupsArr.forEach(group => {
+                                            const [keep, ...extras] = group;
+                                            const keepIdx = nd.albaranes.findIndex((a: any) => a && a.id === keep.id);
+                                            if (keepIdx === -1) return;
+                                            // Fusionar notas y alertas de los extras al principal
+                                            const allNotas = [nd.albaranes[keepIdx].notas_manuscritas, ...extras.map((x: any) => x.notas_manuscritas)].filter(Boolean);
+                                            if (allNotas.length > 0) nd.albaranes[keepIdx].notas_manuscritas = allNotas.join('\n---\n');
+                                            const allAlertas = [...(nd.albaranes[keepIdx].alertas_ia || []), ...extras.flatMap((x: any) => x.alertas_ia || [])];
+                                            if (allAlertas.length > 0) nd.albaranes[keepIdx].alertas_ia = [...new Set(allAlertas)];
+                                            // Si el principal tiene total 0 pero un extra sí, usar ese
+                                            const keepTotal = Math.abs(Num.parse(nd.albaranes[keepIdx].total) || 0);
+                                            if (keepTotal === 0) {
+                                              const best = extras.find((x: any) => Math.abs(Num.parse(x.total) || 0) > 0);
+                                              if (best) {
+                                                nd.albaranes[keepIdx].total = best.total;
+                                                nd.albaranes[keepIdx].base = best.base || nd.albaranes[keepIdx].base;
+                                                nd.albaranes[keepIdx].taxes = best.taxes || nd.albaranes[keepIdx].taxes;
+                                              }
+                                            }
+                                            // Fusionar items si el principal no tiene y un extra sí
+                                            if ((!nd.albaranes[keepIdx].items || nd.albaranes[keepIdx].items.length === 0)) {
+                                              const withItems = extras.find((x: any) => x.items?.length > 0);
+                                              if (withItems) nd.albaranes[keepIdx].items = withItems.items;
+                                            }
+                                            // Eliminar los extras
+                                            const extraIds = new Set(extras.map((x: any) => x.id));
+                                            nd.albaranes = nd.albaranes.filter((a: any) => !extraIds.has(a?.id));
+                                            merged += extras.length;
+                                          });
+                                          await onSave(nd);
+                                          toast.success(`✅ ${merged} albarán(es) fusionado(s). Notas e información combinadas.`);
+                                        }} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[9px] font-black uppercase tracking-widest rounded-lg transition">
+                                          <Merge className="w-3 h-3"/> Unir todos
+                                        </button>
                                       </div>
                                     )}
                                     <div className="space-y-1.5">
@@ -1953,7 +2010,7 @@ REGLAS:
                                         )}>
                                           <div className="flex items-center justify-between">
                                             <div className="flex items-center gap-2 min-w-0">
-                                              {isDup && <span className="text-[8px] font-black text-red-600 bg-red-100 px-1.5 py-0.5 rounded shrink-0 animate-pulse">DUPLICADO</span>}
+                                              {isDup && <span className="text-[8px] font-black text-red-600 bg-red-100 px-1.5 py-0.5 rounded shrink-0">DUPLICADO</span>}
                                               <p className="text-xs text-slate-700 font-bold truncate">{a.date} · <span className="text-slate-500">{a.num || 'S/N'}</span></p>
                                             </div>
                                             <div className="flex items-center gap-2 shrink-0">
