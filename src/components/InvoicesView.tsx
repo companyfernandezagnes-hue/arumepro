@@ -357,6 +357,8 @@ ANALIZA EL DOCUMENTO AL MÁXIMO DETALLE. Devuelve SOLO JSON:
   "lineas": [
     {"qty": 1.0, "name": "Nombre producto", "unit": "kg", "unit_price": 0.00, "tax_rate": 10, "total": 0.00}
   ],
+  "metodo_pago": "sepa|efectivo|tarjeta|transferencia|pendiente",
+  "fecha_vencimiento": "YYYY-MM-DD o null",
   "notas_manuscritas": "string o null",
   "alertas": []
 }
@@ -395,6 +397,17 @@ Reporta CUALQUIER incidencia detectada:
 - "TOTAL NO CUADRA: doc=X vs líneas=Y" si el total no coincide
 Si no hay incidencias → [].
 
+CAMPO "metodo_pago": Detecta la forma de pago:
+- "sepa" o "giro" si dice: "Domiciliación", "Giro bancario", "SEPA", "Recibo domiciliado", "Mandato SEPA"
+- "efectivo" si dice: "Contado", "Efectivo", "Cash"
+- "tarjeta" si dice: "Tarjeta", "Visa", "Mastercard"
+- "transferencia" si dice: "Transferencia"
+- "pendiente" si no se indica forma de pago
+
+CAMPO "fecha_vencimiento": Fecha en que se cobrará el giro/SEPA (YYYY-MM-DD).
+Busca: "Vencimiento", "Fecha de cobro", "Fecha giro", "Dto. pronto pago antes de…"
+Si no hay fecha de vencimiento → null. NO confundir con fecha de emisión.
+
 REGLAS:
 - PROVEEDOR = quien VENDE (emisor). NUNCA Arume/Agnès/Sake Bar (eso es el receptor)
 - FECHA = emisión. YYYY-MM-DD. Año entre 2024-2026. Si no la ves → null
@@ -412,6 +425,8 @@ REGLAS:
       const num   = String(raw.num || 'S/N');
       const notasManuscritas = raw.notas_manuscritas ? String(raw.notas_manuscritas).trim() : undefined;
       const alertasIA: string[] = Array.isArray(raw.alertas) ? raw.alertas.map((a: any) => String(a)).filter(Boolean) : [];
+      const metodoPago = String(raw.metodo_pago || 'pendiente').toLowerCase().trim();
+      const fechaVencimiento = raw.fecha_vencimiento ? String(raw.fecha_vencimiento).trim() : undefined;
 
       // Parsear líneas de producto
       const lineasIA: any[] = Array.isArray(raw.lineas) ? raw.lineas.map((l: any) => ({
@@ -450,6 +465,8 @@ REGLAS:
         ...(thumb_b64 ? { thumb_b64, thumb_mime: mimeType } : {}),
         ...(notasManuscritas ? { notas_manuscritas: notasManuscritas } : {}),
         ...(alertasIA.length > 0 ? { alertas_ia: alertasIA } : {}),
+        ...(metodoPago !== 'pendiente' ? { metodo_pago: metodoPago } : {}),
+        ...(fechaVencimiento ? { fecha_vencimiento: fechaVencimiento } : {}),
       };
       const newData = JSON.parse(JSON.stringify(data));
       if (!newData.albaranes) newData.albaranes = [];

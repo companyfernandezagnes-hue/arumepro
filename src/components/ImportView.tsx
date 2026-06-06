@@ -295,7 +295,13 @@ REGLA TIPO:
 REGLA PROVEEDOR:
   - EMISOR = quien VENDE. Busca nombre + CIF en la cabecera.
   - NUNCA devuelvas "Arume", "Agnès Company", "Celoso de Palma", "Sake Bar" como proveedor — son el RECEPTOR.
-REGLA PAGO: Busca "Pagado", "Efectivo", "Tarjeta", "Visa", "Mastercard", "Transferencia", "Recibí", "Cobrado", "Domiciliado".
+REGLA PAGO: Busca forma de pago:
+  - "sepa" o "giro" si dice: "Domiciliación", "Giro bancario", "SEPA", "Recibo domiciliado", "Mandato SEPA"
+  - "efectivo" si dice: "Contado", "Efectivo", "Cash", "Recibí", "Cobrado"
+  - "tarjeta" si dice: "Tarjeta", "Visa", "Mastercard"
+  - "transferencia" si dice: "Transferencia"
+  - "pendiente" si no se indica
+REGLA VENCIMIENTO: Si hay fecha de vencimiento/giro/cobro, extráela en "fecha_vencimiento" (YYYY-MM-DD). NO confundir con fecha de emisión.
 REGLA IMPORTES: Sin símbolo €. Usa punto decimal (1500.50, no 1.500,50).
 REGLA IVA: En hostelería conviven 4% (pan, leche, fruta), 10% (carne, pescado, alimentación general), 21% (alcohol, no alimentario). Asigna el rate correcto a cada línea.
 REGLA IRPF: Si hay retención IRPF (profesionales), extráela como valor negativo en "irpf".
@@ -331,7 +337,8 @@ Devuelve SOLO un JSON estricto sin comentarios ni markdown:
   "base": 0.00,
   "iva": 0.00,
   "irpf": 0.00,
-  "metodo_pago": "efectivo|tarjeta|banco|pendiente",
+  "metodo_pago": "sepa|efectivo|tarjeta|transferencia|pendiente",
+  "fecha_vencimiento": "YYYY-MM-DD o null",
   "referencias_albaranes": [],
   "notas_manuscritas": "texto manuscrito detectado o null",
   "alertas": [],
@@ -462,6 +469,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
 
     const metodoPago = String(datosIA.metodo_pago ?? 'pendiente').toLowerCase().trim();
     const estaPagado = ['efectivo', 'tarjeta', 'banco'].includes(metodoPago);
+    const fechaVencimiento = (datosIA as any).fecha_vencimiento ? String((datosIA as any).fecha_vencimiento).trim() : undefined;
     const tipoRaw = String(datosIA.tipo_documento ?? '').toLowerCase();
     datosIA.tipo_documento =
       tipoRaw.includes('albaran') ? 'albaran' :
@@ -489,6 +497,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         lineas: datosIA.lineas || [],
         tipo_documento: datosIA.tipo_documento,
         metodo_pago: datosIA.metodo_pago,
+        ...(fechaVencimiento ? { fecha_vencimiento: fechaVencimiento } : {}),
         ...((datosIA as any).notas_manuscritas ? { notas_manuscritas: String((datosIA as any).notas_manuscritas).trim() } : {}),
         ...(Array.isArray((datosIA as any).alertas) && (datosIA as any).alertas.length > 0 ? { alertas_ia: (datosIA as any).alertas.map(String).filter(Boolean) } : {}),
       }};
@@ -509,6 +518,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         status: rec.cuadra ? 'ok' : 'warning', unitId: selectedUnit, by_rate: rec.by_rate,
         tipo_documento: 'albaran',
         metodo_pago: datosIA.metodo_pago,
+        ...(fechaVencimiento ? { fecha_vencimiento: fechaVencimiento } : {}),
         ...((datosIA as any).notas_manuscritas ? { notas_manuscritas: String((datosIA as any).notas_manuscritas).trim() } : {}),
         ...(Array.isArray((datosIA as any).alertas) && (datosIA as any).alertas.length > 0 ? { alertas_ia: (datosIA as any).alertas.map(String).filter(Boolean) } : {}),
       }};

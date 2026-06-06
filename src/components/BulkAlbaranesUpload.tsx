@@ -774,7 +774,7 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
     // Concurrencia 3: Z.AI (gratis) absorbe la primera oleada. Si falla CORS,
     // el circuit breaker lo desactiva 30min y el resto va por Claude/Gemini.
     // Con 3 en paralelo + circuit breaker no se satura.
-    await runWithLimit(pendientes, 3, async (entry) => {
+    await runWithLimit(pendientes, 5, async (entry) => {
       setEntries(prev => prev.map(e => e.id === entry.id ? { ...e, status: { kind: 'scanning' } } : e));
       try {
         // mimeType siempre image/jpeg porque preprocessImageForOCR lo convierte
