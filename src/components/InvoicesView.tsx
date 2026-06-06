@@ -2150,12 +2150,18 @@ REGLAS:
                           >
                             {imgSrc ? (
                               <img src={imgSrc} alt="Factura" className="w-full h-full object-contain" />
-                            ) : isPdf ? (
-                              <iframe
-                                src={b64.startsWith('data:') ? b64 : `data:application/pdf;base64,${b64}`}
-                                className="w-full h-full border-0 pointer-events-none"
-                                title="PDF"
-                              />
+                            ) : (isPdf || (f as any).file_path) ? (
+                              <div className="flex flex-col items-center gap-2">
+                                <div className="w-16 h-20 bg-white rounded-lg shadow-sm border border-violet-200 flex flex-col items-center justify-center">
+                                  <span className="text-[10px] font-black text-violet-500">PDF</span>
+                                  <div className="w-10 mt-1 space-y-0.5">
+                                    <div className="h-[2px] bg-violet-200 rounded-full" />
+                                    <div className="h-[2px] bg-violet-200 rounded-full w-3/4" />
+                                    <div className="h-[2px] bg-violet-200 rounded-full w-1/2" />
+                                  </div>
+                                </div>
+                                <span className="text-[9px] font-black text-violet-400 uppercase tracking-widest">Clic para ver</span>
+                              </div>
                             ) : (
                               <div className="flex flex-col items-center gap-2">
                                 <FileText className="w-12 h-12 text-slate-200" />

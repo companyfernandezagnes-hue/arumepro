@@ -2123,10 +2123,10 @@ const QueueRow = ({ item, onSkip, onReview }: { item: QueueItem; onSkip: () => v
   return (
     <div className={cn('flex items-center gap-3 px-4 py-3 transition-colors', cfg.bg)}>
       <div className="w-9 h-9 rounded-lg overflow-hidden bg-white border border-slate-100 flex items-center justify-center shrink-0 shadow-sm">
-        {item.thumb && item.thumbType === 'pdf' ? (
-          <iframe src={item.thumb} className="w-full h-full border-0 pointer-events-none scale-[0.5] origin-top-left" style={{width:'200%',height:'200%'}} title="PDF" />
-        ) : item.thumb ? (
+        {item.thumb && item.thumbType !== 'pdf' ? (
           <img src={item.thumb} alt="" className="w-full h-full object-cover" />
+        ) : item.thumbType === 'pdf' ? (
+          <div className="w-full h-full bg-rose-50 flex items-center justify-center"><span className="text-[7px] font-black text-rose-500">PDF</span></div>
         ) : (<FileText className="w-5 h-5 text-rose-400" />)}
       </div>
       <div className="min-w-0 flex-1">
