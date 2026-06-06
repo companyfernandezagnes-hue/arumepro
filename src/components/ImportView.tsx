@@ -79,7 +79,7 @@ interface AlbaranPreviewRow {
  * ======================================================= */
 type LineaIA = { qty: any; name: string; unit: string; unit_price: any; tax_rate: any; total: any; };
 type DocumentoIA = {
-  tipo_documento: 'factura' | 'albaran' | 'ticket_simplificado';
+  tipo_documento: 'factura' | 'albaran' | 'ticket_simplificado' | 'informe_z';
   proveedor: string; nif?: string; fecha: string; num: string;
   total: any; base: any; iva: any;
   metodo_pago: 'efectivo' | 'tarjeta' | 'pendiente' | 'banco';

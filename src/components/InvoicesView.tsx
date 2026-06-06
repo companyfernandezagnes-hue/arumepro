@@ -2053,7 +2053,19 @@ REGLAS:
                                           <div className="flex items-center justify-between">
                                             <div className="flex items-center gap-2 min-w-0">
                                               {isDup && <span className="text-[8px] font-black text-red-600 bg-red-100 px-1.5 py-0.5 rounded shrink-0">DUPLICADO</span>}
-                                              <p className="text-xs text-slate-700 font-bold truncate">{a.date} · <span className="text-slate-500">{a.num || 'S/N'}</span></p>
+                                              <input type="date" value={a.date || ''}
+                                                onClick={e => e.stopPropagation()}
+                                                onChange={async (e) => {
+                                                  e.stopPropagation();
+                                                  const newDate = e.target.value;
+                                                  if (!newDate) return;
+                                                  const nd = JSON.parse(JSON.stringify(safeData));
+                                                  const idx = nd.albaranes.findIndex((x:any) => x.id === a.id);
+                                                  if (idx !== -1) { nd.albaranes[idx].date = newDate; await onSave(nd); toast.success(`Fecha actualizada: ${newDate}`); }
+                                                }}
+                                                className="text-xs text-slate-700 font-bold bg-transparent border-b border-dashed border-slate-300 hover:border-indigo-400 focus:border-indigo-500 outline-none cursor-pointer w-[100px] py-0.5"
+                                              />
+                                              <span className="text-xs text-slate-500 font-bold truncate">· {a.num || 'S/N'}</span>
                                             </div>
                                             <div className="flex items-center gap-2 shrink-0">
                                               <p className="font-black text-amber-700 text-xs tabular-nums">{Num.fmt(Math.abs(Num.parse(a.total) || 0))}</p>
@@ -2135,7 +2147,21 @@ REGLAS:
                                           <div key={f.id} className={cn('rounded-xl border p-3', f.paid ? 'bg-emerald-50/50 border-emerald-100' : 'bg-rose-50/50 border-rose-100')}>
                                             <div className="flex items-center justify-between">
                                               <div>
-                                                <p className="font-black text-xs text-slate-700">{f.num || 'Sin número'} · {f.date}</p>
+                                                <div className="flex items-center gap-1.5">
+                                                  <span className="font-black text-xs text-slate-700">{f.num || 'Sin número'} ·</span>
+                                                  <input type="date" value={f.date || ''}
+                                                    onClick={e => e.stopPropagation()}
+                                                    onChange={async (e) => {
+                                                      e.stopPropagation();
+                                                      const newDate = e.target.value;
+                                                      if (!newDate) return;
+                                                      const nd = JSON.parse(JSON.stringify(safeData));
+                                                      const idx = nd.facturas.findIndex((x:any) => x.id === f.id);
+                                                      if (idx !== -1) { nd.facturas[idx].date = newDate; await onSave(nd); toast.success(`Fecha factura actualizada: ${newDate}`); }
+                                                    }}
+                                                    className="text-xs font-bold text-slate-600 bg-transparent border-b border-dashed border-slate-300 hover:border-indigo-400 focus:border-indigo-500 outline-none cursor-pointer w-[100px] py-0"
+                                                  />
+                                                </div>
                                                 <p className="text-[10px] text-slate-400 mt-0.5">{albsEnFactura.length} albaranes vinculados</p>
                                               </div>
                                               <div className="flex items-center gap-2 shrink-0">
