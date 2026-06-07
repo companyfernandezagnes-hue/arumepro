@@ -64,7 +64,11 @@ function LoginButton({ onSuccess }: { onSuccess: (data: SessionData) => void }) 
   return (
     <div className="flex flex-col items-center gap-4">
       <button
-        onClick={() => { setLoading(true); login(); }}
+        onClick={() => {
+          setLoading(true);
+          setError('');
+          try { login(); } catch { setError('No se pudo abrir la ventana de Google. Desbloquea popups.'); setLoading(false); }
+        }}
         disabled={loading}
         className="flex items-center gap-3 px-6 py-3 bg-white text-gray-700 border border-gray-300 rounded-lg shadow hover:shadow-md transition-all font-medium disabled:opacity-60"
       >

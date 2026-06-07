@@ -13,7 +13,7 @@ import { pdfFirstPageToImage } from '../services/pdfToImage';
 import { AnimatedNumber } from './AnimatedNumber';
 import { triggerConfetti } from './Confetti';
 import { motion, AnimatePresence } from 'motion/react';
-import { AppData } from '../types';
+import { AppData, BusinessUnit } from '../types';
 import { useEmpresa } from '../hooks/useEmpresa';
 import { Num } from '../services/engine';
 import { cn } from '../lib/utils';
@@ -39,6 +39,7 @@ interface Trabajador {
   naf?: string;               // Número afiliación SS
   irpfPct: number;            // Retención IRPF %
   activo: boolean;
+  unitId?: BusinessUnit;
   notas?: string;
 }
 
@@ -78,6 +79,20 @@ const GRUPOS_SS = [
   { value: '10', label: '10 - Peones' },
   { value: '11', label: '11 - Menores de 18 años' },
 ];
+
+const UNIDADES_NEGOCIO: { id: BusinessUnit; label: string }[] = [
+  { id: 'REST', label: 'Restaurante' },
+  { id: 'DLV',  label: 'Catering Hoteles' },
+  { id: 'SHOP', label: 'Tienda Sake' },
+  { id: 'CORP', label: 'Socios / Corp' },
+];
+
+const UNIT_BADGE: Record<BusinessUnit, { color: string; bg: string }> = {
+  REST: { color: 'text-indigo-700',  bg: 'bg-indigo-50' },
+  DLV:  { color: 'text-amber-700',   bg: 'bg-amber-50' },
+  SHOP: { color: 'text-emerald-700', bg: 'bg-emerald-50' },
+  CORP: { color: 'text-slate-700',   bg: 'bg-slate-100' },
+};
 
 const PIE_COLORS = ['#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#ef4444', '#6366f1', '#14b8a6'];
 
@@ -209,6 +224,7 @@ export const NominasView: React.FC<Props> = ({ data, onSave }) => {
       naf: (fd.get('naf') as string) || undefined,
       irpfPct: parseFloat(fd.get('irpfPct') as string) || 0,
       activo: !(fd.get('fechaBaja') as string),
+      unitId: (fd.get('unitId') as BusinessUnit) || 'REST',
       notas: (fd.get('notas') as string) || undefined,
     };
 
@@ -426,7 +442,8 @@ Reglas estrictas:
               grupoSS: '',
               irpfPct: Num.round2(irpfPct),
               activo: true,
-              notas: 'Creado automáticamente al importar nómina con IA — completar datos con la gestoría',
+              unitId: 'REST',
+              notas: 'Creado automáticamente al importar nómina con IA — asignar unidad de negocio correcta',
             });
           }
         }
@@ -731,6 +748,16 @@ Reglas estrictas:
                           <div>
                             <div className="font-bold text-gray-800">{t.nombre}</div>
                             <div className="text-xs text-gray-500">{t.puesto}</div>
+                            {(() => {
+                              const u = t.unitId || 'REST';
+                              const badge = UNIT_BADGE[u];
+                              const label = UNIDADES_NEGOCIO.find(x => x.id === u)?.label || u;
+                              return (
+                                <span className={cn('inline-block mt-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider', badge.bg, badge.color)}>
+                                  {label}
+                                </span>
+                              );
+                            })()}
                           </div>
                         </div>
                         <div className="flex gap-1">
@@ -1138,6 +1165,13 @@ Reglas estrictas:
                     <label className="text-xs font-bold text-gray-500 uppercase">NAF (Seg. Social)</label>
                     <input name="naf" defaultValue={editTrab?.naf || ''}
                       className="w-full mt-1 px-4 py-3 border rounded-xl text-sm" placeholder="28/12345678/90" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-gray-500 uppercase">Unidad de Negocio</label>
+                    <select name="unitId" defaultValue={editTrab?.unitId || 'REST'}
+                      className="w-full mt-1 px-4 py-3 border rounded-xl text-sm">
+                      {UNIDADES_NEGOCIO.map(u => <option key={u.id} value={u.id}>{u.label}</option>)}
+                    </select>
                   </div>
                   <div className="col-span-2">
                     <label className="text-xs font-bold text-gray-500 uppercase">Notas</label>

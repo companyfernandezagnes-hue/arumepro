@@ -119,6 +119,7 @@ export const FixedExpensesView = ({ data, onSave }: FixedExpensesViewProps) => {
     costTotal: number;
     trabajadores: any[];
     nuevasEntradas: any[];
+    unitId: BusinessUnit;
   } | null>(null);
 
   // ✅ FIX 2: `today` en useMemo para que se recalcule si el componente
@@ -434,7 +435,7 @@ Instrucciones:
         },
       ];
 
-      setNominasConfirm({ nTrab, mesLabelCap, liquido, ss, costTotal: costeTotal, trabajadores, nuevasEntradas });
+      setNominasConfirm({ nTrab, mesLabelCap, liquido, ss, costTotal: costeTotal, trabajadores, nuevasEntradas, unitId: 'REST' });
 
     } catch (err: any) {
       toast.error(`Error al procesar el PDF: ${err.message || err}`);
@@ -446,12 +447,13 @@ Instrucciones:
   // ── Guardar nóminas tras confirmar ────────────────────────────────────────
   const handleConfirmNominas = async () => {
     if (!nominasConfirm) return;
-    const { nuevasEntradas, mesLabelCap } = nominasConfirm;
+    const { nuevasEntradas, mesLabelCap, unitId } = nominasConfirm;
 
     const newData = JSON.parse(JSON.stringify(data)) as AppData;
     if (!newData.gastos_fijos) newData.gastos_fijos = [];
     let sobreescritos = 0;
     nuevasEntradas.forEach(entrada => {
+      entrada.unitId = unitId;
       const idx = newData.gastos_fijos.findIndex((g: any) => g.id === entrada.id);
       if (idx !== -1) { newData.gastos_fijos[idx] = entrada; sobreescritos++; }
       else newData.gastos_fijos.push(entrada);
@@ -882,8 +884,33 @@ Instrucciones:
                 </div>
               )}
 
+              <div className="space-y-1.5">
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Unidad de negocio</p>
+                <div className="flex flex-wrap gap-2">
+                  {BUSINESS_UNITS.map(u => {
+                    const selected = nominasConfirm.unitId === u.id;
+                    return (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => setNominasConfirm(prev => prev ? { ...prev, unitId: u.id } : prev)}
+                        className={cn(
+                          'flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition',
+                          selected
+                            ? `${u.bg} ${u.color} border-current ring-2 ring-current/20`
+                            : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+                        )}
+                      >
+                        <u.icon className="w-3.5 h-3.5" />
+                        {u.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <p className="text-[10px] font-bold text-slate-500 bg-slate-50 rounded-xl px-3 py-2 flex items-center gap-1.5 border border-slate-100">
-                ℹ️ Se registrarán como <strong>pago único</strong> — no reaparecerán en meses futuros.
+                ℹ️ Se registrarán como <strong>pago único</strong> en la unidad seleccionada.
               </p>
 
               <p className="text-sm font-bold text-slate-700">¿Registrar estas 2 entradas en Gastos Fijos?</p>

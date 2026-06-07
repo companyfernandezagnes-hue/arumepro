@@ -272,7 +272,7 @@ export const DashboardView = ({ data, onNavigate, onSave }: DashboardViewProps) 
     const gastoComida  = periodAlbaranes.filter(a => !a.socio).reduce((s,a) => s + Num.parse(a.total), 0);
     const gastoBebida  = 0;
     const gastoPersonal = periodGastosFijos.filter((g:any) => g.type==='payroll').reduce((s,g:any) => s + Num.parse(g.amount||0), 0);
-    const gastoFijoTotal = periodGastosFijos.filter((g:any) => g.type!=='income'&&g.type!=='grant').reduce((s,g:any) => s + Num.parse(g.amount||0), 0);
+    const gastoFijoTotal = periodGastosFijos.filter((g:any) => g.type!=='income'&&g.type!=='grant'&&g.type!=='payroll').reduce((s,g:any) => s + Num.parse(g.amount||0), 0);
 
     const gastoOtros = periodAlbaranes.filter(a => a.socio).reduce((s,a) => s + Num.parse(a.total), 0);
 
