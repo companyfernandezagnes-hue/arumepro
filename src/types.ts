@@ -129,8 +129,15 @@ export interface Albaran {
   descuento_motivo?: string;
   // ── Notas manuscritas / revisión ──
   notas_manuscritas?: string;
+  alertas_ia?: string[];
   needs_review?: boolean;
   reviewed?: boolean;
+  // ── Thumbnail del documento original ──
+  thumb_b64?: string;
+  thumb_mime?: string;
+  // ── Pago y vencimiento ──
+  metodo_pago?: string;
+  fecha_vencimiento?: string;
   [key: string]: unknown;
 }
 
@@ -171,6 +178,13 @@ export interface Factura {
   descuento_motivo?: string;           // 'pronto pago', 'volumen', etc.
   // ── Notas manuscritas ──
   notas_manuscritas?: string;          // texto que la usuaria añade al revisar
+  alertas_ia?: string[];               // alertas detectadas por IA
+  // ── Thumbnail del documento original ──
+  thumb_b64?: string;
+  thumb_mime?: string;
+  // ── Pago y vencimiento ──
+  metodo_pago?: string;                // 'sepa' | 'efectivo' | 'tarjeta' | 'transferencia' | 'pendiente'
+  fecha_vencimiento?: string;          // YYYY-MM-DD — fecha del giro/cobro SEPA
 }
 
 export interface FacturaExtended extends Factura {

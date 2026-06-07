@@ -634,7 +634,7 @@ REGLAS:
       // 🆕 FIX: toast.error en vez de toast.info
       if (index===-1) return void toast.error('Error crítico: No se encontró el albarán.');
       const before = JSON.parse(JSON.stringify(newData.albaranes[index])) as Albaran;
-      const san    = { ...editForm, prov:editForm.prov?.trim().toUpperCase()||'DESCONOCIDO', socio:editForm.socio||'Arume', unitId:editForm.unitId||'REST',
+      const san    = { ...before, ...editForm, prov:editForm.prov?.trim().toUpperCase()||'DESCONOCIDO', socio:editForm.socio||'Arume', unitId:editForm.unitId||'REST',
         total:String(Num.parse(editForm.total)), base:String(Num.parse(editForm.base)), taxes:String(Num.parse(editForm.taxes)) };
       newData.albaranes[index] = san;
       detachFromPreviousFacturaIfMoved(newData, before, san);

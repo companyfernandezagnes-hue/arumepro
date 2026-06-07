@@ -258,17 +258,7 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [isSyncing,        setIsSyncing]        = useState(false);
   const [isProcessing,     setIsProcessing]     = useState(false);
 
-  const [selectedGroup,    setSelectedGroup]    = useState<{ label: string; ids: string[]; unitId: BusinessUnit } | null>(null);
   const [selectedInvoice,  setSelectedInvoice]  = useState<FacturaExtended | null>(null);
-  const [modalForm,        setModalForm]        = useState({ num: '', date: DateUtil.today(), selectedAlbs: [] as string[], unitId: 'REST' as BusinessUnit });
-
-  const [autoGroupPreview, setAutoGroupPreview] = useState<FacturaExtended[] | null>(null);
-  // Índice del borrador en edición dentro del preview (-1 = ninguno)
-  const [editingDraftIdx,  setEditingDraftIdx]  = useState<number>(-1);
-  // Mini-form para crear un albarán manual en mitad de la agrupación
-  // (cuando la usuaria detecta que falta uno y necesita cuadrar el total).
-  const [manualAlbForm, setManualAlbForm] = useState<{ prov: string; date: string; num: string; total: string }>({ prov: '', date: '', num: '', total: '' });
-  const [manualAlbBusy, setManualAlbBusy] = useState(false);
 
   const [emailAuditInbox,  setEmailAuditInbox]  = useState<EmailDraft[]>([]);
   // Resultados del Agente IA: cada email + su match calculado contra albaranes.
@@ -536,11 +526,7 @@ REGLAS:
     return () => window.removeEventListener('arume-bot-command', handleBotCommand);
   }, []);
 
-  // ============================================================================
-  // 🧠 CEREBRO DE AGRUPACIÓN INTELIGENTE CON FUZZY MATCHING
-  // Agrupa albaranes del mismo proveedor (aunque el nombre esté escrito distinto)
-  // por mes → genera las tarjetas de la sala de espera
-  // ============================================================================
+  // (Agrupación automática eliminada — la vista Proveedores la sustituye)
   const pendingGroups = useMemo(() => {
     try {
       const byMonth: Record<string, { name: string; groups: Record<string, any> }> = {};
@@ -2177,7 +2163,7 @@ REGLAS:
                                                   {/* Fecha de vencimiento */}
                                                   {(f as any).fecha_vencimiento && (
                                                     <span className={cn('text-[8px] font-black px-1.5 py-0.5 rounded border',
-                                                      new Date((f as any).fecha_vencimiento) <= new Date()
+                                                      new Date((f as any).fecha_vencimiento + 'T23:59:59') < new Date()
                                                         ? 'text-red-700 bg-red-100 border-red-200'
                                                         : 'text-amber-700 bg-amber-100 border-amber-200'
                                                     )}>
