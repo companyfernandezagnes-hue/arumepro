@@ -2162,7 +2162,29 @@ REGLAS:
                                                     className="text-xs font-bold text-slate-600 bg-transparent border-b border-dashed border-slate-300 hover:border-indigo-400 focus:border-indigo-500 outline-none cursor-pointer w-[100px] py-0"
                                                   />
                                                 </div>
-                                                <p className="text-[10px] text-slate-400 mt-0.5">{albsEnFactura.length} albaranes vinculados</p>
+                                                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                                  <span className="text-[10px] text-slate-400">{albsEnFactura.length} albaranes</span>
+                                                  {/* SEPA / método de pago */}
+                                                  {((f as any).metodo_pago === 'sepa' || (f as any).metodo_pago === 'giro') && (
+                                                    <span className="text-[8px] font-black text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded border border-blue-200">🏦 SEPA</span>
+                                                  )}
+                                                  {(f as any).metodo_pago === 'transferencia' && (
+                                                    <span className="text-[8px] font-black text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded border border-violet-200">Transf.</span>
+                                                  )}
+                                                  {(f as any).metodo_pago === 'efectivo' && (
+                                                    <span className="text-[8px] font-black text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-200">Efectivo</span>
+                                                  )}
+                                                  {/* Fecha de vencimiento */}
+                                                  {(f as any).fecha_vencimiento && (
+                                                    <span className={cn('text-[8px] font-black px-1.5 py-0.5 rounded border',
+                                                      new Date((f as any).fecha_vencimiento) <= new Date()
+                                                        ? 'text-red-700 bg-red-100 border-red-200'
+                                                        : 'text-amber-700 bg-amber-100 border-amber-200'
+                                                    )}>
+                                                      Vence: {(f as any).fecha_vencimiento}
+                                                    </span>
+                                                  )}
+                                                </div>
                                               </div>
                                               <div className="flex items-center gap-2 shrink-0">
                                                 <p className="font-black text-sm tabular-nums">{Num.fmt(Math.abs(Num.parse(f.total)))}</p>
@@ -2184,6 +2206,44 @@ REGLAS:
                                                     <span className="font-bold tabular-nums shrink-0 ml-2">{Num.fmt(Math.abs(Num.parse(a.total) || 0))}</span>
                                                   </div>
                                                 ))}
+                                              </div>
+                                            )}
+
+                                            {/* Vencimiento + método de pago editable */}
+                                            {!f.paid && (
+                                              <div className="mt-2 flex items-center gap-2 flex-wrap">
+                                                <div className="flex items-center gap-1.5">
+                                                  <span className="text-[9px] font-bold text-slate-400">Vence:</span>
+                                                  <input type="date" value={(f as any).fecha_vencimiento || ''}
+                                                    onClick={e => e.stopPropagation()}
+                                                    onChange={async (e) => {
+                                                      e.stopPropagation();
+                                                      const nd = JSON.parse(JSON.stringify(safeData));
+                                                      const idx = nd.facturas.findIndex((x:any) => x.id === f.id);
+                                                      if (idx !== -1) { nd.facturas[idx].fecha_vencimiento = e.target.value || undefined; await onSave(nd); toast.success('Vencimiento actualizado'); }
+                                                    }}
+                                                    className="text-[10px] font-bold bg-transparent border-b border-dashed border-slate-300 hover:border-blue-400 focus:border-blue-500 outline-none cursor-pointer w-[100px]"
+                                                  />
+                                                </div>
+                                                <div className="flex items-center gap-1.5">
+                                                  <span className="text-[9px] font-bold text-slate-400">Pago:</span>
+                                                  <select value={(f as any).metodo_pago || 'pendiente'}
+                                                    onClick={e => e.stopPropagation()}
+                                                    onChange={async (e) => {
+                                                      e.stopPropagation();
+                                                      const nd = JSON.parse(JSON.stringify(safeData));
+                                                      const idx = nd.facturas.findIndex((x:any) => x.id === f.id);
+                                                      if (idx !== -1) { nd.facturas[idx].metodo_pago = e.target.value; await onSave(nd); toast.success('Método de pago actualizado'); }
+                                                    }}
+                                                    className="text-[10px] font-bold bg-transparent border-b border-dashed border-slate-300 hover:border-blue-400 focus:border-blue-500 outline-none cursor-pointer"
+                                                  >
+                                                    <option value="pendiente">Sin definir</option>
+                                                    <option value="sepa">🏦 SEPA / Giro</option>
+                                                    <option value="transferencia">Transferencia</option>
+                                                    <option value="efectivo">Efectivo</option>
+                                                    <option value="tarjeta">Tarjeta</option>
+                                                  </select>
+                                                </div>
                                               </div>
                                             )}
 
