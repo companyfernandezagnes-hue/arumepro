@@ -978,9 +978,10 @@ function AppContent() {
           )}
         </AnimatePresence>
 
-        <React.Suspense fallback={null}>
+        {/* Telegram desactivado — Agnes pidió parar las notificaciones */}
+        {/* <React.Suspense fallback={null}>
           <TelegramWidget currentModule={TAB_LABELS[activeTab]} chatId={db?.config?.telegramChatId} botToken={db?.config?.telegramToken} />
-        </React.Suspense>
+        </React.Suspense> */}
 
         <MobileTabBar items={navItems} activeKey={activeTab} onChange={(k) => handleTabChange(k)} />
         {/* DesktopDock desactivado — MobileTabBar ahora funciona en todos los tamaños */}
