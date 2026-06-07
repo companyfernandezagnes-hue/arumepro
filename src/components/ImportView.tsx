@@ -464,6 +464,33 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     const file = item.file;
     if (!file.type.includes('pdf') && !file.type.startsWith('image/')) throw new Error('Formato no soportado (solo PDF/JPG/PNG).');
 
+    // 📸 Generar thumbnail del documento original para poder verlo siempre
+    let _thumb_b64: string | undefined;
+    let _thumb_mime: string = file.type || 'image/jpeg';
+    try {
+      const rawB64: string = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res((r.result as string).split(',')[1] || '');
+        r.onerror = rej;
+        r.readAsDataURL(file);
+      });
+      if (file.type.startsWith('image/') && rawB64) {
+        // Comprimir imagen a thumbnail ~400px
+        const blob = new Blob([Uint8Array.from(atob(rawB64), c => c.charCodeAt(0))], { type: file.type });
+        const img = await createImageBitmap(blob);
+        const scale = Math.min(400 / img.width, 400 / img.height, 1);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
+        _thumb_b64 = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
+        _thumb_mime = 'image/jpeg';
+      } else if (file.type.includes('pdf') && rawB64) {
+        _thumb_b64 = rawB64;
+        _thumb_mime = 'application/pdf';
+      }
+    } catch { /* sin thumbnail — no bloqueante */ }
+
     // Si hay páginas adicionales, usar multi-page scan para fusionar todo.
     // Si la multi-page falla (p.ej. timeout / archivos muy pesados),
     // fallback automático al single-page con solo la primera hoja +
@@ -548,6 +575,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         ...(fechaVencimiento ? { fecha_vencimiento: fechaVencimiento } : {}),
         ...((datosIA as any).notas_manuscritas ? { notas_manuscritas: String((datosIA as any).notas_manuscritas).trim() } : {}),
         ...(Array.isArray((datosIA as any).alertas) && (datosIA as any).alertas.length > 0 ? { alertas_ia: (datosIA as any).alertas.map(String).filter(Boolean) } : {}),
+        ...(_thumb_b64 ? { thumb_b64: _thumb_b64, thumb_mime: _thumb_mime } : {}),
       }};
     } else {
       const rec = reconcileAlbaran(datosIA);
@@ -569,6 +597,7 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
         ...(fechaVencimiento ? { fecha_vencimiento: fechaVencimiento } : {}),
         ...((datosIA as any).notas_manuscritas ? { notas_manuscritas: String((datosIA as any).notas_manuscritas).trim() } : {}),
         ...(Array.isArray((datosIA as any).alertas) && (datosIA as any).alertas.length > 0 ? { alertas_ia: (datosIA as any).alertas.map(String).filter(Boolean) } : {}),
+        ...(_thumb_b64 ? { thumb_b64: _thumb_b64, thumb_mime: _thumb_mime } : {}),
       }};
     }
   };
