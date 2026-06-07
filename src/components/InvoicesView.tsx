@@ -259,6 +259,10 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [isProcessing,     setIsProcessing]     = useState(false);
 
   const [selectedInvoice,  setSelectedInvoice]  = useState<FacturaExtended | null>(null);
+  const [selectedGroup,    setSelectedGroup]    = useState<{ label: string; ids: string[] } | null>(null);
+  const [modalForm,        setModalForm]        = useState({ num: '', date: new Date().toISOString().slice(0, 10), selectedAlbs: [] as string[], unitId: 'REST' as string });
+  const [autoGroupPreview, setAutoGroupPreview] = useState<FacturaExtended[] | null>(null);
+  const [editingDraftIdx,  setEditingDraftIdx]  = useState(-1);
 
   const [emailAuditInbox,  setEmailAuditInbox]  = useState<EmailDraft[]>([]);
   // Resultados del Agente IA: cada email + su match calculado contra albaranes.
