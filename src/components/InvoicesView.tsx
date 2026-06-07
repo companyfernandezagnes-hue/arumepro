@@ -2928,6 +2928,20 @@ REGLAS:
                     <input type="date" value={modalForm.date} onChange={e => setModalForm({ ...modalForm, date: e.target.value })} className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-indigo-500 transition" />
                   </div>
                 </div>
+                <div>
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1.5 ml-1">Unidad de Negocio</label>
+                  <div className="flex flex-wrap gap-2">
+                    {BUSINESS_UNITS.map(u => {
+                      const sel = modalForm.unitId === u.id;
+                      return (
+                        <button key={u.id} type="button" onClick={() => setModalForm(p => ({ ...p, unitId: u.id }))}
+                          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition ${sel ? `${u.bg} ${u.color} border-current ring-2 ring-current/20` : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}>
+                          <u.icon className="w-3.5 h-3.5" /> {u.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
                 {modalForm.selectedAlbs.length > 0 && !modalForm.num.trim() && (
                   <p className="text-[10px] font-bold text-amber-600 bg-amber-50 p-2 rounded-lg border border-amber-200 flex items-center gap-1.5">
                     <AlertCircle className="w-3.5 h-3.5" /> Escribe un número de factura para guardar.
