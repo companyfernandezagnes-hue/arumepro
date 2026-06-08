@@ -302,43 +302,9 @@ export const DailyBriefing: React.FC<{ data: AppData; onNavigate?: (tab: string)
     return list;
   }, [data, today]);
 
-  // ── Enviar briefing a Telegram automáticamente (1x/día) ──────────────
-  const [telegramSent, setTelegramSent] = useState(false);
-  useEffect(() => {
-    if (telegramSent) return;
-    if (alerts.length === 0) return;
-    if (alerts.length === 1 && alerts[0].id === 'todo-ok') return;
-    // Solo enviar 1 vez al día
-    const todayKey = `briefing_sent_${today.toISOString().slice(0, 10)}`;
-    if (sessionStorage.getItem(todayKey)) return;
-    // Solo enviar si hay Telegram configurado (API directa)
-    const token = data?.config?.telegramToken;
-    const chatId = data?.config?.telegramChatId;
-    if (!token || !chatId) return;
-
-    const critCount = alerts.filter(a => a.severity === 'critical').length;
-    const warnCount = alerts.filter(a => a.severity === 'warning').length;
-    const emoji = critCount > 0 ? '🔴' : warnCount > 0 ? '🟡' : '🟢';
-
-    const msg = `${emoji} *BRIEFING DIARIO — ${today.toLocaleDateString('es-ES', { weekday:'long', day:'numeric', month:'long' })}*\n\n` +
-      alerts
-        .filter(a => a.id !== 'todo-ok')
-        .map(a => {
-          const sev = a.severity === 'critical' ? '🔴' : a.severity === 'warning' ? '⚠️' : 'ℹ️';
-          return `${sev} *${a.title}*\n   ${a.detail}`;
-        })
-        .join('\n\n') +
-      '\n\n_Abre la app para más detalles._';
-
-    fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text: msg, parse_mode: 'Markdown' }),
-    })
-      .then(() => sessionStorage.setItem(todayKey, '1'))
-      .catch(() => {});
-    setTelegramSent(true);
-  }, [alerts, data, today, telegramSent]);
+  // ── Telegram auto-envío DESACTIVADO ──────────────────────────────────
+  // El briefing se muestra en la app pero NO se envía a Telegram.
+  // Para reactivar, descomentar el bloque original.
 
   const visible   = alerts.filter(a => !dismissed.has(a.id));
   const criticals = visible.filter(a => a.severity === 'critical').length;

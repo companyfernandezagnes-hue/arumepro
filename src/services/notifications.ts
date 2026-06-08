@@ -13,6 +13,10 @@ export class NotificationService {
     const token = data.config.telegramToken;
     const chatId = data.config.telegramChatId;
 
+    // ── Telegram DESACTIVADO — no enviar alertas automáticas ──
+    // Se conserva la configuración para reactivar en el futuro.
+    if (true) return; // eslint-disable-line no-constant-condition
+
     if (!token || !chatId) {
       console.warn("⚠️ No hay token/chatId de Telegram configurados para alertas.");
       return;
