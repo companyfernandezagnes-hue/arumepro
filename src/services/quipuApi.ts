@@ -651,7 +651,13 @@ export async function discoverOwnerSlug(
     .trim()
     .replace(/\s+/g, '-');
 
+  // Sin guiones (como lo usa Quipu web: "racoblanquerna")
+  const noDash = base.replace(/-/g, '');
+  const noDashNoSuffix = noDash.replace(/sl$|sa$|slu$/, '');
+
   const candidates = [
+    noDashNoSuffix,                          // "racoblanquerna" (estilo Quipu web)
+    noDash,                                  // "racoblanquernasl"
     base,                                    // "raco-blanquerna-sl"
     base.replace(/-sl$|-sa$|-slu$/, ''),     // "raco-blanquerna"
     base.split('-').slice(0, 2).join('-'),    // "raco-blanquerna"

@@ -12,6 +12,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { scanBase64 } from '../services/aiProviders';
+import { buildQuipuConfig, syncProveedores, syncFacturasBatch, type SyncResult } from '../services/quipuApi';
 import { AnimatedNumber } from './AnimatedNumber';
 import { ReconciliadorEmails } from './ReconciliadorEmails';
 import { FixYearsModal } from './FixYearsModal';
@@ -318,6 +319,70 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
   const [quickScanTarget,  setQuickScanTarget]  = useState<string | null>(null);
   // 🖼️ Preview de imagen de albarán al hacer clic
   const [previewAlbImg,    setPreviewAlbImg]    = useState<{src: string; prov: string; num: string} | null>(null);
+
+  // 🔗 Quipu sync
+  const [quipuSyncing,     setQuipuSyncing]     = useState(false);
+  const [quipuProgress,    setQuipuProgress]    = useState('');
+
+  const handleSyncToQuipu = async () => {
+    const qConfig = buildQuipuConfig(data?.config || {});
+    if (!qConfig) { toast.warning('Configura Quipu en Ajustes primero (App ID, Secret, Slug).'); return; }
+
+    setQuipuSyncing(true);
+    try {
+      // 1. Sync proveedores
+      setQuipuProgress('Sincronizando proveedores...');
+      const provNames = [...new Set(facturasSeguras.map(f => f.prov).filter(Boolean))];
+      const provList = provNames.map(n => ({ nombre: n }));
+      const { result: provResult, contactMap } = await syncProveedores(qConfig, provList, setQuipuProgress);
+
+      // 2. Sync facturas pendientes (las que tienen nº y no están ya sincronizadas)
+      setQuipuProgress('Subiendo facturas a Quipu...');
+      const facturasToSync = facturasSeguras.filter(f =>
+        f.num && f.prov && !f.quipuId && f.status === 'approved'
+      ).map(f => ({
+        id: f.id,
+        tipo: (f.tipo === 'venta' ? 'venta' : 'compra') as 'compra' | 'venta',
+        numero: f.num || '',
+        fecha: f.date || '',
+        proveedor: f.prov || '',
+        base: Num.parse(f.base || f.total || 0),
+        iva: Num.parse(f.tax || 0),
+        total: Num.parse(f.total || 0),
+        pagada: f.paid || false,
+        fechaPago: (f as any).fecha_pago,
+      }));
+
+      const facResult = await syncFacturasBatch(qConfig, facturasToSync, contactMap, setQuipuProgress);
+
+      // 3. Marcar facturas sincronizadas en Arume PRO
+      if (facResult.syncedIds.length > 0) {
+        const newData = JSON.parse(JSON.stringify(data));
+        facResult.syncedIds.forEach(id => {
+          const f = newData.facturas?.find((x: any) => x.id === id);
+          if (f) f.quipuId = 'synced';
+        });
+        await onSave(newData);
+      }
+
+      // Resumen
+      const parts: string[] = [];
+      if (provResult.created > 0) parts.push(`${provResult.created} proveedores creados`);
+      if (facResult.created > 0) parts.push(`${facResult.created} facturas subidas`);
+      if (facResult.skipped > 0) parts.push(`${facResult.skipped} omitidas`);
+      if (facResult.errors.length > 0) parts.push(`${facResult.errors.length} errores`);
+      toast.success(`Quipu sync ✓ — ${parts.join(', ') || 'todo al día'}`);
+
+      if (facResult.errors.length > 0) {
+        console.warn('[Quipu] Errores:', facResult.errors);
+      }
+    } catch (err: any) {
+      toast.error(`❌ Quipu: ${err?.message || 'Error de conexión'}`);
+    } finally {
+      setQuipuSyncing(false);
+      setQuipuProgress('');
+    }
+  };
 
   const handleQuickScan = (provNombre: string) => {
     setQuickScanTarget(provNombre);
@@ -1696,6 +1761,14 @@ REGLAS:
             className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] hover:bg-[color:var(--arume-gray-700)] transition active:scale-[0.98] relative">
             <Sparkles className="w-3.5 h-3.5 ai-pulse" /> Auto-cuadrar
           </button>
+          {buildQuipuConfig(data?.config || {}) && (
+            <button onClick={handleSyncToQuipu} disabled={quipuSyncing}
+              title="Sube proveedores y facturas pendientes a Quipu"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-emerald-100 text-emerald-700 border border-emerald-200 hover:bg-emerald-200 transition active:scale-[0.98] disabled:opacity-50">
+              {quipuSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
+              {quipuSyncing ? quipuProgress || 'Sincronizando...' : 'Subir a Quipu'}
+            </button>
+          )}
           <button onClick={() => setIsFixYearsOpen(true)}
             title="Detecta documentos con año incorrecto (ej. 2019 en lugar de 2026) y los corrige en bloque"
             className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-warn)]/15 text-[color:var(--arume-warn)] border border-[color:var(--arume-warn)]/30 hover:bg-[color:var(--arume-warn)]/25 transition active:scale-[0.98]">
