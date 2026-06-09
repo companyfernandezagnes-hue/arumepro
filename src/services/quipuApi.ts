@@ -408,3 +408,267 @@ export function buildQuipuConfig(appConfig: Record<string, any>): QuipuConfig | 
   if (!appId || !appSecret || !ownerSlug) return null;
   return { appId, appSecret, ownerSlug };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SYNC: PROVEEDORES  Arume PRO → Quipu
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface SyncResult {
+  created: number;
+  updated: number;
+  skipped: number;
+  errors: string[];
+}
+
+/**
+ * Sincroniza proveedores de Arume PRO → Quipu Contacts.
+ * - Busca cada proveedor por nombre en Quipu
+ * - Si no existe, lo crea como supplier
+ * - Si existe, lo salta (no sobreescribe datos de Quipu)
+ * - Devuelve un mapa nombre→quipuContactId para usar después con facturas
+ */
+export async function syncProveedores(
+  config: QuipuConfig,
+  proveedores: { nombre: string; cif?: string; email?: string; telefono?: string; direccion?: string; ciudad?: string; cp?: string; iban?: string }[],
+  onProgress?: (msg: string) => void,
+): Promise<{ result: SyncResult; contactMap: Record<string, string> }> {
+  const result: SyncResult = { created: 0, updated: 0, skipped: 0, errors: [] };
+  const contactMap: Record<string, string> = {};
+
+  // 1. Cargar todos los contactos existentes de Quipu
+  onProgress?.('Leyendo contactos de Quipu...');
+  const existing = await listContacts(config, 'supplier');
+  const existingByName: Record<string, QuipuContact> = {};
+  for (const c of existing) {
+    const key = (c.attributes.name || '').toLowerCase().trim();
+    if (key) existingByName[key] = c;
+  }
+
+  // 2. Para cada proveedor de Arume, crear o vincular
+  for (let i = 0; i < proveedores.length; i++) {
+    const p = proveedores[i];
+    const nameKey = p.nombre.toLowerCase().trim();
+    onProgress?.(`Sincronizando ${i + 1}/${proveedores.length}: ${p.nombre}`);
+
+    try {
+      if (existingByName[nameKey]) {
+        // Ya existe en Quipu
+        contactMap[p.nombre] = existingByName[nameKey].id;
+        result.skipped++;
+      } else {
+        // Buscar por texto libre (match fuzzy)
+        const found = await findContactByName(config, p.nombre);
+        if (found) {
+          contactMap[p.nombre] = found.id;
+          result.skipped++;
+        } else {
+          // Crear nuevo
+          const created = await createContact(config, {
+            name: p.nombre,
+            taxId: p.cif,
+            email: p.email,
+            phone: p.telefono,
+            address: p.direccion,
+            town: p.ciudad,
+            zipCode: p.cp,
+            isSupplier: true,
+            isClient: false,
+            bankAccount: p.iban,
+          });
+          contactMap[p.nombre] = created.id;
+          result.created++;
+        }
+      }
+    } catch (err: any) {
+      result.errors.push(`${p.nombre}: ${err?.message || 'Error'}`);
+    }
+  }
+
+  return { result, contactMap };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SYNC: FACTURAS  Arume PRO → Quipu
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Sube una factura de Arume PRO a Quipu.
+ * Necesita el quipuContactId del proveedor (obtenerlo de syncProveedores o contactMap).
+ */
+export async function syncFactura(
+  config: QuipuConfig,
+  factura: {
+    tipo: 'compra' | 'venta';
+    numero: string;
+    fecha: string;
+    proveedorQuipuId: string;
+    base: number;
+    iva: number;
+    total: number;
+    concepto?: string;
+    ivaPct?: number;
+    pagada?: boolean;
+    fechaPago?: string;
+    notas?: string;
+  },
+): Promise<{ ok: boolean; quipuId?: string; error?: string }> {
+  try {
+    const items: QuipuInvoiceItem[] = [{
+      concept: factura.concepto || `Factura ${factura.numero}`,
+      unitary_amount: String(factura.base || factura.total),
+      quantity: 1,
+      vat_percent: factura.ivaPct ?? (factura.base > 0 ? Math.round((factura.iva / factura.base) * 100) : 21),
+    }];
+
+    const created = await createInvoice(config, {
+      kind: factura.tipo === 'compra' ? 'expenses' : 'income',
+      issueDate: factura.fecha,
+      number: factura.numero,
+      contactId: factura.proveedorQuipuId,
+      items,
+      notes: factura.notas,
+      tags: 'arume-pro',
+      paidAt: factura.pagada ? (factura.fechaPago || factura.fecha) : undefined,
+    });
+
+    return { ok: true, quipuId: created.id };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'Error al subir factura' };
+  }
+}
+
+/**
+ * Sync masivo de facturas: sube todas las facturas de un periodo a Quipu.
+ * Requiere un contactMap (nombre proveedor → quipuContactId).
+ */
+export async function syncFacturasBatch(
+  config: QuipuConfig,
+  facturas: Array<{
+    id: string;
+    tipo: 'compra' | 'venta';
+    numero: string;
+    fecha: string;
+    proveedor: string;
+    base: number;
+    iva: number;
+    total: number;
+    concepto?: string;
+    ivaPct?: number;
+    pagada?: boolean;
+    fechaPago?: string;
+  }>,
+  contactMap: Record<string, string>,
+  onProgress?: (msg: string) => void,
+): Promise<SyncResult & { syncedIds: string[] }> {
+  const result: SyncResult & { syncedIds: string[] } = { created: 0, updated: 0, skipped: 0, errors: [], syncedIds: [] };
+
+  for (let i = 0; i < facturas.length; i++) {
+    const f = facturas[i];
+    onProgress?.(`Subiendo factura ${i + 1}/${facturas.length}: ${f.numero || 'S/N'} — ${f.proveedor}`);
+
+    const contactId = contactMap[f.proveedor];
+    if (!contactId) {
+      result.errors.push(`${f.numero}: proveedor "${f.proveedor}" no tiene contacto en Quipu`);
+      result.skipped++;
+      continue;
+    }
+
+    const res = await syncFactura(config, {
+      tipo: f.tipo,
+      numero: f.numero,
+      fecha: f.fecha,
+      proveedorQuipuId: contactId,
+      base: f.base,
+      iva: f.iva,
+      total: f.total,
+      concepto: f.concepto,
+      ivaPct: f.ivaPct,
+      pagada: f.pagada,
+      fechaPago: f.fechaPago,
+    });
+
+    if (res.ok) {
+      result.created++;
+      result.syncedIds.push(f.id);
+    } else {
+      result.errors.push(`${f.numero}: ${res.error}`);
+    }
+  }
+
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SYNC: LEER PAGOS  Quipu → Arume PRO
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Lee el estado de pago de todas las facturas en Quipu y devuelve
+ * las que están marcadas como pagadas para actualizar Arume PRO.
+ */
+export async function fetchPaidInvoices(
+  config: QuipuConfig,
+  period?: string,
+): Promise<Array<{ quipuId: string; number: string; paidAt: string; totalAmount: string; providerName: string }>> {
+  const params: Record<string, string> = { 'filter[payment_status]': 'paid', 'filter[kind]': 'expenses' };
+  if (period) params['filter[period]'] = period;
+
+  const invoices = await fetchAll<QuipuInvoice>(config, '/invoices?include=contact', params);
+
+  return invoices
+    .filter(inv => inv.attributes.paid_at)
+    .map(inv => ({
+      quipuId: inv.id,
+      number: inv.attributes.number || '',
+      paidAt: inv.attributes.paid_at || '',
+      totalAmount: inv.attributes.total_amount,
+      providerName: '', // Se llena desde el include si hay contact
+    }));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTO-DETECCIÓN: Owner Slug
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Intenta descubrir el owner_slug probando el endpoint /book_entries
+ * con slugs comunes derivados del nombre de la empresa.
+ * Devuelve el slug que funcione o null.
+ */
+export async function discoverOwnerSlug(
+  appId: string,
+  appSecret: string,
+  empresaNombre: string,
+): Promise<string | null> {
+  const token = await getAccessToken(appId, appSecret);
+  if (!token) return null;
+
+  // Generar variantes del slug a partir del nombre de empresa
+  const base = empresaNombre
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9 ]/g, '')
+    .trim()
+    .replace(/\s+/g, '-');
+
+  const candidates = [
+    base,                                    // "raco-blanquerna-sl"
+    base.replace(/-sl$|-sa$|-slu$/, ''),     // "raco-blanquerna"
+    base.split('-').slice(0, 2).join('-'),    // "raco-blanquerna"
+    base.split('-')[0],                      // "raco"
+  ];
+
+  // Deduplicar
+  const unique = [...new Set(candidates)].filter(Boolean);
+
+  for (const slug of unique) {
+    try {
+      const res = await fetch(`${BASE_URL}/${slug}/contacts?page[size]=1`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: ACCEPT_HEADER },
+      });
+      if (res.ok) return slug;
+    } catch { /* siguiente candidato */ }
+  }
+
+  return null;
+}

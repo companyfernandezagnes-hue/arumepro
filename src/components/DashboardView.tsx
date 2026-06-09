@@ -64,13 +64,14 @@ const todayISO = () => {
 // Muestra el estado operativo de HOY de un vistazo y ofrece accesos directos
 const PulsoDelDia: React.FC<{ data: AppData; onNavigate?: (tab: string) => void }> = ({ data, onNavigate }) => {
   const hoy = todayISO();
+  const safeD = data || {} as AppData;
 
   const pulso = useMemo(() => {
-    const cierres    = Array.isArray(data.cierres)      ? data.cierres      : [];
-    const albaranes  = Array.isArray(data.albaranes)    ? data.albaranes    : [];
-    const banco      = Array.isArray((data as any).banco) ? (data as any).banco : [];
-    const cobrosB2B  = Array.isArray((data as any).cobros_b2b) ? (data as any).cobros_b2b : [];
-    const ingredientes = Array.isArray(data.ingredientes) ? data.ingredientes : [];
+    const cierres    = Array.isArray(safeD.cierres)      ? safeD.cierres      : [];
+    const albaranes  = Array.isArray(safeD.albaranes)    ? safeD.albaranes    : [];
+    const banco      = Array.isArray((safeD as any).banco) ? (safeD as any).banco : [];
+    const cobrosB2B  = Array.isArray((safeD as any).cobros_b2b) ? (safeD as any).cobros_b2b : [];
+    const ingredientes = Array.isArray(safeD.ingredientes) ? safeD.ingredientes : [];
 
     // ── Caja hoy ─────────────────────────────────────────────────────────
     const cierreHoy = cierres.find(c => (c as any).date === hoy && ((c as any).unitId === 'REST' || !(c as any).unitId));
@@ -105,7 +106,7 @@ const PulsoDelDia: React.FC<{ data: AppData; onNavigate?: (tab: string) => void 
     }
 
     return { cierreHoy, ventaHoy, albsUrgentes, cobrosUrgentes, bancoPendiente, stockCritico, diasSinCierre };
-  }, [data, hoy]);
+  }, [safeD, hoy]);
 
   const items: { icon: any; label: string; value: string | number; tab: string; ok: boolean; urgent?: boolean }[] = [
     {

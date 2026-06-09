@@ -9,7 +9,7 @@ import {
 import { AppData } from '../types';
 import { cn } from '../lib/utils';
 import { NotificationService } from '../services/notifications';
-import { testConnection as testQuipuConnection, buildQuipuConfig } from '../services/quipuApi';
+import { testConnection as testQuipuConnection, buildQuipuConfig, discoverOwnerSlug } from '../services/quipuApi';
 import { ExportTools } from './ExportTools';
 import { PackGestoria } from './PackGestoria';
 import { toast } from '../hooks/useToast';
@@ -385,6 +385,25 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
       else toast.error(`❌ ${result.message}`);
     } catch (e: any) {
       toast.error(`❌ Error: ${e?.message || 'Sin conexión'}`);
+    } finally {
+      setQuipuTesting(false);
+    }
+  };
+  const autoDetectSlug = async () => {
+    if (!config.quipuAppId || !config.quipuAppSecret) return void toast.warning('Primero rellena App ID y App Secret.');
+    setQuipuTesting(true);
+    try {
+      const empresaNombre = db?.config?.empresa || 'raco blanquerna sl';
+      toast.success('Buscando tu cuenta en Quipu...');
+      const slug = await discoverOwnerSlug(config.quipuAppId, config.quipuAppSecret, empresaNombre);
+      if (slug) {
+        setConfig(prev => ({ ...prev, quipuOwnerSlug: slug }));
+        toast.success(`✅ Encontrado: "${slug}"`);
+      } else {
+        toast.error('No se encontró automáticamente. Escríbelo manualmente (mira tu URL de Quipu).');
+      }
+    } catch (e: any) {
+      toast.error(`❌ ${e?.message || 'Error buscando slug'}`);
     } finally {
       setQuipuTesting(false);
     }
@@ -999,9 +1018,15 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
                 </div>
                 <div>
                   <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Owner Slug (nombre cuenta Quipu)</label>
-                  <input type="text" name="quipuOwnerSlug" value={config.quipuOwnerSlug || ''} onChange={handleChange}
-                    placeholder="raco-blanquerna-sl"
-                    className="w-full p-3 bg-slate-50 rounded-xl text-xs font-mono outline-none border border-slate-200 focus:border-emerald-400" />
+                  <div className="flex gap-2">
+                    <input type="text" name="quipuOwnerSlug" value={config.quipuOwnerSlug || ''} onChange={handleChange}
+                      placeholder="raco-blanquerna-sl"
+                      className="flex-1 p-3 bg-slate-50 rounded-xl text-xs font-mono outline-none border border-slate-200 focus:border-emerald-400" />
+                    <button onClick={autoDetectSlug} disabled={quipuTesting}
+                      className="px-3 py-2 bg-emerald-100 text-emerald-700 rounded-xl text-[9px] font-black uppercase hover:bg-emerald-200 transition whitespace-nowrap disabled:opacity-50">
+                      {quipuTesting ? '...' : '🔍 Auto'}
+                    </button>
+                  </div>
                 </div>
                 <button onClick={probarQuipu} disabled={quipuTesting}
                   className="w-full py-2.5 bg-emerald-50 text-emerald-600 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-100 transition shadow-sm flex items-center justify-center gap-2 disabled:opacity-50">
