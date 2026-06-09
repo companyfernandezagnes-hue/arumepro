@@ -9,6 +9,7 @@ import {
 import { AppData } from '../types';
 import { cn } from '../lib/utils';
 import { NotificationService } from '../services/notifications';
+import { testConnection as testQuipuConnection, buildQuipuConfig } from '../services/quipuApi';
 import { ExportTools } from './ExportTools';
 import { PackGestoria } from './PackGestoria';
 import { toast } from '../hooks/useToast';
@@ -370,6 +371,22 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
       }
     } catch (e: any) {
       toast.error(`❌ Error de red: ${e?.message || 'Sin conexión'}`);
+    }
+  };
+
+  const [quipuTesting, setQuipuTesting] = useState(false);
+  const probarQuipu = async () => {
+    const qConfig = buildQuipuConfig(config);
+    if (!qConfig) return void toast.warning('Falta App ID, App Secret o Owner Slug de Quipu.');
+    setQuipuTesting(true);
+    try {
+      const result = await testQuipuConnection(qConfig);
+      if (result.ok) toast.success(`✅ ${result.message}`);
+      else toast.error(`❌ ${result.message}`);
+    } catch (e: any) {
+      toast.error(`❌ Error: ${e?.message || 'Sin conexión'}`);
+    } finally {
+      setQuipuTesting(false);
     }
   };
 
@@ -956,6 +973,39 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
                 <button onClick={probarTelegram}
                   className="w-full py-2.5 bg-blue-50 text-blue-600 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-blue-100 transition shadow-sm flex items-center justify-center gap-2">
                   <Send className="w-3 h-3" /> PROBAR CONEXIÓN TELEGRAM
+                </button>
+              </div>
+            </div>
+
+            {/* ══════════════════════════════════════════════════════════════
+                3.5. QUIPU — Facturación y Contabilidad
+            ══════════════════════════════════════════════════════════════ */}
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 to-teal-500 rounded-t-[2.5rem]" />
+              <SectionTitle icon={Building2} title="Quipu — Facturación" color="emerald" />
+              <p className="text-[10px] text-slate-500 font-medium mb-3">Sincroniza facturas, proveedores y nóminas con tu cuenta de Quipu.</p>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">App ID</label>
+                  <input type="text" name="quipuAppId" value={config.quipuAppId || ''} onChange={handleChange}
+                    placeholder="0Wg-m71OCN8C2bsM..."
+                    className="w-full p-3 bg-slate-50 rounded-xl text-xs font-mono outline-none border border-slate-200 focus:border-emerald-400" />
+                </div>
+                <div>
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">App Secret</label>
+                  <input type="password" name="quipuAppSecret" value={config.quipuAppSecret || ''} onChange={handleChange}
+                    placeholder="n9UxbjJ_9ZxYvYDT..."
+                    className="w-full p-3 bg-slate-50 rounded-xl text-xs font-mono outline-none border border-slate-200 focus:border-emerald-400" />
+                </div>
+                <div>
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Owner Slug (nombre cuenta Quipu)</label>
+                  <input type="text" name="quipuOwnerSlug" value={config.quipuOwnerSlug || ''} onChange={handleChange}
+                    placeholder="raco-blanquerna-sl"
+                    className="w-full p-3 bg-slate-50 rounded-xl text-xs font-mono outline-none border border-slate-200 focus:border-emerald-400" />
+                </div>
+                <button onClick={probarQuipu} disabled={quipuTesting}
+                  className="w-full py-2.5 bg-emerald-50 text-emerald-600 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-100 transition shadow-sm flex items-center justify-center gap-2 disabled:opacity-50">
+                  {quipuTesting ? <span className="animate-spin">⏳</span> : <Plug className="w-3 h-3" />} PROBAR CONEXIÓN QUIPU
                 </button>
               </div>
             </div>

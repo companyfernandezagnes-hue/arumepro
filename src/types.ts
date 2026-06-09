@@ -66,6 +66,10 @@ export interface AppConfig {
   supabaseInboxKey?: string;
   supabasePersonalUrl?: string;
   supabasePersonalKey?: string;
+  // ── Quipu API ──
+  quipuAppId?: string;
+  quipuAppSecret?: string;
+  quipuOwnerSlug?: string;       // slug de la cuenta Quipu (ej: "raco-blanquerna-sl")
   // Permite llaves extra sin romper el tipado (config evolutivo)
   [key: string]: unknown;
 }
