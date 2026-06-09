@@ -410,220 +410,207 @@ export function buildQuipuConfig(appConfig: Record<string, any>): QuipuConfig | 
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SYNC: PROVEEDORES  Arume PRO → Quipu
+// IMPORTAR DE QUIPU → Arume PRO
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Flujo real del negocio:
+//   Día a día:  escaneas albaranes → Arume PRO
+//   Fin de mes: proveedor manda factura → Quipu (por email, auto)
+//   Sync:       Quipu facturas → Arume PRO (cruza con albaranes, pago, banco)
+//   Resultado:  Tesorería completa
 // ═══════════════════════════════════════════════════════════════════════════
 
-export interface SyncResult {
-  created: number;
-  updated: number;
-  skipped: number;
+export interface ImportResult {
+  invoicesRead: number;
+  matched: number;
+  unmatched: number;
+  paidUpdated: number;
   errors: string[];
 }
 
-/**
- * Sincroniza proveedores de Arume PRO → Quipu Contacts.
- * - Busca cada proveedor por nombre en Quipu
- * - Si no existe, lo crea como supplier
- * - Si existe, lo salta (no sobreescribe datos de Quipu)
- * - Devuelve un mapa nombre→quipuContactId para usar después con facturas
- */
-export async function syncProveedores(
-  config: QuipuConfig,
-  proveedores: { nombre: string; cif?: string; email?: string; telefono?: string; direccion?: string; ciudad?: string; cp?: string; iban?: string }[],
-  onProgress?: (msg: string) => void,
-): Promise<{ result: SyncResult; contactMap: Record<string, string> }> {
-  const result: SyncResult = { created: 0, updated: 0, skipped: 0, errors: [] };
-  const contactMap: Record<string, string> = {};
-
-  // 1. Cargar todos los contactos existentes de Quipu
-  onProgress?.('Leyendo contactos de Quipu...');
-  const existing = await listContacts(config, 'supplier');
-  const existingByName: Record<string, QuipuContact> = {};
-  for (const c of existing) {
-    const key = (c.attributes.name || '').toLowerCase().trim();
-    if (key) existingByName[key] = c;
-  }
-
-  // 2. Para cada proveedor de Arume, crear o vincular
-  for (let i = 0; i < proveedores.length; i++) {
-    const p = proveedores[i];
-    const nameKey = p.nombre.toLowerCase().trim();
-    onProgress?.(`Sincronizando ${i + 1}/${proveedores.length}: ${p.nombre}`);
-
-    try {
-      if (existingByName[nameKey]) {
-        // Ya existe en Quipu
-        contactMap[p.nombre] = existingByName[nameKey].id;
-        result.skipped++;
-      } else {
-        // Buscar por texto libre (match fuzzy)
-        const found = await findContactByName(config, p.nombre);
-        if (found) {
-          contactMap[p.nombre] = found.id;
-          result.skipped++;
-        } else {
-          // Crear nuevo
-          const created = await createContact(config, {
-            name: p.nombre,
-            taxId: p.cif,
-            email: p.email,
-            phone: p.telefono,
-            address: p.direccion,
-            town: p.ciudad,
-            zipCode: p.cp,
-            isSupplier: true,
-            isClient: false,
-            bankAccount: p.iban,
-          });
-          contactMap[p.nombre] = created.id;
-          result.created++;
-        }
-      }
-    } catch (err: any) {
-      result.errors.push(`${p.nombre}: ${err?.message || 'Error'}`);
-    }
-  }
-
-  return { result, contactMap };
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// SYNC: FACTURAS  Arume PRO → Quipu
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Sube una factura de Arume PRO a Quipu.
- * Necesita el quipuContactId del proveedor (obtenerlo de syncProveedores o contactMap).
- */
-export async function syncFactura(
-  config: QuipuConfig,
-  factura: {
-    tipo: 'compra' | 'venta';
-    numero: string;
-    fecha: string;
-    proveedorQuipuId: string;
-    base: number;
-    iva: number;
-    total: number;
-    concepto?: string;
-    ivaPct?: number;
-    pagada?: boolean;
-    fechaPago?: string;
-    notas?: string;
-  },
-): Promise<{ ok: boolean; quipuId?: string; error?: string }> {
-  try {
-    const items: QuipuInvoiceItem[] = [{
-      concept: factura.concepto || `Factura ${factura.numero}`,
-      unitary_amount: String(factura.base || factura.total),
-      quantity: 1,
-      vat_percent: factura.ivaPct ?? (factura.base > 0 ? Math.round((factura.iva / factura.base) * 100) : 21),
-    }];
-
-    const created = await createInvoice(config, {
-      kind: factura.tipo === 'compra' ? 'expenses' : 'income',
-      issueDate: factura.fecha,
-      number: factura.numero,
-      contactId: factura.proveedorQuipuId,
-      items,
-      notes: factura.notas,
-      tags: 'arume-pro',
-      paidAt: factura.pagada ? (factura.fechaPago || factura.fecha) : undefined,
-    });
-
-    return { ok: true, quipuId: created.id };
-  } catch (err: any) {
-    return { ok: false, error: err?.message || 'Error al subir factura' };
-  }
+/** Factura importada de Quipu, lista para cruzar con albaranes de Arume */
+export interface QuipuImportedInvoice {
+  quipuId: string;
+  number: string;
+  issueDate: string;
+  dueDate: string | null;
+  paidAt: string | null;
+  paymentMethod: string | null;
+  paymentStatus: 'paid' | 'unpaid' | 'partially_paid';
+  totalAmount: number;
+  totalWithoutTax: number;
+  vatAmount: number;
+  providerName: string;
+  providerTaxId: string;
+  providerQuipuId: string;
+  pdfUrl: string | null;
+  tags: string;
 }
 
 /**
- * Sync masivo de facturas: sube todas las facturas de un periodo a Quipu.
- * Requiere un contactMap (nombre proveedor → quipuContactId).
+ * Lee TODAS las facturas de gasto de Quipu para un periodo.
+ * Incluye datos del contacto (proveedor) y estado de pago.
  */
-export async function syncFacturasBatch(
-  config: QuipuConfig,
-  facturas: Array<{
-    id: string;
-    tipo: 'compra' | 'venta';
-    numero: string;
-    fecha: string;
-    proveedor: string;
-    base: number;
-    iva: number;
-    total: number;
-    concepto?: string;
-    ivaPct?: number;
-    pagada?: boolean;
-    fechaPago?: string;
-  }>,
-  contactMap: Record<string, string>,
-  onProgress?: (msg: string) => void,
-): Promise<SyncResult & { syncedIds: string[] }> {
-  const result: SyncResult & { syncedIds: string[] } = { created: 0, updated: 0, skipped: 0, errors: [], syncedIds: [] };
-
-  for (let i = 0; i < facturas.length; i++) {
-    const f = facturas[i];
-    onProgress?.(`Subiendo factura ${i + 1}/${facturas.length}: ${f.numero || 'S/N'} — ${f.proveedor}`);
-
-    const contactId = contactMap[f.proveedor];
-    if (!contactId) {
-      result.errors.push(`${f.numero}: proveedor "${f.proveedor}" no tiene contacto en Quipu`);
-      result.skipped++;
-      continue;
-    }
-
-    const res = await syncFactura(config, {
-      tipo: f.tipo,
-      numero: f.numero,
-      fecha: f.fecha,
-      proveedorQuipuId: contactId,
-      base: f.base,
-      iva: f.iva,
-      total: f.total,
-      concepto: f.concepto,
-      ivaPct: f.ivaPct,
-      pagada: f.pagada,
-      fechaPago: f.fechaPago,
-    });
-
-    if (res.ok) {
-      result.created++;
-      result.syncedIds.push(f.id);
-    } else {
-      result.errors.push(`${f.numero}: ${res.error}`);
-    }
-  }
-
-  return result;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// SYNC: LEER PAGOS  Quipu → Arume PRO
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Lee el estado de pago de todas las facturas en Quipu y devuelve
- * las que están marcadas como pagadas para actualizar Arume PRO.
- */
-export async function fetchPaidInvoices(
+export async function importInvoicesFromQuipu(
   config: QuipuConfig,
   period?: string,
-): Promise<Array<{ quipuId: string; number: string; paidAt: string; totalAmount: string; providerName: string }>> {
-  const params: Record<string, string> = { 'filter[payment_status]': 'paid', 'filter[kind]': 'expenses' };
+  onProgress?: (msg: string) => void,
+): Promise<QuipuImportedInvoice[]> {
+  onProgress?.('Conectando con Quipu...');
+
+  const params: Record<string, string> = { 'filter[kind]': 'expenses' };
   if (period) params['filter[period]'] = period;
 
-  const invoices = await fetchAll<QuipuInvoice>(config, '/invoices?include=contact', params);
+  onProgress?.('Leyendo facturas de gasto...');
+  // Fetch invoices with contact included
+  const rawInvoices = await fetchAll<any>(config, '/invoices?include=contact', params);
 
-  return invoices
-    .filter(inv => inv.attributes.paid_at)
-    .map(inv => ({
+  onProgress?.(`${rawInvoices.length} facturas leídas. Procesando...`);
+
+  return rawInvoices.map((inv: any) => {
+    const attr = inv.attributes || {};
+    const contactData = inv.relationships?.contact?.data;
+    // El contact puede venir en "included" del JSON:API, pero con fetchAll
+    // no lo tenemos fácilmente. Usamos el nombre del issuing si existe.
+    return {
       quipuId: inv.id,
-      number: inv.attributes.number || '',
-      paidAt: inv.attributes.paid_at || '',
-      totalAmount: inv.attributes.total_amount,
-      providerName: '', // Se llena desde el include si hay contact
+      number: attr.number || '',
+      issueDate: attr.issue_date || '',
+      dueDate: (attr.due_dates || [])[0] || null,
+      paidAt: attr.paid_at || null,
+      paymentMethod: attr.payment_method || null,
+      paymentStatus: attr.payment_status || 'unpaid',
+      totalAmount: parseFloat(attr.total_amount || '0'),
+      totalWithoutTax: parseFloat(attr.total_amount_without_taxes || '0'),
+      vatAmount: parseFloat(attr.vat_amount || '0'),
+      providerName: attr.issuing_name || '',
+      providerTaxId: attr.issuing_tax_id || '',
+      providerQuipuId: contactData?.id || '',
+      pdfUrl: attr.download_pdf_url || null,
+      tags: attr.tags || '',
+    };
+  });
+}
+
+/**
+ * Cruza facturas de Quipu con albaranes de Arume PRO.
+ *
+ * Lógica de matching:
+ * 1. Busca albaranes del mismo proveedor (nombre fuzzy)
+ * 2. Que la suma de albaranes ≈ total factura (±5% tolerancia)
+ * 3. Que estén en el mismo mes o mes anterior
+ *
+ * Devuelve las facturas enriquecidas con los IDs de albaranes que corresponden.
+ */
+export function matchInvoicesWithAlbaranes(
+  quipuInvoices: QuipuImportedInvoice[],
+  albaranes: Array<{ id: string; prov: string; total: string | number; date: string; invoiced?: boolean }>,
+): Array<QuipuImportedInvoice & { matchedAlbaranIds: string[]; matchTotal: number; matchConfidence: 'exact' | 'close' | 'none' }> {
+
+  const norm = (s: string) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[,.|]/g, ' ').replace(/\b(s\.?l\.?u?\.?|s\.?a\.?u?\.?)\b/gi, '')
+    .replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+
+  return quipuInvoices.map(inv => {
+    const invNorm = norm(inv.providerName);
+    const invMonth = inv.issueDate.slice(0, 7); // YYYY-MM
+    // Mes anterior
+    const d = new Date(inv.issueDate);
+    d.setMonth(d.getMonth() - 1);
+    const prevMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+
+    // 1. Filtrar albaranes del mismo proveedor (fuzzy)
+    const provAlbs = albaranes.filter(a => {
+      const aNorm = norm(a.prov);
+      if (!aNorm || !invNorm) return false;
+      // Match: comparten al menos 2 palabras significativas
+      const invWords = invNorm.split(' ').filter(w => w.length > 2);
+      const aWords = aNorm.split(' ').filter(w => w.length > 2);
+      const shorter = invWords.length <= aWords.length ? invWords : aWords;
+      const longerStr = invWords.length <= aWords.length ? aNorm : invNorm;
+      return shorter.length > 0 && shorter.filter(w => longerStr.includes(w)).length >= Math.max(1, Math.ceil(shorter.length * 0.5));
+    });
+
+    // 2. Filtrar por mes (mismo mes o anterior)
+    const monthAlbs = provAlbs.filter(a => {
+      const aMonth = (a.date || '').slice(0, 7);
+      return aMonth === invMonth || aMonth === prevMonth;
+    });
+
+    // 3. Buscar combinación cuya suma ≈ total factura
+    // Primero probar todos los no-facturados
+    const pending = monthAlbs.filter(a => !a.invoiced);
+    const pendingTotal = pending.reduce((s, a) => s + Math.abs(parseFloat(String(a.total)) || 0), 0);
+    const tolerance = inv.totalAmount * 0.05; // 5% tolerancia
+
+    let matchedIds: string[] = [];
+    let matchTotal = 0;
+    let confidence: 'exact' | 'close' | 'none' = 'none';
+
+    if (Math.abs(pendingTotal - inv.totalAmount) < tolerance && pending.length > 0) {
+      // Todos los pendientes del mes suman ≈ factura
+      matchedIds = pending.map(a => a.id);
+      matchTotal = pendingTotal;
+      confidence = Math.abs(pendingTotal - inv.totalAmount) < 0.01 ? 'exact' : 'close';
+    } else if (pending.length === 1 && Math.abs(Math.abs(parseFloat(String(pending[0].total)) || 0) - inv.totalAmount) < tolerance) {
+      // Un solo albarán que cuadra
+      matchedIds = [pending[0].id];
+      matchTotal = Math.abs(parseFloat(String(pending[0].total)) || 0);
+      confidence = 'exact';
+    }
+
+    return { ...inv, matchedAlbaranIds: matchedIds, matchTotal, matchConfidence: confidence };
+  });
+}
+
+/**
+ * Importación completa: lee de Quipu, cruza con albaranes, actualiza Arume PRO.
+ * Devuelve los datos para actualizar el estado de la app.
+ */
+export async function fullImportFromQuipu(
+  config: QuipuConfig,
+  albaranes: Array<{ id: string; prov: string; total: string | number; date: string; invoiced?: boolean }>,
+  period?: string,
+  onProgress?: (msg: string) => void,
+): Promise<{
+  result: ImportResult;
+  invoicesToCreate: Array<QuipuImportedInvoice & { matchedAlbaranIds: string[] }>;
+  paymentsToUpdate: Array<{ quipuId: string; number: string; paidAt: string; totalAmount: number; providerName: string }>;
+}> {
+  const result: ImportResult = { invoicesRead: 0, matched: 0, unmatched: 0, paidUpdated: 0, errors: [] };
+
+  // 1. Leer facturas de Quipu
+  const quipuInvoices = await importInvoicesFromQuipu(config, period, onProgress);
+  result.invoicesRead = quipuInvoices.length;
+
+  if (quipuInvoices.length === 0) {
+    return { result, invoicesToCreate: [], paymentsToUpdate: [] };
+  }
+
+  // 2. Cruzar con albaranes
+  onProgress?.(`Cruzando ${quipuInvoices.length} facturas con albaranes...`);
+  const matched = matchInvoicesWithAlbaranes(quipuInvoices, albaranes);
+
+  const invoicesToCreate = matched.filter(m => m.matchedAlbaranIds.length > 0);
+  const unmatched = matched.filter(m => m.matchedAlbaranIds.length === 0);
+  result.matched = invoicesToCreate.length;
+  result.unmatched = unmatched.length;
+
+  // 3. Facturas pagadas (para actualizar tesorería)
+  const paymentsToUpdate = quipuInvoices
+    .filter(inv => inv.paidAt)
+    .map(inv => ({
+      quipuId: inv.quipuId,
+      number: inv.number,
+      paidAt: inv.paidAt!,
+      totalAmount: inv.totalAmount,
+      providerName: inv.providerName,
     }));
+  result.paidUpdated = paymentsToUpdate.length;
+
+  onProgress?.(`✓ ${result.matched} cruzadas, ${result.unmatched} sin cruzar, ${result.paidUpdated} pagadas`);
+
+  return { result, invoicesToCreate, paymentsToUpdate };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
