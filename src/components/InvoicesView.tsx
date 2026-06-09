@@ -1761,14 +1761,12 @@ REGLAS:
             className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-ink)] text-[color:var(--arume-paper)] hover:bg-[color:var(--arume-gray-700)] transition active:scale-[0.98] relative">
             <Sparkles className="w-3.5 h-3.5 ai-pulse" /> Auto-cuadrar
           </button>
-          {buildQuipuConfig(data?.config || {}) && (
-            <button onClick={handleSyncToQuipu} disabled={quipuSyncing}
-              title="Sube proveedores y facturas pendientes a Quipu"
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-emerald-100 text-emerald-700 border border-emerald-200 hover:bg-emerald-200 transition active:scale-[0.98] disabled:opacity-50">
-              {quipuSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
-              {quipuSyncing ? quipuProgress || 'Sincronizando...' : 'Subir a Quipu'}
-            </button>
-          )}
+          <button onClick={handleSyncToQuipu} disabled={quipuSyncing}
+            title="Sube proveedores y facturas pendientes a Quipu"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-emerald-100 text-emerald-700 border border-emerald-200 hover:bg-emerald-200 transition active:scale-[0.98] disabled:opacity-50">
+            {quipuSyncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
+            {quipuSyncing ? quipuProgress || 'Sincronizando...' : 'Subir a Quipu'}
+          </button>
           <button onClick={() => setIsFixYearsOpen(true)}
             title="Detecta documentos con año incorrecto (ej. 2019 en lugar de 2026) y los corrige en bloque"
             className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-warn)]/15 text-[color:var(--arume-warn)] border border-[color:var(--arume-warn)]/30 hover:bg-[color:var(--arume-warn)]/25 transition active:scale-[0.98]">
