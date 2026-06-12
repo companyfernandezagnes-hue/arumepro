@@ -489,6 +489,28 @@ function DesktopTabButton<T extends string>({ item, active, onClick }: { item: D
 /* =======================================================
  * 4. COMPONENTE APP PRINCIPAL
  * ======================================================= */
+
+// 🧹 Limpieza de claves legacy de localStorage (builds antiguos pre-multi-empresa
+// y copias v152 de 2025). Sin esto el almacén del navegador llega al límite de
+// 10 MB y CUALQUIER setItem lanza QuotaExceededError — que era lo que abortaba
+// handleSave antes de llegar a Supabase y hacía que "no se guardara nada".
+const LEGACY_LS_KEYS = [
+  'arume_v152',
+  'arume_v152_backup_cierre_2025',
+  'arume_erp_backup',
+  'arume_data_cache',
+  'arume_meta_cache',
+  'arume_backup_last',
+  'arume_shadow_backup',
+  'arume_save_queue',
+];
+function cleanupLegacyStorage() {
+  try {
+    LEGACY_LS_KEYS.forEach(k => localStorage.removeItem(k));
+  } catch { /* noop */ }
+}
+cleanupLegacyStorage();
+
 export default function App() {
   return (
     <EmpresaProvider>
@@ -628,7 +650,14 @@ function AppContent() {
       while (lastPayloadRef.current) {
         const payload = lastPayloadRef.current; lastPayloadRef.current = null;
         setData(payload);
-        localStorage.setItem(`arume_backup_last_${empresaActiva}`, JSON.stringify(payload));
+        // 🔒 La copia local es opcional: si el almacén está lleno
+        // (QuotaExceededError) NO puede impedir el guardado en Supabase.
+        try {
+          localStorage.setItem(`arume_backup_last_${empresaActiva}`, JSON.stringify(payload));
+        } catch {
+          cleanupLegacyStorage();
+          try { localStorage.setItem(`arume_backup_last_${empresaActiva}`, JSON.stringify(payload)); } catch { /* sin sitio: seguimos igualmente */ }
+        }
         // 🔒 SIEMPRE llamar a saveData. Internamente detecta el fallo de red y
         // pone el cambio en la cola offline (offlineQueue) para flushear al
         // reconectar. ANTES saltábamos esto en isOffline → el cambio quedaba
