@@ -170,6 +170,12 @@ export async function fetchArumeData(empresaId: EmpresaId = 'arume', retries = 3
 
                                                     try { localStorage.setItem(shadowKey, JSON.stringify(payload)); } catch (e) {}
 
+                                                    // Versión que escribiremos: SIEMPRE remota+1. Antes la versión nunca
+                                                    // se incrementaba (se quedaba en 1 para siempre), así que la detección
+                                                    // de conflictos no saltaba nunca y una pestaña/dispositivo con datos
+                                                    // viejos podía machacar silenciosamente los datos nuevos.
+                                                    let nextVersion = (lastKnownVersion ?? 0) + 1;
+
                                                     // Deteccion de conflictos via version (evita un fetch extra si tenemos version)
                                                     if (lastKnownVersion !== undefined) {
                                                                     const { data: curr, error: e } = await supabase
@@ -183,6 +189,7 @@ export async function fetchArumeData(empresaId: EmpresaId = 'arume', retries = 3
                                                                                                                 if (!silent) notifyError('Se detectaron cambios de otro usuario. Recargando datos...');
                                                                                                                 return { ok: false, conflict: true };
                                                                                             }
+                                                                                        nextVersion = remoteVersion + 1;
                                                                     }
                                                     } else if (lastKnownUpdatedAt) {
                                                                     // Fallback: comparar por updated_at
@@ -196,6 +203,16 @@ export async function fetchArumeData(empresaId: EmpresaId = 'arume', retries = 3
                                                                                         if (!silent) notifyError('Se detectaron cambios de otro usuario. Recargando datos...');
                                                                                         return { ok: false, conflict: true };
                                                                     }
+                                                                    nextVersion = (meta?.version ?? 0) + 1;
+                                                    } else {
+                                                                    // Sin metadatos previos (caché vacía): leer la versión remota
+                                                                    // para no escribir una versión inferior a la existente.
+                                                                    const { data: curr } = await supabase
+                                                                        .from('arume_data')
+                                                                        .select('version')
+                                                                        .eq('empresa_id', empresaId)
+                                                                        .single();
+                                                                    nextVersion = ((curr?.version as number | null) ?? 0) + 1;
                                                     }
 
                                                     // 🩺 Diagnóstico de tamaño del payload. Supabase tiene un límite
@@ -215,7 +232,7 @@ export async function fetchArumeData(empresaId: EmpresaId = 'arume', retries = 3
                                                     const execUpsert = async () => {
                                                                     const { data: up, error } = await supabase
                                                                         .from('arume_data')
-                                                                        .update({ data: payload })
+                                                                        .update({ data: payload, version: nextVersion, updated_at: new Date().toISOString() })
                                                                         .eq('empresa_id', empresaId)
                                                                         .select('updated_at, version')
                                                                         .single();

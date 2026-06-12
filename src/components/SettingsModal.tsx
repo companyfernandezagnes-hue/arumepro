@@ -286,6 +286,7 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
   // modal se abre/cierra.
   const [migrating, setMigrating] = useState(false);
   const [migrationProgress, setMigrationProgress] = useState({ done: 0, total: 0 });
+  const [quipuTesting, setQuipuTesting] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -374,7 +375,6 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
     }
   };
 
-  const [quipuTesting, setQuipuTesting] = useState(false);
   const probarQuipu = async () => {
     const qConfig = buildQuipuConfig(config);
     if (!qConfig) return void toast.warning('Falta App ID, App Secret o Owner Slug de Quipu.');
