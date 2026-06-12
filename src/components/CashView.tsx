@@ -145,6 +145,54 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     onResult: (text) => parseVoiceCommandRef.current(text),
   });
 
+  // ─── Parser de fecha en español ─────────────────────────────────────────
+  // Detecta frases como "hoy", "ayer", "anteayer", "el 15 de mayo",
+  // "el quince de mayo", "el quince de mayo de dos mil veintiséis".
+  // Devuelve YYYY-MM-DD o null si no detecta nada.
+  const MESES_ES: Record<string, number> = {
+    enero: 1, febrero: 2, marzo: 3, abril: 4, mayo: 5, junio: 6,
+    julio: 7, agosto: 8, septiembre: 9, setiembre: 9, octubre: 10,
+    noviembre: 11, diciembre: 12,
+  };
+  const parseFechaSpanish = (text: string): string | null => {
+    const lower = text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const now = new Date();
+    if (/\bhoy\b/.test(lower)) return now.toLocaleDateString('sv-SE');
+    if (/\bayer\b/.test(lower)) {
+      const d = new Date(now); d.setDate(d.getDate() - 1);
+      return d.toLocaleDateString('sv-SE');
+    }
+    if (/\banteayer\b/.test(lower)) {
+      const d = new Date(now); d.setDate(d.getDate() - 2);
+      return d.toLocaleDateString('sv-SE');
+    }
+    // "el 15 de mayo [de 2026]" — con números arábigos
+    const matchNum = lower.match(/(\d{1,2})\s+de\s+(\w+?)(?:\s+de\s+(\d{2,4}))?\b/);
+    if (matchNum) {
+      const dia = parseInt(matchNum[1], 10);
+      const mes = MESES_ES[matchNum[2]];
+      const anyo = matchNum[3] ? (matchNum[3].length === 2 ? 2000 + parseInt(matchNum[3], 10) : parseInt(matchNum[3], 10)) : now.getFullYear();
+      if (mes && dia >= 1 && dia <= 31) {
+        return `${anyo}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+      }
+    }
+    // "el quince de mayo" — palabras → números
+    const matchWords = lower.match(/(?:el\s+)?([a-z\s]+?)\s+de\s+(\w+?)(?:\s+de\s+([a-z\d\s]+))?$/);
+    if (matchWords) {
+      const dia = parseSpanishWordsToNumber(matchWords[1]);
+      const mes = MESES_ES[matchWords[2]];
+      if (dia !== null && mes && dia >= 1 && dia <= 31) {
+        let anyo = now.getFullYear();
+        if (matchWords[3]) {
+          const a = parseSpanishWordsToNumber(matchWords[3]);
+          if (a !== null && a >= 2024 && a <= 2030) anyo = a;
+        }
+        return `${anyo}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+      }
+    }
+    return null;
+  };
+
   // ─── parseVoiceCommand: multi-campo, compatible con Groq Whisper ─────────
   // Groq transcribe TODO de golpe: "Efectivo 313 TPV1 1446,25 Glovo 61"
   // → detecta TODOS los campos en una sola pasada, sin else-if
@@ -192,6 +240,64 @@ export const CashView = ({ data, onSave }: CashViewProps) => {
     const updates: Record<string, string> = {};
     const logParts: string[] = [];
     const ts = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    // 🆕 Detectar cambios de FECHA: "fecha del quince de mayo", "ayer", etc.
+    const fechaDetectada = parseFechaSpanish(lower);
+    if (fechaDetectada) {
+      setForm(f => ({ ...f, date: fechaDetectada }));
+      logParts.push(`fecha=${fechaDetectada}`);
+    }
+
+    // 🆕 Detectar GASTOS: "gasto pan ocho con cincuenta" / "gasto trescientos del pan"
+    // Patrón: la palabra "gasto"/"gastos"/"pago"/"compra" + concepto + importe
+    // Soporta importe en dígitos o palabras.
+    const gastoRegex = /\b(gasto|gastos|pago|compra)\s+(.+?)(?=(?:\s+(?:gasto|gastos|pago|compra|efectivo|tpv|amex|glovo|uber|tienda|fecha|hoy|ayer)\b)|$)/gi;
+    const gastosDetectados: any[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = gastoRegex.exec(lower)) !== null) {
+      const fragmento = m[2].trim();
+      // El importe puede estar al PRINCIPIO o al FINAL del fragmento
+      // "ocho con cincuenta de pan" o "pan ocho con cincuenta"
+      const numMatch = fragmento.match(/(\d+(?:[.,]\d+)?)/);
+      let importe: number | null = null;
+      let concepto = '';
+      if (numMatch) {
+        importe = parseFloat(numMatch[1].replace(',', '.'));
+        concepto = fragmento.replace(numMatch[0], '').replace(/^de\s+/, '').replace(/\s+de\s*$/, '').trim();
+      } else {
+        // Intentar parsear el importe desde palabras: el concepto suele ir al inicio o final
+        const palabras = fragmento.split(/\s+/);
+        for (let i = 0; i < palabras.length; i++) {
+          const tail = palabras.slice(i).join(' ');
+          const n = parseSpanishWordsToNumber(tail);
+          if (n !== null && n > 0) {
+            importe = n;
+            concepto = palabras.slice(0, i).join(' ').replace(/\s+de\s*$/, '').trim();
+            break;
+          }
+        }
+        if (importe === null) {
+          // Probar al revés (importe primero, concepto después)
+          for (let i = palabras.length; i > 0; i--) {
+            const head = palabras.slice(0, i).join(' ');
+            const n = parseSpanishWordsToNumber(head);
+            if (n !== null && n > 0) {
+              importe = n;
+              concepto = palabras.slice(i).join(' ').replace(/^de\s+/, '').trim();
+              break;
+            }
+          }
+        }
+      }
+      if (importe !== null && importe > 0) {
+        if (!concepto || concepto.length < 2) concepto = 'Gasto sin descripción';
+        gastosDetectados.push({ concepto, importe, iva: 10, unidad: 'REST' });
+        logParts.push(`gasto[${concepto}=${importe}€]`);
+      }
+    }
+    if (gastosDetectados.length > 0) {
+      setGastosCaja(prev => [...prev, ...gastosDetectados]);
+    }
 
     for (const { keys, field } of VOICE_MAPPINGS) {
       for (const key of keys) {
