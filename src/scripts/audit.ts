@@ -27,14 +27,23 @@ async function main(){
   console.log("🕵️‍♂️ CFO Virtual: Conectando a la base de datos de Arume...");
   const sb = createClient(url, key, { auth: { persistSession:false }});
   
-  const { data, error } = await sb.from('arume_data').select('id,data').eq('id',1).single();
+  // Multi-empresa: una fila por empresa (empresa_id 'arume' | 'raco')
+  const { data: rows, error } = await sb.from('arume_data').select('empresa_id,data,updated_at,version');
   if(error) throw error;
-  const root:any = data?.data || {};
-  if (!root || typeof root !== 'object') throw new Error('JSON maestro inválido o vacío');
+  if(!rows || rows.length === 0) throw new Error('No hay filas en arume_data');
 
-  // --- Snapshot (Copia de Seguridad de Emergencia) ---
+  // --- Snapshot (Copia de Seguridad de Emergencia) de TODAS las empresas ---
+  let root:any = {};
+  for (const row of rows) {
+    const d:any = row?.data || {};
+    const eid = (row as any).empresa_id || 'desconocida';
+    fs.writeFileSync(`out/${eid}_data_snapshot.json`, JSON.stringify(d,null,2), 'utf8');
+    console.log(`✅ Copia de seguridad guardada: ${eid} (version ${(row as any).version ?? '?'})`);
+    if (eid === 'arume') root = d;
+  }
+  if (!root || typeof root !== 'object') throw new Error('JSON maestro de arume inválido o vacío');
+  // Compatibilidad con el nombre antiguo del snapshot
   fs.writeFileSync('out/arume_data_snapshot.json', JSON.stringify(root,null,2), 'utf8');
-  console.log("✅ Copia de seguridad guardada.");
 
   const albaranes = Array.isArray(root.albaranes) ? root.albaranes : [];
   const facturas  = Array.isArray(root.facturas)  ? root.facturas  : [];

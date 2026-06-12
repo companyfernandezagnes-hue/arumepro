@@ -261,9 +261,13 @@ export const InvoicesView = ({ data, onSave }: InvoicesViewProps) => {
 
   const [selectedInvoice,  setSelectedInvoice]  = useState<FacturaExtended | null>(null);
   const [selectedGroup,    setSelectedGroup]    = useState<{ label: string; ids: string[] } | null>(null);
-  const [modalForm,        setModalForm]        = useState({ num: '', date: new Date().toISOString().slice(0, 10), selectedAlbs: [] as string[], unitId: 'REST' as string });
+  const [modalForm,        setModalForm]        = useState<{ num: string; date: string; selectedAlbs: string[]; unitId: BusinessUnit }>({ num: '', date: new Date().toISOString().slice(0, 10), selectedAlbs: [], unitId: 'REST' });
   const [autoGroupPreview, setAutoGroupPreview] = useState<FacturaExtended[] | null>(null);
   const [editingDraftIdx,  setEditingDraftIdx]  = useState(-1);
+  // Mini-form para crear un albarán manual durante la agrupación (cuando la
+  // usuaria detecta que falta uno y necesita cuadrar el total con la factura).
+  const [manualAlbForm, setManualAlbForm] = useState<{ prov: string; date: string; num: string; total: string }>({ prov: '', date: '', num: '', total: '' });
+  const [manualAlbBusy, setManualAlbBusy] = useState(false);
 
   const [emailAuditInbox,  setEmailAuditInbox]  = useState<EmailDraft[]>([]);
   // Resultados del Agente IA: cada email + su match calculado contra albaranes.

@@ -1097,7 +1097,11 @@ const _transcribeWithGroqWhisper = async (
 
   const formData = new FormData();
   formData.append('file',            audioBlob, extension);
-  formData.append('model',           'whisper-large-v3-turbo');
+  // 🔧 FIX: whisper-large-v3-turbo es SOLO inglés en la última config de Groq.
+  // Para español hay que usar whisper-large-v3 (multilenguaje). Cambio el
+  // modelo y dejo de devolver "Comprueba la key" cuando en realidad el
+  // problema es de modelo deprecado o de cuota.
+  formData.append('model',           'whisper-large-v3');
   formData.append('language',        'es');
   formData.append('response_format', 'text');
   // Vocabulario de referencia — Whisper prioriza estas palabras al transcribir.
@@ -1106,16 +1110,45 @@ const _transcribeWithGroqWhisper = async (
     'Efectivo, TPV1, TPV2, AMEX, Glovo, Uber, Madisa, ApperStreet, Tienda, arqueo, euros, caja física'
   );
 
-  const res = await fetchWithTimeout(
-    'https://api.groq.com/openai/v1/audio/transcriptions',
-    { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: formData },
-    20000
-  );
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(
+      'https://api.groq.com/openai/v1/audio/transcriptions',
+      { method: 'POST', headers: { Authorization: `Bearer ${apiKey}` }, body: formData },
+      20000
+    );
+  } catch (e: any) {
+    // Error de red / CORS / timeout → caemos al navegador.
+    console.warn('[Groq Whisper] red/timeout, fallback al navegador:', e?.message);
+    throw new Error('USE_BROWSER_FALLBACK');
+  }
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    throw new Error(`Groq Whisper HTTP ${res.status}: ${errText}`);
+    console.warn(`[Groq Whisper] HTTP ${res.status}:`, errText);
+    // 401/403 = key inválida o caducada → ese caso SÍ es problema de key.
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(`Groq Whisper: API key inválida (${res.status}). Revísala en Ajustes → Cerebros IA → Groq.`);
+    }
+    // 400 con "model not found" / "model decommissioned" → modelo deprecado,
+    // fallback al navegador en vez de bloquear a la usuaria.
+    if (res.status === 400 && /model|decommission|not found/i.test(errText)) {
+      console.warn('[Groq Whisper] modelo deprecado, fallback al navegador');
+      throw new Error('USE_BROWSER_FALLBACK');
+    }
+    // Cualquier otro error (429 rate limit, 500…) también va al fallback
+    // para que la usuaria pueda seguir trabajando sin tener que esperar.
+    if (res.status === 429 || res.status >= 500) {
+      console.warn(`[Groq Whisper] error transitorio ${res.status}, fallback al navegador`);
+      throw new Error('USE_BROWSER_FALLBACK');
+    }
+    throw new Error(`Groq Whisper HTTP ${res.status}: ${errText.slice(0, 200)}`);
   }
-  return (await res.text()).trim();
+  const text = (await res.text()).trim();
+  if (!text) {
+    console.warn('[Groq Whisper] respuesta vacía, fallback al navegador');
+    throw new Error('USE_BROWSER_FALLBACK');
+  }
+  return text;
 };
 
 
