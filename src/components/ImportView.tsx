@@ -228,15 +228,32 @@ const extractJSON = (rawText: string) => {
 };
 
 const compressImage = async (file: File | Blob): Promise<string> => {
-  const QUALITY_LEVELS=[0.85,0.65,0.45]; const MAX_BYTES=3*1024*1024; const MAX_W=1600,MAX_H=1600;
-  const bitmap=await createImageBitmap(file); const ratio=Math.min(MAX_W/bitmap.width,MAX_H/bitmap.height,1);
-  const w=Math.max(1,Math.round(bitmap.width*ratio)); const h=Math.max(1,Math.round(bitmap.height*ratio));
-  const canvas=document.createElement('canvas'); canvas.width=w; canvas.height=h;
+  // Optimizado para móvil: compresión agresiva, máximo 2MB
+  const QUALITY_LEVELS=[0.8,0.6,0.4,0.25]; const MAX_BYTES=2*1024*1024;
+  const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
+  const MAX_W = isMobile ? 1200 : 1600;
+  const MAX_H = isMobile ? 1200 : 1600;
+
+  const bitmap=await createImageBitmap(file);
+  const ratio=Math.min(MAX_W/bitmap.width,MAX_H/bitmap.height,1);
+  const w=Math.max(1,Math.round(bitmap.width*ratio));
+  const h=Math.max(1,Math.round(bitmap.height*ratio));
+  const canvas=document.createElement('canvas');
+  canvas.width=w; canvas.height=h;
   canvas.getContext('2d',{alpha:false})?.drawImage(bitmap,0,0,w,h);
+
   let finalBlob:Blob|null=null;
-  for(const quality of QUALITY_LEVELS){const qBlob:Blob=await new Promise((res)=>canvas.toBlob((b)=>res(b as Blob),'image/jpeg',quality));finalBlob=qBlob;if(qBlob.size<=MAX_BYTES)break;}
+  for(const quality of QUALITY_LEVELS){
+    const qBlob:Blob=await new Promise((res)=>canvas.toBlob((b)=>res(b as Blob),'image/jpeg',quality));
+    finalBlob=qBlob;
+    if(qBlob.size<=MAX_BYTES)break;
+  }
   if(!finalBlob) throw new Error('No se pudo comprimir la imagen.');
-  const b64=await new Promise<string>((res)=>{const fr=new FileReader();fr.onload=()=>res((fr.result as string).split(',')[1]);fr.readAsDataURL(finalBlob!);});
+  const b64=await new Promise<string>((res)=>{
+    const fr=new FileReader();
+    fr.onload=()=>res((fr.result as string).split(',')[1]);
+    fr.readAsDataURL(finalBlob!);
+  });
   return `data:image/jpeg;base64,${b64}`;
 };
 
@@ -442,7 +459,24 @@ export const ImportView = ({ data, onSave, onNavigate }: ImportViewProps) => {
     mesNombre: string;
     onConfirm: () => void;
   } | null>(null);
-  const [selectedUnit, setSelectedUnit] = React.useState<'REST' | 'SHOP' | 'B2B'>('REST');
+  // Persistir selección de unidad en localStorage
+  const [selectedUnit, setSelectedUnit] = React.useState<'REST' | 'SHOP' | 'B2B'>(() => {
+    try {
+      const saved = localStorage.getItem('arume_import_unit');
+      return (saved as 'REST' | 'SHOP' | 'B2B') || 'REST';
+    } catch {
+      return 'REST';
+    }
+  });
+
+  // Guardar selección cuando cambia
+  useEffect(() => {
+    try {
+      localStorage.setItem('arume_import_unit', selectedUnit);
+    } catch {
+      // localStorage no disponible en algunos navegadores
+    }
+  }, [selectedUnit]);
 
   const [reviewItem, setReviewItem] = useState<QueueItem | null>(null);
   const [processStartTime, setProcessStartTime] = React.useState<number | null>(null);

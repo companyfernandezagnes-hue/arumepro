@@ -597,12 +597,12 @@ export const DashboardView = ({ data, onNavigate, onSave }: DashboardViewProps) 
         </motion.button>
       )}
 
-      {/* ═════════════ BANNER DUPLICADOS ═════════════ */}
+      {/* ═════════════ BANNER DUPLICADOS (MEJORADO) ═════════════ */}
       {duplicados.total > 0 && (
         <motion.div
           initial={{ opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-[color:var(--arume-danger)]/10 border border-[color:var(--arume-danger)]/30 rounded-2xl p-4"
+          className="bg-[color:var(--arume-danger)]/10 border border-[color:var(--arume-danger)]/30 rounded-2xl p-4 space-y-3"
         >
           <div className="flex items-center gap-3">
             <AlertTriangle className="w-5 h-5 text-[color:var(--arume-danger)] shrink-0"/>
@@ -618,17 +618,40 @@ export const DashboardView = ({ data, onNavigate, onSave }: DashboardViewProps) 
               <p className="text-[11px] text-[color:var(--arume-gray-600)] mt-0.5">
                 Mismo proveedor + nº + total aparece más de una vez. Revisa antes de pagar dos veces.
               </p>
-              {duplicados.facturasDups.slice(0, 3).map((grupo, i) => (
-                <p key={i} className="text-[11px] text-[color:var(--arume-gray-500)] mt-1 font-mono">
-                  · {grupo[0].prov || grupo[0].cliente} · {grupo[0].num} · {Num.fmt(Math.abs(Num.parse(grupo[0].total)))} ({grupo.length} copias)
-                </p>
-              ))}
             </div>
             <button onClick={() => onNavigate?.('compras')}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold uppercase tracking-[0.15em] bg-[color:var(--arume-danger)] text-white hover:brightness-95 transition shrink-0">
               Revisar →
             </button>
           </div>
+
+          {/* Mostrar todos los duplicados detectados */}
+          {(duplicados.facturasDups.length > 0 || duplicados.albaranesDups.length > 0) && (
+            <div className="bg-white/60 rounded-xl p-3 space-y-2">
+              {duplicados.facturasDups.map((grupo, i) => (
+                <div key={`f-${i}`} className="flex items-center justify-between bg-white rounded-lg p-2.5 border border-[color:var(--arume-danger)]/15 text-[11px]">
+                  <span className="font-mono flex-1">
+                    📄 {grupo[0].prov || grupo[0].cliente} · {grupo[0].num} · {Num.fmt(Math.abs(Num.parse(grupo[0].total)))} <span className="text-[color:var(--arume-danger)] font-bold">({grupo.length} copias)</span>
+                  </span>
+                  <button onClick={() => onNavigate?.('compras')}
+                    className="text-[9px] font-black uppercase tracking-widest text-[color:var(--arume-danger)] hover:bg-[color:var(--arume-danger)]/10 px-2.5 py-1 rounded transition ml-2">
+                    Verificar
+                  </button>
+                </div>
+              ))}
+              {duplicados.albaranesDups.map((grupo, i) => (
+                <div key={`a-${i}`} className="flex items-center justify-between bg-white rounded-lg p-2.5 border border-[color:var(--arume-danger)]/15 text-[11px]">
+                  <span className="font-mono flex-1">
+                    📦 {grupo[0].prov} · {grupo[0].num} · {Num.fmt(Math.abs(Num.parse(grupo[0].total)))} <span className="text-[color:var(--arume-danger)] font-bold">({grupo.length} copias)</span>
+                  </span>
+                  <button onClick={() => onNavigate?.('albaranes')}
+                    className="text-[9px] font-black uppercase tracking-widest text-[color:var(--arume-danger)] hover:bg-[color:var(--arume-danger)]/10 px-2.5 py-1 rounded transition ml-2">
+                    Verificar
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </motion.div>
       )}
 
