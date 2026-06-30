@@ -865,6 +865,16 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
                   </div>
                   <SecretInput value={claudeKey} onChange={setClaudeKey} placeholder="sk-ant-..." colorClass="pink"
                     linkHref="https://console.anthropic.com/settings/keys" linkLabel="Crear clave en Anthropic →" />
+                  {/* 🔍 TEST: Verificar estado de guardado */}
+                  <div className={cn('text-xs p-2 rounded border font-bold',
+                    claudeKey.trim()
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                      : 'bg-rose-50 border-rose-200 text-rose-700'
+                  )}>
+                    {claudeKey.trim()
+                      ? `✅ Clave ingresada (${claudeKey.length} caracteres)`
+                      : '❌ Campo vacío — pega tu clave sk-ant-... aquí'}
+                  </div>
                   <p className="text-[8px] text-pink-500 font-bold leading-tight">Sonnet 4.5. Lee si Z.AI no funciona desde browser (CORS) o no responde. También necesario para PDFs (Z.AI sólo imágenes).</p>
                 </div>
 
