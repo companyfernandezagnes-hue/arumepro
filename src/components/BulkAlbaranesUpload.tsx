@@ -779,7 +779,8 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
       try {
         // mimeType siempre image/jpeg porque preprocessImageForOCR lo convierte
         // (el original puede ser HEIC/PNG/WebP — la IA recibe siempre JPEG normalizado).
-        const result = await scanBase64(entry.base64, 'image/jpeg', PROMPT);
+        // Force Claude para subida masiva (más preciso que Gemini/Z.AI)
+        const result = await scanBase64(entry.base64, 'image/jpeg', PROMPT, 'claude');
         const raw = result.raw as any;
 
         // Normalizar líneas — el prompt pide unitPrice/base/rate/iva/t pero la

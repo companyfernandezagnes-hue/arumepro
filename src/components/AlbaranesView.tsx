@@ -512,28 +512,39 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
 
   // Telegram sync eliminado — ya no se usa
 
-  // ── Escanear archivo con Gemini ────────────────────────────────────────────
+  // ── Escanear archivo con Claude (OCR más preciso que Gemini) ────────────────────────────────────────────
   const processLocalFile = async (file: File) => {
     setIsScanning(true);
     try {
-      const prompt = `Eres un OCR EXPERTO en albaranes y facturas comerciales españoles. Tu precisión es crítica — los números errados cuestan dinero.
+      const prompt = `Eres un OCR EXPERTO en albaranes y delivery de restaurantes españoles (Raçó Blanquerna / RACO). Tu precisión es CRÍTICA — los números errados cuestan dinero real.
 
-DEVUELVE ÚNICAMENTE JSON, sin markdown:
+DEVUELVE ÚNICAMENTE JSON VÁLIDO, sin markdown, sin backticks, sin explicaciones:
 {
-  "proveedor": "Nombre legal del EMISOR (quien vende)",
-  "num": "Referencia del documento",
+  "proveedor": "Nombre legal del EMISOR",
+  "num": "Referencia del documento (Nota de Entrega, Factura, etc)",
   "fecha": "YYYY-MM-DD",
-  "total_factura": 0,
-  "lineas": [{"q": 1, "n": "Producto", "t": 10.50, "rate": 10, "u": "kg"}],
-  "notas_ocr": "Cualquier ambigüedad o dato dudoso aquí"
+  "total_factura": 0.00,
+  "lineas": [{"q": 1, "n": "Producto", "t": 10.50, "rate": 10, "u": "ud"}],
+  "notas_ocr": "Cualquier ambigüedad o dato dudoso"
 }
 
-ESTRUCTURA TÍPICA DE ALBARÁN ESPAÑOL:
-- Encabezado: nombre proveedor (EMISOR), CIF/NIF, dirección, teléfono
-- Tabla: CANTIDAD | UNIDAD | DESCRIPCIÓN | P.UNIT | TOTAL | %IVA
-- Pie: Base imponible por tramo IVA (4%, 10%, 21%), total sin/con IVA, descuentos
+ESTRUCTURA REAL DE ALBARÁN RACO (basado en tus documentos):
+- Encabezado IZQUIERDA: Proveedor (ej: "FORM DES PLA DE NA TESA SL"), CIF, dirección, email, teléfono
+- Encabezado DERECHA: Receptor (ej: "RACOBLANQUERNA SL"), CIF, dirección (esto ES Raçó/Raco, NUNCA lo pongas como proveedor)
+- Datos: Nota de Entrega (ej: "01-i60.598/2"), Fecha (ej: "02/06/2026" → convertir a "2026-06-02"), Nº Pedido
+- Tabla RACO: Descripción | Vuelta 1ª | Vuelta 2ª | Pr. Iva Incl. | IVA % | Total
+  • "Vuelta 1ª/2ª" = números de entrega/devolución (ignora si vacíos)
+  • "Pr. Iva Incl." = PRECIO UNITARIO CON IVA (importante: ya incluye IVA)
+  • "IVA %" = tipo de IVA (4, 10, 21)
+  • "Total" = cantidad × Pr. Iva Incl. = total línea CON IVA
+- Pie: "Total cantidad: X.XX", "Total: YY.YY €"
+- NOTAS IMPORTANTES:
+  • Las columnas "Vuelta 1ª/2ª" suelen estar vacías (las rellena Raco)
+  • El formato es tabla simple (no compleja)
+  • Todos los precios están YA CON IVA incluido
+  • El total final es el importe a pagar directamente
 
-REGLAS CRÍTICAS:
+REGLAS CRÍTICAS (para Raco en específico):
 
 1️⃣ PROVEEDOR (obligatorio):
    - Es el VENDEDOR/EMISOR (cabecera del documento).
@@ -557,15 +568,16 @@ REGLAS CRÍTICAS:
    - Si hay descuento global, réstalo del subtotal.
    - Nunca uses "," como decimal (Python espera "." → será punto).
 
-5️⃣ LINEAS — LO MÁS IMPORTANTE:
+5️⃣ LINEAS — LO MÁS IMPORTANTE (RACO específico):
    - Extrae TODAS las líneas de la tabla principal.
-   - Ignora: gastos de envío, embalaje, etc. (a menos que esté dentro de tabla).
+   - Ignora columnas vacías ("Vuelta 1ª", "Vuelta 2ª" casi siempre están en blanco).
    - Para cada línea: {q, n, t, rate, u}
-     • q (cantidad): número puro (decimales con punto: 1.5, 10, 0.25).
-     • n (nombre): descripción tal cual (sin abreviar, mantén mayúscula/minúscula).
-     • t (total): importe de esa línea (q × precio_unit), con IVA si la línea lo especifica.
-     • rate (IVA): 4, 10, 21 (detecta de la columna %IVA o del pie de totales).
-     • u (unidad): kg, l, ud, uds, g, gr, ml, x, etc. Normaliza: "kgs"→"kg", "litro"→"l".
+     • q (cantidad): número en columna "Vuelta 1ª" (si está), o "1" si está vacía. Puede ser decimal (1.5, 10, 0.25).
+     • n (nombre): descripción en columna "Descripción" (tal cual, sin abreviar).
+     • t (total): el valor de "Total" directamente (ya está con IVA incluido).
+       → IMPORTANTE: este t ya incluye IVA, es lo que pagas.
+     • rate (IVA): el % de la columna "IVA %" (4, 10, 21).
+     • u (unidad): casi siempre "ud" o "uds" en Raco (no hay kg/l usualmente). Si ves peso → "kg", si litros → "l".
 
 6️⃣ DETECCIÓN INTELIGENTE DE IVA:
    - Si la tabla tiene columna "%IVA" → úsala para cada línea.
@@ -584,20 +596,19 @@ REGLAS CRÍTICAS:
    - Si no cierra: revisar si hay descuentos globales, gastos extra, impuestos.
    - Productos en hostelería: nombres comunes (pescado, verdura, aceite, vino, etc.).
 
-EJEMPLO CORRECTO de albarán hostelería:
+EJEMPLO CORRECTO de albarán RACO (basado en tus documentos):
 {
-  "proveedor": "MAKRO CASH AND CARRY",
-  "num": "ALB-20260630-001",
-  "fecha": "2026-06-30",
-  "total_factura": 245.67,
+  "proveedor": "FORM DES PLA DE NA TESA SL",
+  "num": "01-i60.598/2",
+  "fecha": "2026-06-02",
+  "total_factura": 32.00,
   "lineas": [
-    {"q": 5, "n": "SALMÓN AHUMADO (kg)", "t": 125.00, "rate": 10, "u": "kg"},
-    {"q": 2.5, "n": "ACEITE OLIVA VIRGEN (L)", "t": 45.50, "rate": 10, "u": "l"},
-    {"q": 1, "n": "DESCUENTO VOLUMEN", "t": -5.00, "rate": 0, "u": "ud"},
-    {"q": 12, "n": "AGUA MINERAL (botellas 1.5L)", "t": 3.60, "rate": 10, "u": "ud"}
+    {"q": 10, "n": "PRECUIT PA AMB MULTICEREAL", "t": 32.00, "rate": 4, "u": "ud"}
   ],
-  "notas_ocr": "Línea 2: unidad detectada por contexto (litros de aceite). Descuento global validado contra pie."
+  "notas_ocr": null
 }
+
+NOTA: el precio 3,20€ en "Pr. Iva Incl." × 10 uds = 32.00€ en "Total" (ya con 4% IVA incluido).
 
 ERRORES FRECUENTES QUE EVITARÁS:
 ❌ Nombre proveedor como "ARUME SAKE BAR" (NO, eso es receptor).
@@ -608,7 +619,7 @@ ERRORES FRECUENTES QUE EVITARÁS:
 ❌ Total con coma: "245,67" (debe ser "245.67").
 
 AHORA ANALIZA EL DOCUMENTO Y DEVUELVE SOLO EL JSON (sin triple backticks, sin explicaciones).`;
-      const result = await scanDocument(file, prompt);
+      const result = await scanDocument(file, prompt, 'claude'); // Force Claude (más preciso que Gemini)
       const raw: any = result.raw;
 
       // Validación post-OCR: verificar integridad de datos

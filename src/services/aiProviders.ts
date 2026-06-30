@@ -596,11 +596,13 @@ export const scanDocumentMultiPage = async (
 /**
  * scanBase64 — Escaneo cuando ya tenemos datos en base64 (sin File).
  * Útil para imágenes de cámara, adjuntos de email, etc.
+ * Si forceProvider='claude', usa solo Claude (sin fallback).
  */
 export const scanBase64 = async (
   base64: string,
   mimeType: string,
   prompt: string,
+  forceProvider?: AIProvider,
 ): Promise<ScanResult> => {
   // Limpiar prefijo data:... si existe
   const cleanB64 = base64.includes(',') ? base64.split(',')[1] : base64;
@@ -611,10 +613,14 @@ export const scanBase64 = async (
   // genérico inútil.
   const errors: string[] = [];
 
+  // Si se fuerza Claude, solo intentamos Claude (sin fallback)
+  const onlyClaude = forceProvider === 'claude';
+  const tryAll = !forceProvider;
+
   // 🟠 Z.AI PRIMERO — gratuito, OCR optimizado para documentos.
   // Si CORS falla, circuit breaker 30 min → cae a Claude automáticamente.
   const zaiKey = keys.zai();
-  if (zaiKey && isImage && !isCircuitOpen('zai')) {
+  if (zaiKey && isImage && (tryAll && !isCircuitOpen('zai'))) {
     try {
       return await _scanBase64WithZai(cleanB64, mimeType, prompt, zaiKey);
     } catch (e: any) {
@@ -626,17 +632,17 @@ export const scanBase64 = async (
       }
       errors.push(`Z.AI: ${msg}`);
     }
-  } else if (isCircuitOpen('zai')) {
+  } else if (isCircuitOpen('zai') && tryAll) {
     errors.push('Z.AI: en pausa (bloqueado CORS o saturado)');
-  } else if (!zaiKey) {
+  } else if (!zaiKey && tryAll) {
     errors.push('Z.AI: sin API key configurada');
-  } else if (!isImage) {
+  } else if (!isImage && tryAll) {
     errors.push('Z.AI: solo soporta imágenes, no PDFs');
   }
 
   // 🟣 Claude — fallback 1. Máxima precisión. Visión + PDFs nativos.
   const claudeKey = keys.claude();
-  if (claudeKey && !isCircuitOpen('claude')) {
+  if (claudeKey && (onlyClaude || tryAll) && !isCircuitOpen('claude')) {
     const isRateLimit = (msg: string) =>
       /rate.?limit|429/i.test(msg);
     const isTransientClaude = (msg: string) =>
