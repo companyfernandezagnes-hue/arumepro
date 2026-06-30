@@ -291,13 +291,17 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
   useEffect(() => {
     if (!isOpen) return;
     setConfig(db?.config || {});
-    setClaudeKey(localStorage.getItem('claude_api_key') || '');
-    setGeminiKey(localStorage.getItem('gemini_api_key') || '');
-    setZaiKey(localStorage.getItem('zai_api_key') || '');
-    setGroqKey(localStorage.getItem('groq_api_key') || '');
-    setCerebrasKey(localStorage.getItem('cerebras_api_key') || '');
-    setDeepseekKey(localStorage.getItem('deepseek_api_key') || '');
-    setMistralKey(localStorage.getItem('mistral_api_key') || '');
+
+    // 🔐 Cargar claves API desde Supabase config (NO localStorage)
+    const apiKeys = db?.config?.api_keys || {};
+    setClaudeKey(apiKeys.claude || localStorage.getItem('claude_api_key') || '');
+    setGeminiKey(apiKeys.gemini || localStorage.getItem('gemini_api_key') || '');
+    setZaiKey(apiKeys.zai || localStorage.getItem('zai_api_key') || '');
+    setGroqKey(apiKeys.groq || localStorage.getItem('groq_api_key') || '');
+    setCerebrasKey(apiKeys.cerebras || localStorage.getItem('cerebras_api_key') || '');
+    setDeepseekKey(apiKeys.deepseek || localStorage.getItem('deepseek_api_key') || '');
+    setMistralKey(apiKeys.mistral || localStorage.getItem('mistral_api_key') || '');
+
     setVoiceProvider((localStorage.getItem('voice_provider') as 'browser' | 'groq') || 'browser');
     setIgToken(localStorage.getItem('ig_graph_token') || '');
     setIgPageId(localStorage.getItem('ig_page_id') || '');
@@ -318,66 +322,61 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
     if (!db) return;
 
     try {
-      // 🧹 LIMPIEZA automática: si localStorage está casi lleno, borra datos viejos
-      try {
-        const quotaUsage = (JSON.stringify(localStorage).length / (1024 * 1024)).toFixed(2);
-        if (parseFloat(quotaUsage) > 4) { // Si usa más de 4MB
-          console.log(`[Settings] localStorage casi lleno (${quotaUsage}MB). Limpiando...`);
-          // Elimina datos de debug/temporales que no son críticos
-          const keysToClean = [
-            'arume_debug_logs', 'ai_diagnostics', 'temp_uploads', 'cache_',
-            'history_prices_old', 'backup_old', 'sync_state'
-          ];
-          for (const key of Object.keys(localStorage)) {
-            if (keysToClean.some(k => key.includes(k))) {
-              localStorage.removeItem(key);
-            }
-          }
-          toast.info('🧹 Se limpió espacio. Intentando guardar...');
-        }
-      } catch { /* ignore cleanup errors */ }
+      // 🔐 GUARDAR EN SUPABASE (no en localStorage limitado)
+      // Las claves API se guardan en db.config.api_keys
+      const newData = {
+        ...db,
+        config: {
+          ...(db.config || {}),
+          ...config,
+          // Claves API en Supabase (seguras, ilimitadas, sincronizadas)
+          api_keys: {
+            claude: claudeKey.trim() || undefined,
+            gemini: geminiKey.trim() || undefined,
+            zai: zaiKey.trim() || undefined,
+            groq: groqKey.trim() || undefined,
+            cerebras: cerebrasKey.trim() || undefined,
+            deepseek: deepseekKey.trim() || undefined,
+            mistral: mistralKey.trim() || undefined,
+          },
+        },
+      };
 
-      // IAs — con validación
-      if (claudeKey.trim()) {
-        localStorage.setItem('claude_api_key', claudeKey.trim());
-      } else {
-        localStorage.removeItem('claude_api_key');
-      }
-
-      if (geminiKey.trim())   localStorage.setItem('gemini_api_key',   geminiKey.trim());   else localStorage.removeItem('gemini_api_key');
-      if (zaiKey.trim())      localStorage.setItem('zai_api_key',      zaiKey.trim());      else localStorage.removeItem('zai_api_key');
-      if (groqKey.trim())     localStorage.setItem('groq_api_key',     groqKey.trim());     else localStorage.removeItem('groq_api_key');
-      if (cerebrasKey.trim()) localStorage.setItem('cerebras_api_key', cerebrasKey.trim()); else localStorage.removeItem('cerebras_api_key');
-      if (deepseekKey.trim()) localStorage.setItem('deepseek_api_key', deepseekKey.trim()); else localStorage.removeItem('deepseek_api_key');
-      if (mistralKey.trim())  localStorage.setItem('mistral_api_key',  mistralKey.trim());  else localStorage.removeItem('mistral_api_key');
+      // También guardar en localStorage como fallback (para arranques rápidos)
+      // pero la fuente de verdad es Supabase
+      if (claudeKey.trim()) localStorage.setItem('claude_api_key', claudeKey.trim());
+      if (geminiKey.trim()) localStorage.setItem('gemini_api_key', geminiKey.trim());
+      if (zaiKey.trim()) localStorage.setItem('zai_api_key', zaiKey.trim());
+      if (groqKey.trim()) localStorage.setItem('groq_api_key', groqKey.trim());
+      if (cerebrasKey.trim()) localStorage.setItem('cerebras_api_key', cerebrasKey.trim());
+      if (deepseekKey.trim()) localStorage.setItem('deepseek_api_key', deepseekKey.trim());
+      if (mistralKey.trim()) localStorage.setItem('mistral_api_key', mistralKey.trim());
 
       // Voz
       localStorage.setItem('voice_provider', voiceProvider);
 
       // Marketing
-      if (igToken.trim())  localStorage.setItem('ig_graph_token', igToken.trim());  else localStorage.removeItem('ig_graph_token');
-      if (igPageId.trim()) localStorage.setItem('ig_page_id',     igPageId.trim()); else localStorage.removeItem('ig_page_id');
+      if (igToken.trim()) localStorage.setItem('ig_graph_token', igToken.trim());
+      if (igPageId.trim()) localStorage.setItem('ig_page_id', igPageId.trim());
 
       // Integraciones externas
       const validExt = extIntegrations.filter(i => i.name.trim());
       localStorage.setItem('ext_integrations', JSON.stringify(validExt));
       validExt.forEach(i => {
         const k = `ext_api_${i.name.trim().toLowerCase().replace(/\s+/g, '_')}`;
-        if (i.key.trim()) localStorage.setItem(k, i.key.trim()); else localStorage.removeItem(k);
+        if (i.key.trim()) localStorage.setItem(k, i.key.trim());
       });
 
-      // Config en Supabase
-      const newData = { ...db, config: { ...(db.config || {}), ...config } };
+      // 💾 GUARDAR EN SUPABASE
       setDb(newData);
       onSave(newData);
 
       // ✅ CONFIRMACIÓN VISUAL
       setIsSaved(true);
-      toast.success('✅ Ajustes guardados correctamente. Claude API lista.');
+      toast.success('✅ Claves guardadas en Supabase. Sin límite de localStorage.');
       setTimeout(() => { setIsSaved(false); onClose(); }, 1500);
     } catch (err: any) {
-      // ❌ Si localStorage falla (modo privado, sin espacio, etc)
-      toast.error(`❌ Error al guardar: ${err?.message || 'localStorage no disponible (¿modo privado?)'}`);
+      toast.error(`❌ Error al guardar: ${err?.message || 'No disponible'}`);
       console.error('[Settings] Save error:', err);
     }
   };
