@@ -20,6 +20,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend } from 'recharts';
 import { scanDocument } from '../services/aiProviders';
+import { OCR_PROMPT_RACO } from '../services/ocrPrompt';
 
 import { supabase } from '../services/supabase'; 
 import { basicNorm, TOLERANCIA as CENTRAL_TOLERANCIA, linkAlbaranesToFactura, unlinkAlbaranFromFactura } from '../services/invoicing';
@@ -516,167 +517,9 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const processLocalFile = async (file: File) => {
     setIsScanning(true);
     try {
-      const prompt = `Eres un OCR EXPERTO en albaranes y delivery de restaurantes españoles (Raçó Blanquerna / RACO). Tu precisión es CRÍTICA — los números errados cuestan dinero real.
+      // Usar prompt profesional centralizado (mismo que BulkAlbaranesUpload)
+      const prompt = OCR_PROMPT_RACO;
 
-DEVUELVE ÚNICAMENTE JSON VÁLIDO, sin markdown, sin backticks, sin explicaciones:
-{
-  "proveedor": "Nombre legal del EMISOR",
-  "num": "Referencia del documento (Nota de Entrega, Factura, etc)",
-  "fecha": "YYYY-MM-DD",
-  "total_factura": 0.00,
-  "lineas": [{"q": 1, "n": "Producto", "t": 10.50, "rate": 10, "u": "ud"}],
-  "notas_ocr": "Cualquier ambigüedad o dato dudoso"
-}
-
-ESTRUCTURAS DE ALBARANES RACO (múltiples proveedores, múltiples formatos):
-
-═══ FORMATO 1 — FORM DES PLA DE NA TESA SL (panadería, proveedores locales) ═══
-- Encabezado: Proveedor izq., Receptor RACOBLANQUERNA derecha
-- Tabla: Descripción | Vuelta 1ª | Vuelta 2ª | Pr. Iva Incl. | IVA % | Total
-- Precios: YA CON IVA incluido
-- Pie: "Total cantidad: X", "Total: YY.YY €"
-- Ejemplo: PRECUIT PA AMB MULTICEREAL - 10 uds, 3.20€ c/u (con IVA), 4% IVA, 32.00€ total
-- Nota: "Vuelta 1ª/2ª" casi siempre vacías
-
-═══ FORMATO 2 — LICORS MOYÀ 1890 SL (licorería, bebidas alcohólicas, EN CATALÁN) ═══
-- Cabecera: "ALBARÀ" (no ALBARÁN)
-- Encabezado: Proveedor izq., Cliente "RTE. ES RACO" en medio
-- Tabla: Codi | Descripció | Litres | Graus | Caixes | Unitals | P.V.P | % I.V.A. | Preu Real | Import
-- Columnas raras:
-  • Litres = cantidad en litros (puede ser decimal: 0.70, 1.40)
-  • Graus = grados de alcohol (informativo, ignora)
-  • Caixes = número de cajas (informativo)
-  • Unitals = cantidad de unidades (puede sobreescribir Litres)
-  • P.V.P = Precio Venta Público (ignorar, es de referencia)
-  • Preu Real = PRECIO UNITARIO SIN IVA (usar este)
-  • Import = TOTAL LÍNEA (cantidad × Preu Real)
-- IVA: TODO 21% (bebidas alcohólicas)
-- Pie: "Imp. Brut | B. Imponible | %Iva | Quota I.V.A. | Total Alb"
-- Ejemplo: GIN HENDRICKS 70cl - 1.40L, 23.90€ unitario (sin IVA), 21% IVA, 47.80€ import
-- Nota: Puede tener 1-3 líneas, bareode al final
-
-═══ GUÍA DE DETECCIÓN RÁPIDA DE PROVEEDOR ═══
-
-BUSCA ESTOS PATRONES para identificar qué formato tiene:
-
-✓ FORM DES PLA DE NA TESA SL:
-  - Cabecera: "FORM DES PLA DE NA TESA SL" izquierda
-  - Columnas: Descripción | Vuelta 1ª | Vuelta 2ª | Pr. Iva Incl. | IVA % | Total
-  - Precios CON IVA en "Pr. Iva Incl."
-  - Total línea en columna "Total"
-  - Pie: "Total cantidad:" y "Total: YY.YY €"
-
-✓ LICORS MOYÀ 1890 S.L.:
-  - Cabecera: "LICORS MOYÀ 1890 S.L." o "LICORS MOYÀ" con CIF B07126550
-  - Tipo doc: "ALBARÀ" (catalán, no ALBARÁN)
-  - Cliente: "RTE. ES RACO" o "RACOBLANQUERNA, S.L."
-  - Columnas: Codi | Descripció | Litres | Graus | Caixes | Unitals | P.V.P | % I.V.A. | Preu Real | Import
-  - Precios SIN IVA en "Preu Real"
-  - Total línea en columna "Import"
-  - TODO 21% IVA (bebidas alcohólicas)
-  - Pie: "Imp. Brut | B. Imponible | %Iva | Quota I.V.A. | Total Alb"
-
-═══ REGLA GENERAL PARA MÚLTIPLES FORMATOS ═══
-1. IDENTIFICA el proveedor leyendo cabecera + columnas
-2. LEE LAS CABECERAS DE COLUMNA (español o catalán)
-3. MAPEA: cantidad (Litres/Vuelta/Cant.) → descripción → unitPrice (Preu Real/Pr.Iva Incl.) → IVA% → total (Import/Total)
-4. EXTRAE datos con mapeo correcto
-5. Si ves "Preu Real" → es precio SIN IVA (suma IVA)
-6. Si ves "Pr. Iva Incl." → es precio CON IVA (ya está incluido)
-7. Si ves "Import" o "Total" → es total línea YA CALCULADO (usa directo)
-
-REGLAS CRÍTICAS (para Raco en específico):
-
-1️⃣ PROVEEDOR (obligatorio):
-   - Es el VENDEDOR/EMISOR (cabecera del documento).
-   - NUNCA es "Arume", "Agnès Company" ni "Restaurant" (son RECEPTORES).
-   - Si ves "MAKRO", "GRUPO EKIN", "DISTRIBUCIONES X" → ese es el proveedor.
-   - Busca el CIF/NIF validador junto al nombre legal.
-
-2️⃣ NÚMERO (obligatorio, sino "S/N"):
-   - Ref. del albarán tal cual aparece (NO transformes, NO corrijas).
-   - Puede ser: ALB-001, 2026-0001, 180624, A123, etc.
-
-3️⃣ FECHA (formato YYYY-MM-DD, sino null):
-   - Fecha de EMISIÓN/ENTRADA (NOT entrega ni vencimiento).
-   - Si ves "DD/MM/YYYY" → convierte a YYYY-MM-DD.
-   - Valida: año 2024-2026, mes 01-12, día 01-31.
-   - Si hay duda (ilegible, mal escaneado) → null.
-
-4️⃣ TOTAL_FACTURA (obligatorio, punto decimal, nunca comas):
-   - Total BRUTO (con IVA incluido) tal como aparece en pie.
-   - Suma de todas las líneas + descuentos aplicados.
-   - Si hay descuento global, réstalo del subtotal.
-   - Nunca uses "," como decimal (Python espera "." → será punto).
-
-5️⃣ LINEAS — LO MÁS IMPORTANTE (RACO específico):
-   - Extrae TODAS las líneas de la tabla principal.
-   - Ignora columnas vacías ("Vuelta 1ª", "Vuelta 2ª" casi siempre están en blanco).
-   - Para cada línea: {q, n, t, rate, u}
-     • q (cantidad): número en columna "Vuelta 1ª" (si está), o "1" si está vacía. Puede ser decimal (1.5, 10, 0.25).
-     • n (nombre): descripción en columna "Descripción" (tal cual, sin abreviar).
-     • t (total): el valor de "Total" directamente (ya está con IVA incluido).
-       → IMPORTANTE: este t ya incluye IVA, es lo que pagas.
-     • rate (IVA): el % de la columna "IVA %" (4, 10, 21).
-     • u (unidad): casi siempre "ud" o "uds" en Raco (no hay kg/l usualmente). Si ves peso → "kg", si litros → "l".
-
-6️⃣ DETECCIÓN INTELIGENTE DE IVA:
-   - Si la tabla tiene columna "%IVA" → úsala para cada línea.
-   - Si NO hay columna, busca en el pie "Base 21%" / "IVA 21%" y aplica ese rate a TODAS.
-   - IVA 21% es lo más común en hostelería. 10% en ciertos alimentos. 4% en básicos.
-   - Si TOTAL_FACTURA se ve alto comparado con suma de líneas → IVA está INCLUIDO.
-
-7️⃣ GESTIÓN DE ERRORES OCR:
-   - Texto pequeño/borroso → marcar en "notas_ocr": "Texto pequeño, línea 3 dudosa".
-   - Número ilegible → usar el contexto (¿es cantidad, precio?).
-   - Decimales confusos (0 vs O, 1 vs l) → deducir por magnitud.
-   - NUNCA inventes filas si no las ves claramente.
-
-8️⃣ VALIDACIONES POST-OCR:
-   - Suma de líneas ≈ TOTAL_FACTURA (con margen <5%).
-   - Si no cierra: revisar si hay descuentos globales, gastos extra, impuestos.
-   - Productos en hostelería: nombres comunes (pescado, verdura, aceite, vino, etc.).
-
-EJEMPLOS REALES DE ALBARANES RACO:
-
-EJEMPLO 1 — FORM DES PLA DE NA TESA SL (panadería):
-{
-  "proveedor": "FORM DES PLA DE NA TESA SL",
-  "num": "01-i60.598/2",
-  "fecha": "2026-06-02",
-  "total_factura": 32.00,
-  "lineas": [
-    {"q": 10, "n": "PRECUIT PA AMB MULTICEREAL", "t": 32.00, "rate": 4, "u": "ud"}
-  ],
-  "notas_ocr": null
-}
-NOTA: Pr. Iva Incl.=3.20€ × 10 = 32.00€ total (con 4% IVA ya incluido)
-
-EJEMPLO 2 — LICORS MOYÀ 1890 SL (licorería, en catalán):
-{
-  "proveedor": "LICORS MOYÀ 1890 S.L.",
-  "num": "012600028440",
-  "fecha": "2026-06-25",
-  "total_factura": 177.00,
-  "lineas": [
-    {"q": 1.0, "n": "A TELTEIRA PARCELAS 3/4", "t": 37.62, "rate": 21, "u": "ud"},
-    {"q": 1.4, "n": "GIN HENDRICKS 70cl", "t": 47.80, "rate": 21, "u": "l"},
-    {"q": 0.7, "n": "WHISKY MACALLAN 12 DOUBLE CASK 7", "t": 57.89, "rate": 21, "u": "l"},
-    {"q": 1.0, "n": "LOGISTICA", "t": 2.97, "rate": 21, "u": "ud"}
-  ],
-  "notas_ocr": null
-}
-NOTA: Preu Real=23.90€ (sin IVA) × 1.4L + 21% IVA = 47.80€ en Import (con IVA)
-
-ERRORES FRECUENTES QUE EVITARÁS:
-❌ Nombre proveedor como "ARUME SAKE BAR" (NO, eso es receptor).
-❌ Cantidad 0 o precio negativo (sin marcar como descuento).
-❌ Mezclar líneas de dos tablas diferentes.
-❌ IVA = 0 en líneas normales (valida con el pie de totales).
-❌ Formato fecha: "2026-30-06" (es YYYY-MM-DD, no DD-MM-YYYY).
-❌ Total con coma: "245,67" (debe ser "245.67").
-
-AHORA ANALIZA EL DOCUMENTO Y DEVUELVE SOLO EL JSON (sin triple backticks, sin explicaciones).`;
       const result = await scanDocument(file, prompt, 'claude'); // Force Claude (más preciso que Gemini)
       const raw: any = result.raw;
 
