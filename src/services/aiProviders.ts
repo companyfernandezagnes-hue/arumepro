@@ -228,9 +228,67 @@ const sharpenForOCR = (ctx: CanvasRenderingContext2D, w: number, h: number): voi
   }
 };
 
+// Binarización adaptativa de Otsu: convierte imagen a B/N puro para albaranes
+// de baja calidad (escaneos viejos, fotos con sombras, fondos grises). Solo se
+// aplica si la imagen tiene bajo contraste (<100 en rango de luminancia).
+// Resultado: texto nítido (negro) sobre fondo blanco → OCR casi perfecto.
+const binarizeForOCR = (ctx: CanvasRenderingContext2D, w: number, h: number): void => {
+  try {
+    const src = ctx.getImageData(0, 0, w, h);
+    const d = src.data;
+
+    // 1. Calcular histograma de luminancia
+    const hist = new Uint32Array(256);
+    for (let i = 0; i < d.length; i += 4) {
+      const Y = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) | 0;
+      hist[Y]++;
+    }
+
+    // 2. Otsu's method: encontrar threshold que minimiza varianza intra-clase
+    const N = d.length / 4;
+    let sum = 0, sumB = 0;
+    for (let i = 0; i < 256; i++) sum += i * hist[i];
+
+    let varMax = 0, threshold = 0;
+    let w0 = 0, w1 = N;
+    let mu0 = 0, mu1 = sum;
+
+    for (let i = 0; i < 256; i++) {
+      w0 += hist[i];
+      if (w0 === 0) continue;
+      w1 = N - w0;
+      if (w1 === 0) break;
+
+      sumB += i * hist[i];
+      mu0 = sumB / w0;
+      mu1 = (sum - sumB) / w1;
+
+      const between = w0 * w1 * Math.pow(mu0 - mu1, 2);
+      if (between > varMax) {
+        varMax = between;
+        threshold = i;
+      }
+    }
+
+    // 3. Aplicar threshold: píxeles < threshold = negro (0), >= threshold = blanco (255)
+    const dst = new Uint8ClampedArray(d.length);
+    for (let i = 0; i < d.length; i += 4) {
+      const Y = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) | 0;
+      const val = Y < threshold ? 0 : 255;
+      dst[i] = dst[i + 1] = dst[i + 2] = val;
+      dst[i + 3] = 255;
+    }
+    const imgData = new ImageData(dst, w, h);
+    ctx.putImageData(imgData, 0, 0);
+  } catch {
+    // Si falla (ej: canvas bloqueado), dejamos como estaba.
+  }
+};
+
 // Versión pública del preprocesado, reutilizable desde otros componentes
 // (BulkAlbaranesUpload usa esto antes de enviar a scanBase64 para que las
 // fotos del móvil con orientación EXIF se roten ANTES de llegar a la IA).
+// Aplicamos: rotación EXIF + auto-levels + sharpening + binarización adaptativa
 export const preprocessImageForOCR = (file: File | Blob) => compressImage(file);
 
 const compressImage = async (file: File | Blob): Promise<{ base64: string; mimeType: string }> => {
@@ -266,11 +324,33 @@ const compressImage = async (file: File | Blob): Promise<{ base64: string; mimeT
     // Pipeline de pre-procesado para OCR óptimo:
     //   1. enhanceForOCR — auto-levels + gamma para fotos planas/tickets pálidos
     //   2. sharpenForOCR — afilado de bordes para texto pequeño/borroso
+    //   3. binarizeForOCR — B/N puro (Otsu) SOLO si contraste muy bajo (documentos viejos/sombras)
+    const imgOrig = ctx.getImageData(0, 0, w, h);
+    const lumiHist = new Uint32Array(256);
+    for (let i = 0; i < imgOrig.data.length; i += 4) {
+      const Y = (0.299 * imgOrig.data[i] + 0.587 * imgOrig.data[i + 1] + 0.114 * imgOrig.data[i + 2]) | 0;
+      lumiHist[Y]++;
+    }
+    let lo = 0, hi = 255, acc = 0;
+    const N = imgOrig.data.length / 4;
+    for (let v = 0; v < 256; v++) {
+      acc += lumiHist[v];
+      if (acc >= Math.floor(N * 0.01)) { lo = v; break; }
+    }
+    acc = 0;
+    for (let v = 255; v >= 0; v--) {
+      acc += lumiHist[v];
+      if (acc >= Math.floor(N * 0.01)) { hi = v; break; }
+    }
+    const contrast = hi - lo;
+    const needsBinarize = contrast < 80; // Bajo contraste → aplicar binarización Otsu
+
     enhanceForOCR(ctx, w, h);
-    // Solo aplicar sharpening si la imagen no es enorme (>5MP en este punto)
-    // — evita pre-procesado muy lento con ningún beneficio adicional.
     if (w * h <= 5_000_000) {
       sharpenForOCR(ctx, w, h);
+    }
+    if (needsBinarize) {
+      binarizeForOCR(ctx, w, h);
     }
   }
 

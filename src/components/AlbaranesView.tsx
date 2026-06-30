@@ -516,33 +516,157 @@ export const AlbaranesView = ({ data, onSave }: AlbaranesViewProps) => {
   const processLocalFile = async (file: File) => {
     setIsScanning(true);
     try {
-      const prompt = `Eres un OCR contable especializado en albaranes y facturas comerciales españoles. Analiza este documento y devuelve SOLO JSON, sin markdown:
-{"proveedor":"Nombre legal del EMISOR (NO Arume)","num":"Número del documento","fecha":"YYYY-MM-DD","total_factura":0,"lineas":[{"q":1,"n":"Producto","t":10.50,"rate":10,"u":"kg"}]}
+      const prompt = `Eres un OCR EXPERTO en albaranes y facturas comerciales españoles. Tu precisión es crítica — los números errados cuestan dinero.
 
-REGLAS:
-- PROVEEDOR = EMISOR del documento (quien vende). El receptor SIEMPRE es Arume / Agnès Company — NUNCA es eso, es la receptora. Busca el nombre legal del emisor en cabecera junto al CIF/NIF.
-- FECHA = emisión del documento (no entrega ni vencimiento). YYYY-MM-DD con año 4 dígitos. Convierte DD/MM/YYYY si lo ves así. Si no es clara → null. Año esperado: 2024-2026.
-- NUM = ref tal cual aparece. Si no hay → "S/N".
-- TOTAL_FACTURA = importe total con IVA. Punto decimal.
-- LINEAS: q=cantidad, n=producto, t=total línea con IVA, rate=% IVA (4/10/21), u=unidad (kg/l/ud).
-- null si no estás segura. NUNCA inventes datos.`;
+DEVUELVE ÚNICAMENTE JSON, sin markdown:
+{
+  "proveedor": "Nombre legal del EMISOR (quien vende)",
+  "num": "Referencia del documento",
+  "fecha": "YYYY-MM-DD",
+  "total_factura": 0,
+  "lineas": [{"q": 1, "n": "Producto", "t": 10.50, "rate": 10, "u": "kg"}],
+  "notas_ocr": "Cualquier ambigüedad o dato dudoso aquí"
+}
+
+ESTRUCTURA TÍPICA DE ALBARÁN ESPAÑOL:
+- Encabezado: nombre proveedor (EMISOR), CIF/NIF, dirección, teléfono
+- Tabla: CANTIDAD | UNIDAD | DESCRIPCIÓN | P.UNIT | TOTAL | %IVA
+- Pie: Base imponible por tramo IVA (4%, 10%, 21%), total sin/con IVA, descuentos
+
+REGLAS CRÍTICAS:
+
+1️⃣ PROVEEDOR (obligatorio):
+   - Es el VENDEDOR/EMISOR (cabecera del documento).
+   - NUNCA es "Arume", "Agnès Company" ni "Restaurant" (son RECEPTORES).
+   - Si ves "MAKRO", "GRUPO EKIN", "DISTRIBUCIONES X" → ese es el proveedor.
+   - Busca el CIF/NIF validador junto al nombre legal.
+
+2️⃣ NÚMERO (obligatorio, sino "S/N"):
+   - Ref. del albarán tal cual aparece (NO transformes, NO corrijas).
+   - Puede ser: ALB-001, 2026-0001, 180624, A123, etc.
+
+3️⃣ FECHA (formato YYYY-MM-DD, sino null):
+   - Fecha de EMISIÓN/ENTRADA (NOT entrega ni vencimiento).
+   - Si ves "DD/MM/YYYY" → convierte a YYYY-MM-DD.
+   - Valida: año 2024-2026, mes 01-12, día 01-31.
+   - Si hay duda (ilegible, mal escaneado) → null.
+
+4️⃣ TOTAL_FACTURA (obligatorio, punto decimal, nunca comas):
+   - Total BRUTO (con IVA incluido) tal como aparece en pie.
+   - Suma de todas las líneas + descuentos aplicados.
+   - Si hay descuento global, réstalo del subtotal.
+   - Nunca uses "," como decimal (Python espera "." → será punto).
+
+5️⃣ LINEAS — LO MÁS IMPORTANTE:
+   - Extrae TODAS las líneas de la tabla principal.
+   - Ignora: gastos de envío, embalaje, etc. (a menos que esté dentro de tabla).
+   - Para cada línea: {q, n, t, rate, u}
+     • q (cantidad): número puro (decimales con punto: 1.5, 10, 0.25).
+     • n (nombre): descripción tal cual (sin abreviar, mantén mayúscula/minúscula).
+     • t (total): importe de esa línea (q × precio_unit), con IVA si la línea lo especifica.
+     • rate (IVA): 4, 10, 21 (detecta de la columna %IVA o del pie de totales).
+     • u (unidad): kg, l, ud, uds, g, gr, ml, x, etc. Normaliza: "kgs"→"kg", "litro"→"l".
+
+6️⃣ DETECCIÓN INTELIGENTE DE IVA:
+   - Si la tabla tiene columna "%IVA" → úsala para cada línea.
+   - Si NO hay columna, busca en el pie "Base 21%" / "IVA 21%" y aplica ese rate a TODAS.
+   - IVA 21% es lo más común en hostelería. 10% en ciertos alimentos. 4% en básicos.
+   - Si TOTAL_FACTURA se ve alto comparado con suma de líneas → IVA está INCLUIDO.
+
+7️⃣ GESTIÓN DE ERRORES OCR:
+   - Texto pequeño/borroso → marcar en "notas_ocr": "Texto pequeño, línea 3 dudosa".
+   - Número ilegible → usar el contexto (¿es cantidad, precio?).
+   - Decimales confusos (0 vs O, 1 vs l) → deducir por magnitud.
+   - NUNCA inventes filas si no las ves claramente.
+
+8️⃣ VALIDACIONES POST-OCR:
+   - Suma de líneas ≈ TOTAL_FACTURA (con margen <5%).
+   - Si no cierra: revisar si hay descuentos globales, gastos extra, impuestos.
+   - Productos en hostelería: nombres comunes (pescado, verdura, aceite, vino, etc.).
+
+EJEMPLO CORRECTO de albarán hostelería:
+{
+  "proveedor": "MAKRO CASH AND CARRY",
+  "num": "ALB-20260630-001",
+  "fecha": "2026-06-30",
+  "total_factura": 245.67,
+  "lineas": [
+    {"q": 5, "n": "SALMÓN AHUMADO (kg)", "t": 125.00, "rate": 10, "u": "kg"},
+    {"q": 2.5, "n": "ACEITE OLIVA VIRGEN (L)", "t": 45.50, "rate": 10, "u": "l"},
+    {"q": 1, "n": "DESCUENTO VOLUMEN", "t": -5.00, "rate": 0, "u": "ud"},
+    {"q": 12, "n": "AGUA MINERAL (botellas 1.5L)", "t": 3.60, "rate": 10, "u": "ud"}
+  ],
+  "notas_ocr": "Línea 2: unidad detectada por contexto (litros de aceite). Descuento global validado contra pie."
+}
+
+ERRORES FRECUENTES QUE EVITARÁS:
+❌ Nombre proveedor como "ARUME SAKE BAR" (NO, eso es receptor).
+❌ Cantidad 0 o precio negativo (sin marcar como descuento).
+❌ Mezclar líneas de dos tablas diferentes.
+❌ IVA = 0 en líneas normales (valida con el pie de totales).
+❌ Formato fecha: "2026-30-06" (es YYYY-MM-DD, no DD-MM-YYYY).
+❌ Total con coma: "245,67" (debe ser "245.67").
+
+AHORA ANALIZA EL DOCUMENTO Y DEVUELVE SOLO EL JSON (sin triple backticks, sin explicaciones).`;
       const result = await scanDocument(file, prompt);
       const raw: any = result.raw;
-      // Si la IA no extrajo líneas, prefiero dejarlo a la usuaria que rellenarle
-      // medio formulario y que pulse guardar pensando que está completo.
+
+      // Validación post-OCR: verificar integridad de datos
       if (!Array.isArray(raw?.lineas) || raw.lineas.length === 0) {
-        toast.warning('La IA no pudo extraer las líneas del albarán. Rellénalo a mano para no perder datos.');
+        toast.warning('⚠️ La IA no extrajo líneas. Posible: imagen muy oscura, texto muy pequeño, o formato raro. Rellena a mano para no perder datos.');
         return;
       }
+
+      // Validar y limpiar líneas extraídas
+      const validLineas = raw.lineas.filter((l: any) => {
+        const hasQ = typeof l.q === 'number' && l.q > 0;
+        const hasN = typeof l.n === 'string' && l.n.trim().length > 0;
+        const hasT = typeof l.t === 'number';
+        return hasQ && hasN && hasT;
+      });
+
+      if (validLineas.length === 0) {
+        toast.warning('⚠️ Las líneas extraídas estaban vacías o mal formadas. Rellena el albarán a mano.');
+        return;
+      }
+
+      // Verificar consistencia: suma de líneas vs total factura
+      const sumLineas = validLineas.reduce((s: number, l: any) => s + (l.t || 0), 0);
+      const totalEsperado = raw.total_factura || 0;
+      const diferencia = Math.abs(sumLineas - totalEsperado);
+      const tolerancia = Math.max(5, totalEsperado * 0.02); // 5€ o 2% del total
+
+      let alerta = '';
+      if (diferencia > tolerancia) {
+        alerta = `⚠️ Suma de líneas (${Num.fmt(sumLineas)}) NO coincide con total (${Num.fmt(totalEsperado)}). Dif: ${Num.fmt(diferencia)}€. Revisa si hay descuentos globales o gastos de envío.`;
+      }
+
+      // Validar fecha
+      if (raw.fecha && !/^\d{4}-\d{2}-\d{2}$/.test(raw.fecha)) {
+        alerta = (alerta ? alerta + '\n' : '') + `⚠️ Fecha "${raw.fecha}" tiene formato raro. Úsala o corrígela manualmente.`;
+      }
+
+      // Validar proveedor (no sea Arume/receptor)
+      const provNorm = basicNorm(raw.proveedor || '');
+      if (provNorm.includes('arume') || provNorm.includes('agnes') || provNorm.includes('restaurant')) {
+        alerta = (alerta ? alerta + '\n' : '') + `⚠️ Proveedor parece ser RECEPTOR (Arume/Agnes). Verifica que no sea error de OCR.`;
+      }
+
       setForm(prev => ({
         ...prev,
         prov: raw.proveedor || '',
-        num: raw.num || '',
+        num: raw.num || 'S/N',
         date: raw.fecha || DateUtil.today(),
-        expectedTotal: raw.total_factura || null,
-        text: raw.lineas.map((l: any) => `${l.q} ${l.u || 'uds'} ${l.n} ${l.rate}% ${l.t}`).join('\n'),
+        expectedTotal: totalEsperado > 0 ? totalEsperado : null,
+        text: validLineas.map((l: any) => `${l.q} ${l.u || 'uds'} ${l.n} ${l.rate || 10}% ${Num.round2(l.t)}`).join('\n'),
+        notes: (raw.notas_ocr || '') + (alerta ? `\n[ALERTA OCR] ${alerta}` : ''),
       }));
-      toast.success('IA completada. Revisa los campos antes de guardar.');
+
+      if (alerta) {
+        toast.warning(alerta);
+      } else {
+        toast.success('✅ Albarán escaneado correctamente. Revisa antes de guardar.');
+      }
     } catch (err: any) {
       const msg = err?.message || '';
       if (/high demand|overloaded|503|429|rate.?limit/i.test(msg)) {
