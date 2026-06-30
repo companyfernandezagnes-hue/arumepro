@@ -528,21 +528,62 @@ DEVUELVE ÚNICAMENTE JSON VÁLIDO, sin markdown, sin backticks, sin explicacione
   "notas_ocr": "Cualquier ambigüedad o dato dudoso"
 }
 
-ESTRUCTURA REAL DE ALBARÁN RACO (basado en tus documentos):
-- Encabezado IZQUIERDA: Proveedor (ej: "FORM DES PLA DE NA TESA SL"), CIF, dirección, email, teléfono
-- Encabezado DERECHA: Receptor (ej: "RACOBLANQUERNA SL"), CIF, dirección (esto ES Raçó/Raco, NUNCA lo pongas como proveedor)
-- Datos: Nota de Entrega (ej: "01-i60.598/2"), Fecha (ej: "02/06/2026" → convertir a "2026-06-02"), Nº Pedido
-- Tabla RACO: Descripción | Vuelta 1ª | Vuelta 2ª | Pr. Iva Incl. | IVA % | Total
-  • "Vuelta 1ª/2ª" = números de entrega/devolución (ignora si vacíos)
-  • "Pr. Iva Incl." = PRECIO UNITARIO CON IVA (importante: ya incluye IVA)
-  • "IVA %" = tipo de IVA (4, 10, 21)
-  • "Total" = cantidad × Pr. Iva Incl. = total línea CON IVA
-- Pie: "Total cantidad: X.XX", "Total: YY.YY €"
-- NOTAS IMPORTANTES:
-  • Las columnas "Vuelta 1ª/2ª" suelen estar vacías (las rellena Raco)
-  • El formato es tabla simple (no compleja)
-  • Todos los precios están YA CON IVA incluido
-  • El total final es el importe a pagar directamente
+ESTRUCTURAS DE ALBARANES RACO (múltiples proveedores, múltiples formatos):
+
+═══ FORMATO 1 — FORM DES PLA DE NA TESA SL (panadería, proveedores locales) ═══
+- Encabezado: Proveedor izq., Receptor RACOBLANQUERNA derecha
+- Tabla: Descripción | Vuelta 1ª | Vuelta 2ª | Pr. Iva Incl. | IVA % | Total
+- Precios: YA CON IVA incluido
+- Pie: "Total cantidad: X", "Total: YY.YY €"
+- Ejemplo: PRECUIT PA AMB MULTICEREAL - 10 uds, 3.20€ c/u (con IVA), 4% IVA, 32.00€ total
+- Nota: "Vuelta 1ª/2ª" casi siempre vacías
+
+═══ FORMATO 2 — LICORS MOYÀ 1890 SL (licorería, bebidas alcohólicas, EN CATALÁN) ═══
+- Cabecera: "ALBARÀ" (no ALBARÁN)
+- Encabezado: Proveedor izq., Cliente "RTE. ES RACO" en medio
+- Tabla: Codi | Descripció | Litres | Graus | Caixes | Unitals | P.V.P | % I.V.A. | Preu Real | Import
+- Columnas raras:
+  • Litres = cantidad en litros (puede ser decimal: 0.70, 1.40)
+  • Graus = grados de alcohol (informativo, ignora)
+  • Caixes = número de cajas (informativo)
+  • Unitals = cantidad de unidades (puede sobreescribir Litres)
+  • P.V.P = Precio Venta Público (ignorar, es de referencia)
+  • Preu Real = PRECIO UNITARIO SIN IVA (usar este)
+  • Import = TOTAL LÍNEA (cantidad × Preu Real)
+- IVA: TODO 21% (bebidas alcohólicas)
+- Pie: "Imp. Brut | B. Imponible | %Iva | Quota I.V.A. | Total Alb"
+- Ejemplo: GIN HENDRICKS 70cl - 1.40L, 23.90€ unitario (sin IVA), 21% IVA, 47.80€ import
+- Nota: Puede tener 1-3 líneas, bareode al final
+
+═══ GUÍA DE DETECCIÓN RÁPIDA DE PROVEEDOR ═══
+
+BUSCA ESTOS PATRONES para identificar qué formato tiene:
+
+✓ FORM DES PLA DE NA TESA SL:
+  - Cabecera: "FORM DES PLA DE NA TESA SL" izquierda
+  - Columnas: Descripción | Vuelta 1ª | Vuelta 2ª | Pr. Iva Incl. | IVA % | Total
+  - Precios CON IVA en "Pr. Iva Incl."
+  - Total línea en columna "Total"
+  - Pie: "Total cantidad:" y "Total: YY.YY €"
+
+✓ LICORS MOYÀ 1890 S.L.:
+  - Cabecera: "LICORS MOYÀ 1890 S.L." o "LICORS MOYÀ" con CIF B07126550
+  - Tipo doc: "ALBARÀ" (catalán, no ALBARÁN)
+  - Cliente: "RTE. ES RACO" o "RACOBLANQUERNA, S.L."
+  - Columnas: Codi | Descripció | Litres | Graus | Caixes | Unitals | P.V.P | % I.V.A. | Preu Real | Import
+  - Precios SIN IVA en "Preu Real"
+  - Total línea en columna "Import"
+  - TODO 21% IVA (bebidas alcohólicas)
+  - Pie: "Imp. Brut | B. Imponible | %Iva | Quota I.V.A. | Total Alb"
+
+═══ REGLA GENERAL PARA MÚLTIPLES FORMATOS ═══
+1. IDENTIFICA el proveedor leyendo cabecera + columnas
+2. LEE LAS CABECERAS DE COLUMNA (español o catalán)
+3. MAPEA: cantidad (Litres/Vuelta/Cant.) → descripción → unitPrice (Preu Real/Pr.Iva Incl.) → IVA% → total (Import/Total)
+4. EXTRAE datos con mapeo correcto
+5. Si ves "Preu Real" → es precio SIN IVA (suma IVA)
+6. Si ves "Pr. Iva Incl." → es precio CON IVA (ya está incluido)
+7. Si ves "Import" o "Total" → es total línea YA CALCULADO (usa directo)
 
 REGLAS CRÍTICAS (para Raco en específico):
 
@@ -596,7 +637,9 @@ REGLAS CRÍTICAS (para Raco en específico):
    - Si no cierra: revisar si hay descuentos globales, gastos extra, impuestos.
    - Productos en hostelería: nombres comunes (pescado, verdura, aceite, vino, etc.).
 
-EJEMPLO CORRECTO de albarán RACO (basado en tus documentos):
+EJEMPLOS REALES DE ALBARANES RACO:
+
+EJEMPLO 1 — FORM DES PLA DE NA TESA SL (panadería):
 {
   "proveedor": "FORM DES PLA DE NA TESA SL",
   "num": "01-i60.598/2",
@@ -607,8 +650,23 @@ EJEMPLO CORRECTO de albarán RACO (basado en tus documentos):
   ],
   "notas_ocr": null
 }
+NOTA: Pr. Iva Incl.=3.20€ × 10 = 32.00€ total (con 4% IVA ya incluido)
 
-NOTA: el precio 3,20€ en "Pr. Iva Incl." × 10 uds = 32.00€ en "Total" (ya con 4% IVA incluido).
+EJEMPLO 2 — LICORS MOYÀ 1890 SL (licorería, en catalán):
+{
+  "proveedor": "LICORS MOYÀ 1890 S.L.",
+  "num": "012600028440",
+  "fecha": "2026-06-25",
+  "total_factura": 177.00,
+  "lineas": [
+    {"q": 1.0, "n": "A TELTEIRA PARCELAS 3/4", "t": 37.62, "rate": 21, "u": "ud"},
+    {"q": 1.4, "n": "GIN HENDRICKS 70cl", "t": 47.80, "rate": 21, "u": "l"},
+    {"q": 0.7, "n": "WHISKY MACALLAN 12 DOUBLE CASK 7", "t": 57.89, "rate": 21, "u": "l"},
+    {"q": 1.0, "n": "LOGISTICA", "t": 2.97, "rate": 21, "u": "ud"}
+  ],
+  "notas_ocr": null
+}
+NOTA: Preu Real=23.90€ (sin IVA) × 1.4L + 21% IVA = 47.80€ en Import (con IVA)
 
 ERRORES FRECUENTES QUE EVITARÁS:
 ❌ Nombre proveedor como "ARUME SAKE BAR" (NO, eso es receptor).
