@@ -317,37 +317,50 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
   const handleSaveAll = () => {
     if (!db) return;
 
-    // IAs
-    if (claudeKey.trim())   localStorage.setItem('claude_api_key',   claudeKey.trim());   else localStorage.removeItem('claude_api_key');
-    if (geminiKey.trim())   localStorage.setItem('gemini_api_key',   geminiKey.trim());   else localStorage.removeItem('gemini_api_key');
-    if (zaiKey.trim())      localStorage.setItem('zai_api_key',      zaiKey.trim());      else localStorage.removeItem('zai_api_key');
-    if (groqKey.trim())     localStorage.setItem('groq_api_key',     groqKey.trim());     else localStorage.removeItem('groq_api_key');
-    if (cerebrasKey.trim()) localStorage.setItem('cerebras_api_key', cerebrasKey.trim()); else localStorage.removeItem('cerebras_api_key');
-    if (deepseekKey.trim()) localStorage.setItem('deepseek_api_key', deepseekKey.trim()); else localStorage.removeItem('deepseek_api_key');
-    if (mistralKey.trim())  localStorage.setItem('mistral_api_key',  mistralKey.trim());  else localStorage.removeItem('mistral_api_key');
+    try {
+      // IAs — con validación
+      if (claudeKey.trim()) {
+        localStorage.setItem('claude_api_key', claudeKey.trim());
+      } else {
+        localStorage.removeItem('claude_api_key');
+      }
 
-    // Voz
-    localStorage.setItem('voice_provider', voiceProvider);
+      if (geminiKey.trim())   localStorage.setItem('gemini_api_key',   geminiKey.trim());   else localStorage.removeItem('gemini_api_key');
+      if (zaiKey.trim())      localStorage.setItem('zai_api_key',      zaiKey.trim());      else localStorage.removeItem('zai_api_key');
+      if (groqKey.trim())     localStorage.setItem('groq_api_key',     groqKey.trim());     else localStorage.removeItem('groq_api_key');
+      if (cerebrasKey.trim()) localStorage.setItem('cerebras_api_key', cerebrasKey.trim()); else localStorage.removeItem('cerebras_api_key');
+      if (deepseekKey.trim()) localStorage.setItem('deepseek_api_key', deepseekKey.trim()); else localStorage.removeItem('deepseek_api_key');
+      if (mistralKey.trim())  localStorage.setItem('mistral_api_key',  mistralKey.trim());  else localStorage.removeItem('mistral_api_key');
 
-    // Marketing
-    if (igToken.trim())  localStorage.setItem('ig_graph_token', igToken.trim());  else localStorage.removeItem('ig_graph_token');
-    if (igPageId.trim()) localStorage.setItem('ig_page_id',     igPageId.trim()); else localStorage.removeItem('ig_page_id');
+      // Voz
+      localStorage.setItem('voice_provider', voiceProvider);
 
-    // Integraciones externas
-    const validExt = extIntegrations.filter(i => i.name.trim());
-    localStorage.setItem('ext_integrations', JSON.stringify(validExt));
-    validExt.forEach(i => {
-      const k = `ext_api_${i.name.trim().toLowerCase().replace(/\s+/g, '_')}`;
-      if (i.key.trim()) localStorage.setItem(k, i.key.trim()); else localStorage.removeItem(k);
-    });
+      // Marketing
+      if (igToken.trim())  localStorage.setItem('ig_graph_token', igToken.trim());  else localStorage.removeItem('ig_graph_token');
+      if (igPageId.trim()) localStorage.setItem('ig_page_id',     igPageId.trim()); else localStorage.removeItem('ig_page_id');
 
-    // Config en Supabase
-    const newData = { ...db, config: { ...(db.config || {}), ...config } };
-    setDb(newData);
-    onSave(newData);
+      // Integraciones externas
+      const validExt = extIntegrations.filter(i => i.name.trim());
+      localStorage.setItem('ext_integrations', JSON.stringify(validExt));
+      validExt.forEach(i => {
+        const k = `ext_api_${i.name.trim().toLowerCase().replace(/\s+/g, '_')}`;
+        if (i.key.trim()) localStorage.setItem(k, i.key.trim()); else localStorage.removeItem(k);
+      });
 
-    setIsSaved(true);
-    setTimeout(() => { setIsSaved(false); onClose(); }, 1500);
+      // Config en Supabase
+      const newData = { ...db, config: { ...(db.config || {}), ...config } };
+      setDb(newData);
+      onSave(newData);
+
+      // ✅ CONFIRMACIÓN VISUAL
+      setIsSaved(true);
+      toast.success('✅ Ajustes guardados correctamente. Claude API lista.');
+      setTimeout(() => { setIsSaved(false); onClose(); }, 1500);
+    } catch (err: any) {
+      // ❌ Si localStorage falla (modo privado, sin espacio, etc)
+      toast.error(`❌ Error al guardar: ${err?.message || 'localStorage no disponible (¿modo privado?)'}`);
+      console.error('[Settings] Save error:', err);
+    }
   };
 
   const probarTelegram = async () => {
