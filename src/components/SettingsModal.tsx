@@ -318,6 +318,25 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
     if (!db) return;
 
     try {
+      // 🧹 LIMPIEZA automática: si localStorage está casi lleno, borra datos viejos
+      try {
+        const quotaUsage = (JSON.stringify(localStorage).length / (1024 * 1024)).toFixed(2);
+        if (parseFloat(quotaUsage) > 4) { // Si usa más de 4MB
+          console.log(`[Settings] localStorage casi lleno (${quotaUsage}MB). Limpiando...`);
+          // Elimina datos de debug/temporales que no son críticos
+          const keysToClean = [
+            'arume_debug_logs', 'ai_diagnostics', 'temp_uploads', 'cache_',
+            'history_prices_old', 'backup_old', 'sync_state'
+          ];
+          for (const key of Object.keys(localStorage)) {
+            if (keysToClean.some(k => key.includes(k))) {
+              localStorage.removeItem(key);
+            }
+          }
+          toast.info('🧹 Se limpió espacio. Intentando guardar...');
+        }
+      } catch { /* ignore cleanup errors */ }
+
       // IAs — con validación
       if (claudeKey.trim()) {
         localStorage.setItem('claude_api_key', claudeKey.trim());
