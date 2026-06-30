@@ -63,6 +63,7 @@ interface ParsedAlbaran {
   proveedor: string;
   num: string;
   fecha: string;
+  pagina?: string;      // Ej: "1 de 3", "page_1_of_3" — para detectar multi-página
   total: number;        // total con IVA (alias de totales.total para compatibilidad)
   totales?: ParsedTotales;
   lineas: ParsedLinea[];
@@ -853,10 +854,14 @@ export const BulkAlbaranesUpload: React.FC<BulkAlbaranesUploadProps> = ({
           ? raw.alertas.map((a: any) => String(a)).filter(Boolean)
           : [];
 
+        // 🔴 MULTI-PÁGINA: extraer campo "pagina" si está (ej: "1 de 3")
+        const paginaStr = String(raw.pagina || '').trim() || undefined;
+
         const parsed: ParsedAlbaran = {
           proveedor: String(raw.proveedor || '').trim(),
           num: String(raw.num || '').trim() || 'S/N',
           fecha: String(raw.fecha || '').trim(),
+          ...(paginaStr ? { pagina: paginaStr } : {}),
           // Total canónico = totales.total. Si la IA no lo dio, suma de líneas.
           total: totales.total || 0,
           totales,
@@ -936,6 +941,55 @@ Si no lo ves claramente, devuelve null. NO inventes.`;
               console.warn(`[BulkAlbaranes] Rotación ${deg}° falló:`, e);
             }
           }
+        }
+
+        // 🔴 MULTI-PÁGINA: Detectar si este albarán es continuación de uno anterior
+        // Buscar en batchSeen si hay un albarán con el MISMO num
+        // Si lo hay Y este tiene pagina diferente → es multi-página
+        const prevMultiPageMatch = Array.from(batchSeen.entries()).find(
+          ([_, prev]) => prev.parsed.num === parsed.num && prev.parsed.num !== 'S/N'
+        );
+
+        if (prevMultiPageMatch && paginaStr) {
+          // ¡MULTI-PÁGINA DETECTADA! Fusionar líneas con el anterior
+          const [prevKey, { id: prevId, parsed: prevParsed }] = prevMultiPageMatch;
+          console.log(`[MultiPage] ${parsed.num}: ${prevParsed.pagina} + ${paginaStr} = fusionadas`);
+
+          // Merge: sumar líneas + totales
+          const lineasMerged = [...(prevParsed.lineas || []), ...normLineas];
+          const totalesMerged: ParsedTotales = {
+            base: Num.round2((prevParsed.totales?.base || 0) + (totales.base || 0)),
+            iva: Num.round2((prevParsed.totales?.iva || 0) + (totales.iva || 0)),
+            total: Num.round2((prevParsed.totales?.total || 0) + (totales.total || 0)),
+            descuento: Num.round2((prevParsed.totales?.descuento || 0) + (totales.descuento || 0)),
+            by_rate: (() => {
+              const merged: Record<string, { base: number; iva: number; total: number }> = {};
+              for (const rate of ['4', '10', '21']) {
+                merged[rate] = {
+                  base: Num.round2((prevParsed.totales?.by_rate?.[rate]?.base || 0) + (totales.by_rate?.[rate]?.base || 0)),
+                  iva: Num.round2((prevParsed.totales?.by_rate?.[rate]?.iva || 0) + (totales.by_rate?.[rate]?.iva || 0)),
+                  total: Num.round2((prevParsed.totales?.by_rate?.[rate]?.total || 0) + (totales.by_rate?.[rate]?.total || 0)),
+                };
+              }
+              return merged;
+            })(),
+          };
+
+          // Actualizar el anterior con los datos fusionados
+          prevParsed.lineas = lineasMerged;
+          prevParsed.totales = totalesMerged;
+          prevParsed.total = totalesMerged.total;
+          // Actualizar indicador de página
+          const paginaIndicador = `${prevParsed.pagina || '1'} + ${paginaStr}`;
+          prevParsed.pagina = paginaIndicador;
+
+          // Marcar ESTE entrada como "parte de multi-página"
+          setEntries(prev => prev.map(e =>
+            e.id === entry.id
+              ? { ...e, status: { kind: 'duplicate-meta', existing: { id: prevId, date: prevParsed.fecha, prov: prevParsed.proveedor, num: prevParsed.num, total: String(prevParsed.total) }, parsed } }
+              : e
+          ));
+          return;
         }
 
         // Validación post-IA — detecta señales de "se leyó mal" para marcar

@@ -28,6 +28,7 @@ DEVUELVE SOLO JSON VÁLIDO (sin markdown, sin backticks, sin explicaciones):
   "proveedor": "string|null",
   "nif": "string|null",
   "num": "string|null",
+  "pagina": "string|null",  // Ej: "1 de 3", "page_1_of_3", null si no aparece
   "fecha": "YYYY-MM-DD|null",
   "lineas": [
     {
@@ -83,6 +84,10 @@ FECHA: YYYY-MM-DD (emisión, no pago). Convierte DD/MM/YYYY si lo ves.
 - Si no clara → null
 
 NUM: Referencia tal cual (con guiones/letras). Si no hay → "S/N"
+⚠️ CRÍTICO PARA MULTI-PÁGINA: El número del albarán es lo MÁS IMPORTANTE.
+   - Algunos distribuidores ponen "Página 1 de 3" o "1/3" → EXTRAE ESO TAMBIÉN
+   - Si ves "A-2703" en página 1 y "A-2703" en página 2 = MISMO ALBARÁN, NO duplicar
+   - Incluye en el JSON el campo "pagina" si lo ves (ej: "1 de 3" o "page_1_of_3")
 
 LÍNEAS — IMPORTANTÍSIMO:
 - q = cantidad (número puro, puede ser decimal: 1.5, 0.7)
