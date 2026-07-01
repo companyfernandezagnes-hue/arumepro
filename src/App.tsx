@@ -589,17 +589,23 @@ function AppContent() {
 
   // 🔄 Realtime listener con deduplicación (evita reloads en rápida sucesión)
   const lastRealtimeReloadRef = useRef<number>(0);
+  const reloadDataRef = useRef(reloadData);
+
+  useEffect(() => {
+    reloadDataRef.current = reloadData;
+  }, [reloadData]);
+
   useEffect(() => {
     const channel = supabase.channel(`arume-changes-${empresaActiva}`, { config: { broadcast: { self: false } } }).on('postgres_changes', { event: '*', schema: 'public', table: 'arume_data', filter: `empresa_id=eq.${empresaActiva}` }, () => {
       const now = Date.now();
       // Deduplicar: máximo 1 reload cada 5 segundos
       if (now - lastRealtimeReloadRef.current > 5000) {
         lastRealtimeReloadRef.current = now;
-        reloadData();
+        reloadDataRef.current();
       }
     }).subscribe();
     return () => { try { supabase.removeChannel(channel); } catch { /* noop */ } };
-  }, [reloadData, empresaActiva]);
+  }, [empresaActiva]);
 
   const REQUIRED: (keyof AppData)[] = ['banco','platos','recetas','ingredientes','ventas_menu','cierres','facturas','albaranes','gastos_fijos', 'socios', 'control_pagos', 'cierres_mensuales', 'activos'];
   
