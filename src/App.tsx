@@ -570,15 +570,35 @@ function AppContent() {
   useEffect(() => {
     PushService.registerSW();
   }, []);
+  // 🔥 CRÍTICO FIX: runScheduled no debería ejecutarse cada render
+  // Crear un intervalo global de 5 minutos
   useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (dataRef.current) {
+        ArumeAgent.runScheduled(dataRef.current);
+      }
+    }, 5 * 60_000); // Cada 5 minutos (NO en cada render)
+
+    // Ejecutar una vez al cargar
     if (!loading && db) {
       PushService.runSmartChecks(db);
       ArumeAgent.runScheduled(db);
     }
-  }, [loading, db]);
 
+    return () => clearInterval(timer);
+  }, [loading]); // QUITAR db de dependencias
+
+  // 🔄 Realtime listener con deduplicación (evita reloads en rápida sucesión)
+  const lastRealtimeReloadRef = useRef<number>(0);
   useEffect(() => {
-    const channel = supabase.channel(`arume-changes-${empresaActiva}`, { config: { broadcast: { self: false } } }).on('postgres_changes', { event: '*', schema: 'public', table: 'arume_data', filter: `empresa_id=eq.${empresaActiva}` }, () => { reloadData(); }).subscribe();
+    const channel = supabase.channel(`arume-changes-${empresaActiva}`, { config: { broadcast: { self: false } } }).on('postgres_changes', { event: '*', schema: 'public', table: 'arume_data', filter: `empresa_id=eq.${empresaActiva}` }, () => {
+      const now = Date.now();
+      // Deduplicar: máximo 1 reload cada 5 segundos
+      if (now - lastRealtimeReloadRef.current > 5000) {
+        lastRealtimeReloadRef.current = now;
+        reloadData();
+      }
+    }).subscribe();
     return () => { try { supabase.removeChannel(channel); } catch { /* noop */ } };
   }, [reloadData, empresaActiva]);
 
