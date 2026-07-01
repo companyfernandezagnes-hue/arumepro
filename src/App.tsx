@@ -78,7 +78,6 @@ const TAB_LABELS: Record<TabKey, string> = {
   agente: 'Agente',
 };
 
-const jsonSafeClone = <T,>(obj: T): T => { try { return JSON.parse(JSON.stringify(obj)); } catch { return obj; } };
 
 /* =======================================================
  * COMPRESOR DE IMÁGENES
@@ -571,13 +570,13 @@ function AppContent() {
     PushService.registerSW();
   }, []);
   // 🔥 CRÍTICO FIX: runScheduled no debería ejecutarse cada render
-  // Crear un intervalo global de 5 minutos
+  // Crear un intervalo global de 10 minutos (reducido desde 5min para SMALL compute)
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (dataRef.current) {
+      if (!document.hidden && dataRef.current) {
         ArumeAgent.runScheduled(dataRef.current);
       }
-    }, 5 * 60_000); // Cada 5 minutos (NO en cada render)
+    }, 10 * 60_000); // Cada 10 minutos (NO ejecutar si app está en background)
 
     // Ejecutar una vez al cargar
     if (!loading && db) {
@@ -586,7 +585,7 @@ function AppContent() {
     }
 
     return () => clearInterval(timer);
-  }, [loading]); // QUITAR db de dependencias
+  }, []);
 
   // 🔄 Realtime listener con deduplicación (evita reloads en rápida sucesión)
   const lastRealtimeReloadRef = useRef<number>(0);
@@ -663,7 +662,7 @@ function AppContent() {
   const lastPayloadRef = useRef<AppData | null>(null);
 
   const handleSave = useCallback(async (newData: AppData) => {
-    lastPayloadRef.current = jsonSafeClone(newData);
+    lastPayloadRef.current = newData;
     if (isSyncingRef.current) return;
     isSyncingRef.current = true; setIsSyncing(true);
     try {
