@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   LayoutDashboard, Wallet, ArrowUpRight, ArrowDownRight,
   TrendingDown, TrendingUp, Building2, Hotel, ShoppingBag, Users, SplitSquareHorizontal,
-  ChevronLeft, ChevronRight, CheckCircle2, Mail, Loader2,
+  ChevronLeft, ChevronRight, CheckCircle2, Loader2,
   Sparkles, Coffee, ChefHat, AlertTriangle, Zap,
   CreditCard, Package, Clock, ExternalLink, CalendarCheck,
   Landmark, Receipt, Bell, Plus, Upload,
@@ -209,8 +209,6 @@ export const DashboardView = ({ data, onNavigate, onSave }: DashboardViewProps) 
   const [selectedMonth,   setSelectedMonth]   = useState(new Date().getMonth());
   const [selectedQuarter, setSelectedQuarter] = useState(Math.floor(new Date().getMonth()/3)+1);
   const [selectedYear,    setSelectedYear]    = useState(new Date().getFullYear());
-  const [generalEmails,   setGeneralEmails]   = useState<any[]>([]);
-  const [loadingEmails,   setLoadingEmails]   = useState(true);
 
   // Datos blindados
   const safeData     = data || {};
@@ -1198,37 +1196,6 @@ export const DashboardView = ({ data, onNavigate, onSave }: DashboardViewProps) 
         );
       })()}
 
-      {/* EMAILS GENERALES */}
-      {(loadingEmails || generalEmails.length > 0) && (
-        <div className="bg-white p-6 md:p-8 rounded-2xl border border-[color:var(--arume-gray-100)] shadow-sm">
-          <div className="mb-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[color:var(--arume-gray-500)]">Correo</p>
-            <h3 className="font-serif text-xl font-semibold mt-1 flex items-center gap-2">
-              <Mail className="w-4 h-4 text-[color:var(--arume-gray-400)]"/>
-              Bandeja de entrada
-            </h3>
-          </div>
-          {loadingEmails ? (
-            <div className="space-y-2">
-              <RowSkeleton/>
-              <RowSkeleton/>
-              <RowSkeleton/>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {generalEmails.map((e,i) => (
-                <div key={i} className="flex items-start gap-3 p-3 bg-slate-50 rounded-2xl border border-slate-100 text-xs">
-                  <Mail className="w-4 h-4 text-slate-400 flex-shrink-0 mt-0.5"/>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold text-slate-700 truncate">{e.from||e.subject||'Sin asunto'}</p>
-                    <p className="text-slate-400 text-[10px] mt-0.5">{e.date ? new Date(e.date).toLocaleDateString('es-ES') : ''}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
     </div>
   );

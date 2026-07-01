@@ -57,12 +57,13 @@ export const NotificacionesView: React.FC<Props> = ({ data, onSave }) => {
   const [permStatus, setPermStatus] = useState(PushService.getPermissionStatus());
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
 
-  // Refresh history periodically
+  // Refresh history when tab is active (avoid constant polling)
   useEffect(() => {
-    const interval = setInterval(() => {
-      setHistory(PushService.getHistory());
-    }, 10000);
-    return () => clearInterval(interval);
+    const handleVisibilityChange = () => {
+      if (!document.hidden) setHistory(PushService.getHistory());
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
   const unreadCount = useMemo(() => history.filter(n => !n.read).length, [history]);
