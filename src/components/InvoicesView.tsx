@@ -1028,13 +1028,14 @@ REGLAS:
         }
       }
 
-      // 3. Fallback Supabase si no hubo nada en local ni Gmail
-      if (byId.size === 0) {
-        try {
-          const supaEmails = await fetchNewEmails();
-          for (const e of supaEmails) if (e?.id) byId.set(e.id, e);
-        } catch { /* ignore */ }
-      }
+      // 3. Fallback Supabase deshabilitado (casi nunca se usa, usuarios autenticados en Gmail)
+      // Si necesitas activarlo, descomenta esto:
+      // if (byId.size === 0) {
+      //   try {
+      //     const supaEmails = await fetchNewEmails();
+      //     for (const e of supaEmails) if (e?.id) byId.set(e.id, e);
+      //   } catch { /* ignore */ }
+      // }
 
       const allEmails = Array.from(byId.values());
       if (allEmails.length > 0) {
@@ -1404,7 +1405,7 @@ REGLAS:
               newData.facturas[fIndex].file_base64 = `data:${mime};base64,${base64}`;
             }
             await onSave(newData);
-            await markEmailAsParsed(email.id);
+            // await markEmailAsParsed(email.id); // Solo necesario si fallback de inbox_gmail está activado
             // Marcar el email como leído en Gmail sólo cuando este era el último
             // adjunto pendiente del mismo messageId. Si quedan otros PDFs del
             // mismo correo en el buzón, lo dejamos no leído para no perderlo
