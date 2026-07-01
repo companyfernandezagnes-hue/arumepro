@@ -28,7 +28,7 @@ async function main(){
   const sb = createClient(url, key, { auth: { persistSession:false }});
   
   // Multi-empresa: una fila por empresa (empresa_id 'arume' | 'raco')
-  const { data: rows, error } = await sb.from('arume_data').select('empresa_id,data,updated_at,version');
+  const { data: rows, error } = await sb.from('arume_data').select('empresa_id,data,updated_at,version').limit(100);
   if(error) throw error;
   if(!rows || rows.length === 0) throw new Error('No hay filas en arume_data');
 

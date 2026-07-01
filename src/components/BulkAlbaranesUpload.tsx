@@ -1112,11 +1112,7 @@ Si no lo ves claramente, devuelve null. NO inventes.`;
     }
     setPhase('saving');
     try {
-      const newData: AppData = JSON.parse(JSON.stringify(data));
-      if (!newData.albaranes) newData.albaranes = [];
-      if (!newData.priceHistory) newData.priceHistory = [];
-
-      // ── Detección de subida de precios ─────────────────────────────
+      // Detección de subida de precios
       const getDynThreshold = (itemName: string) => {
         const n = basicNorm(itemName || '');
         if (n.match(/tomate|lechuga|cebolla|patata|pimiento|verdura|fruta|limon|naranja|pepino|mango|aguacate/)) return 25;
@@ -1126,22 +1122,38 @@ Si no lo ves claramente, devuelve null. NO inventes.`;
         return 10;
       };
       const singularize = (s: string) => basicNorm(s).replace(/s$/, '');
-      const detectPriceInc = (prov: string, item: string, price: number) => {
-        const pN = basicNorm(prov);
-        const iN = singularize(item);
-        const prev = [...(newData.priceHistory || [])].filter(h =>
-          basicNorm(h.prov || '') === pN && singularize(h.item || '').includes(iN)
-        ).sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
-        if (!prev || (prev as any).unitPrice <= 0) return null;
-        const prevPrice = (prev as any).unitPrice;
-        const pct = Num.round2(((price - prevPrice) / prevPrice) * 100);
-        const threshold = getDynThreshold(item);
-        if (pct >= threshold) return { pct, prevPrice, threshold };
-        return null;
-      };
+
+      // Procesar en lotes de 50 para evitar payloads gigantes
+      const BATCH_SIZE = 50;
+      const batches = [];
+      for (let i = 0; i < seleccionados.length; i += BATCH_SIZE) {
+        batches.push(seleccionados.slice(i, i + BATCH_SIZE));
+      }
+
+      let totalAlbaranesGuardados = 0;
       const priceAlerts: string[] = [];
 
-      for (const e of seleccionados) {
+      for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+        const batch = batches[batchIdx];
+        const newData: AppData = JSON.parse(JSON.stringify(data));
+        if (!newData.albaranes) newData.albaranes = [];
+        if (!newData.priceHistory) newData.priceHistory = [];
+
+        const detectPriceInc = (prov: string, item: string, price: number) => {
+          const pN = basicNorm(prov);
+          const iN = singularize(item);
+          const prev = [...(newData.priceHistory || [])].filter(h =>
+            basicNorm(h.prov || '') === pN && singularize(h.item || '').includes(iN)
+          ).sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
+          if (!prev || (prev as any).unitPrice <= 0) return null;
+          const prevPrice = (prev as any).unitPrice;
+          const pct = Num.round2(((price - prevPrice) / prevPrice) * 100);
+          const threshold = getDynThreshold(item);
+          if (pct >= threshold) return { pct, prevPrice, threshold };
+          return null;
+        };
+
+        for (const e of batch) {
         if (e.status.kind !== 'new') continue;
         // Si la usuaria editó los campos en la pantalla de revisión, esos
         // valores tienen prioridad sobre los originales de la IA.
@@ -1277,17 +1289,21 @@ Si no lo ves claramente, devuelve null. NO inventes.`;
         }
 
         newData.albaranes.unshift(newAlbaran);
+        totalAlbaranesGuardados++;
+        }
+
+        // Guardar este lote
+        await onSave(newData);
+        toast.info(`✅ Lote ${batchIdx + 1}/${batches.length} guardado (${batch.length} albaranes)`);
       }
 
       // ── Mostrar alertas de precio ──────────────────────────────────
       if (priceAlerts.length > 0) {
         const msg = `⚠️ SUBIDAS DE PRECIO DETECTADAS:\n\n${priceAlerts.join('\n')}`;
         toast.warning(msg);
-        // Disparar evento para el asistente IA
       }
 
-      await onSave(newData);
-      toast.success(`✅ ${seleccionados.length} albaranes guardados.${priceAlerts.length > 0 ? ` ⚠️ ${priceAlerts.length} subida(s) de precio.` : ''}`);
+      toast.success(`✅ ${totalAlbaranesGuardados} albaranes guardados.${priceAlerts.length > 0 ? ` ⚠️ ${priceAlerts.length} subida(s) de precio.` : ''}`);
       reset();
       onClose();
     } catch (err: any) {

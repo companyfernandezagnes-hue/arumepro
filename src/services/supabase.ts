@@ -272,7 +272,7 @@ export async function fetchArumeData(empresaId: EmpresaId = 'arume', retries = 3
 export async function fetchNewEmails(): Promise<EmailDraft[]> {
         try {
                     const exec = async () => {
-                                    const { data, error } = await supabase.from('inbox_gmail').select('*').eq('status', 'new');
+                                    const { data, error } = await supabase.from('inbox_gmail').select('*').eq('status', 'new').order('created_at', { ascending: false }).limit(50);
                                     if (error) throw error;
                                     if (!data) return [];
                                     return data.map((fila: any) => ({
