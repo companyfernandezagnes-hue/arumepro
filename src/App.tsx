@@ -598,8 +598,8 @@ function AppContent() {
   useEffect(() => {
     const channel = supabase.channel(`arume-changes-${empresaActiva}`, { config: { broadcast: { self: false } } }).on('postgres_changes', { event: '*', schema: 'public', table: 'arume_data', filter: `empresa_id=eq.${empresaActiva}` }, () => {
       const now = Date.now();
-      // Deduplicar: máximo 1 reload cada 5 segundos
-      if (now - lastRealtimeReloadRef.current > 5000) {
+      // Deduplicar: máximo 1 reload cada 2 segundos (evita pérdida de cambios rápidos)
+      if (now - lastRealtimeReloadRef.current > 2000) {
         lastRealtimeReloadRef.current = now;
         reloadDataRef.current();
       }
