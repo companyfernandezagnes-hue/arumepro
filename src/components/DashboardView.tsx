@@ -219,23 +219,6 @@ export const DashboardView = ({ data, onNavigate, onSave }: DashboardViewProps) 
   const controlPagos = safeData.control_pagos || {};
   const ingredientes = Array.isArray(safeData.ingredientes) ? safeData.ingredientes : [];
 
-  // Emails generales desde Supabase
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        setLoadingEmails(true);
-        const inboxUrl = safeData.config?.supabaseInboxUrl;
-        const inboxKey = safeData.config?.supabaseInboxKey;
-        if (!inboxUrl || !inboxKey) { setGeneralEmails([]); return; }
-        const { data: rows } = await supabase.from('emails').select('*').order('date', { ascending: false }).limit(5);
-        if (!cancelled) setGeneralEmails(rows || []);
-      } catch { if (!cancelled) setGeneralEmails([]); }
-      finally  { if (!cancelled) setLoadingEmails(false); }
-    };
-    load();
-    return () => { cancelled = true; };
-  }, [safeData.config?.supabaseInboxUrl, safeData.config?.supabaseInboxKey]);
 
   // ── Cálculo de stats por periodo ────────────────────────────────────────
   const calculateStatsForPeriod = useCallback((month: number, quarter: number, year: number, mode: string) => {
