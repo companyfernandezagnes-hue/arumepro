@@ -779,9 +779,11 @@ export const SettingsModal = ({ isOpen, onClose, db, setDb, onSave }: SettingsMo
 
         {/* ── CUERPO ───────────────────────────────────────────────────────── */}
         <div className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar">
-          {/* 🩺 HEALTH CHECK: comprueba que todos los servicios están operativos
-              cuando se abre el modal. Verde si todo OK, ámbar avisos, rojo fallo. */}
-          <HealthCheckPanel open={isOpen} />
+          {/* 🩺 HEALTH CHECK: DESHABILITADO POR AHORA
+              (ejecutaba queries costosas cada vez que se abría Settings, sobrecargando el servidor)
+              Se puede re-habilitar cuando el servidor tenga mejor capacidad.
+              TODO: Cachear los resultados por 5min en lugar de ejecutar cada vez. */}
+          {/* <HealthCheckPanel open={isOpen} /> */}
 
           {/* 🚨 BANNER GIGANTE DE LIMPIEZA: visible siempre que haya basura IA
               sin marca temporal. Imposible de pasar por alto. */}
