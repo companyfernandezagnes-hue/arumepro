@@ -158,6 +158,8 @@ const PulsoDelDia: React.FC<{ data: AppData; onNavigate?: (tab: string) => void 
     }] : []),
   ];
 
+  const urgentCount = useMemo(() => items.filter(i => i.urgent).length, [items]);
+
   return (
     <div className="bg-white border border-slate-100 rounded-[2rem] shadow-sm overflow-hidden">
       <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
@@ -166,9 +168,9 @@ const PulsoDelDia: React.FC<{ data: AppData; onNavigate?: (tab: string) => void 
           <span className="text-xs font-black text-slate-700 uppercase tracking-widest">Pulso del Día</span>
           <span className="text-[10px] text-slate-400 font-bold">{new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
         </div>
-        {items.filter(i => i.urgent).length > 0 && (
+        {urgentCount > 0 && (
           <span className="text-[9px] font-black text-rose-600 bg-rose-50 border border-rose-100 px-2 py-1 rounded-full uppercase tracking-widest animate-pulse">
-            {items.filter(i => i.urgent).length} urgente{items.filter(i => i.urgent).length > 1 ? 's' : ''}
+            {urgentCount} urgente{urgentCount > 1 ? 's' : ''}
           </span>
         )}
       </div>

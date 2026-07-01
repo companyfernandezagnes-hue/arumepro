@@ -665,6 +665,11 @@ Solo el texto del post, sin comillas.`;
     return m;
   }, [posts]);
 
+  const postsMetrics = useMemo(() => ({
+    published: posts.filter(p => p.published).length,
+    unpublished: posts.filter(p => !p.published).length,
+  }), [posts]);
+
   const metricsThisMonth = useMemo(() => {
     const monthKey = `${calY}-${String(calM+1).padStart(2,'0')}`;
     const mp       = posts.filter(p => p.date.startsWith(monthKey));
@@ -1176,7 +1181,7 @@ Solo el texto del post, sin comillas.`;
               </div>
               <div className="flex items-center gap-3">
                 <span className="text-[10px] font-bold text-slate-400 uppercase">
-                  {posts.filter(p=>p.published).length} pub · {posts.filter(p=>!p.published).length} pend
+                  {postsMetrics.published} pub · {postsMetrics.unpublished} pend
                 </span>
                 <button onClick={() => setTab('studio')}
                   className={cn('flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition', BRAND.color)}>
